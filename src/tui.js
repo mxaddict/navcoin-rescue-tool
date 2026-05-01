@@ -269,6 +269,8 @@ function renderStatus(C, data) {
       src.syncStatus === 'synced'
         ? C.teal
         : src.syncStatus === 'syncing' ||
+            src.syncStatus === 'syncing-addresses' ||
+            src.syncStatus === 'syncing-txs' ||
             src.syncStatus === 'connecting' ||
             src.syncStatus === 'connected' ||
             src.syncStatus === 'opening'

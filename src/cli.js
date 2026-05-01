@@ -54,7 +54,7 @@ process.stdout.on('error', (error) => {
 
 function printHelp() {
   process.stdout.write(
-    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} sweep <address>\n  ${CLI_NAME} purge\n`,
+    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} show\n  ${CLI_NAME} sweep <address>\n  ${CLI_NAME} purge\n`,
   );
 }
 
@@ -176,6 +176,37 @@ async function handleStatus() {
         process.stdout.write(
           `  Addresses (${source.addresses.length} derived, none used yet)\n`,
         );
+      }
+    }
+  } catch {
+    process.stderr.write(
+      `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
+    );
+    process.exitCode = 1;
+  }
+}
+
+async function handleShow() {
+  try {
+    const status = await getDaemonStatus(getAppDataRoot());
+    process.stdout.write(`Imported sources: ${status.sourceCount}\n`);
+
+    for (const source of status.sources) {
+      const typeLabel = source.walletType
+        ? `${source.type}:${source.walletType}`
+        : source.type;
+
+      process.stdout.write(`\nSource: ${source.id} [${typeLabel}]\n`);
+
+      if (source.addresses.length === 0) {
+        process.stdout.write('  No addresses derived yet.\n');
+        continue;
+      }
+
+      process.stdout.write(`  Addresses (${source.addresses.length}):\n`);
+      for (const addr of source.addresses) {
+        const usedLabel = addr.used ? ' [used]' : '';
+        process.stdout.write(`    ${addr.address}${usedLabel}\n`);
       }
     }
   } catch {
@@ -526,6 +557,9 @@ async function main(argv) {
       return;
     case 'status':
       await handleStatus();
+      return;
+    case 'show':
+      await handleShow();
       return;
     case 'stop':
       await handleStop();

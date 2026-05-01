@@ -152,6 +152,7 @@ function buildPalette(dark) {
 // ---------------------------------------------------------------------------
 const COMMANDS = [
   'status',
+  'show',
   'import',
   'import mnemonic',
   'import private-key',
@@ -207,6 +208,7 @@ function renderHelp(C) {
     '',
     C.bold('  Commands:'),
     `    ${C.cyan('status')}              Show daemon and source status`,
+    `    ${C.cyan('show')}                Show all derived addresses`,
     `    ${C.cyan('import mnemonic')}     Import a mnemonic source`,
     `    ${C.cyan('import private-key')}  Import one or more private keys`,
     `    ${C.cyan('remove')}              Remove an imported source`,
@@ -330,6 +332,46 @@ function renderStatus(C, data) {
   return lines.join('\n');
 }
 
+function renderShow(C, data) {
+  const SEP = makeSep(C);
+  const lines = [];
+
+  lines.push(SEP);
+  lines.push(C.gradient('  Derived Addresses'));
+  lines.push(`  ${C.bold('Sources:')}  ${data.sourceCount}`);
+
+  if (data.sources.length === 0) {
+    lines.push('');
+    lines.push(C.muted('  No sources imported.'));
+    lines.push(SEP);
+    return lines.join('\n');
+  }
+
+  for (const src of data.sources) {
+    lines.push(SEP);
+    const typeLabel = src.walletType
+      ? `${src.type}:${src.walletType}`
+      : src.type;
+    lines.push(
+      `  ${C.boldMagenta('Source')}  ${C.muted(`[${typeLabel}]`)}  ${src.id}`,
+    );
+
+    if (src.addresses.length === 0) {
+      lines.push('  No addresses derived yet.');
+      continue;
+    }
+
+    lines.push(`  ${C.bold('Addresses')} (${src.addresses.length}):`);
+    for (const addr of src.addresses) {
+      const usedLabel = addr.used ? C.muted(' [used]') : '';
+      lines.push(`    ${C.magenta(addr.address)}${usedLabel}`);
+    }
+  }
+
+  lines.push(SEP);
+  return lines.join('\n');
+}
+
 // ---------------------------------------------------------------------------
 // Daemon auto-start
 // ---------------------------------------------------------------------------
@@ -396,6 +438,16 @@ async function cmdStatus(C, root, log) {
   try {
     const data = await getDaemonStatus(root);
     log(renderStatus(C, data));
+  } catch {
+    log(C.pink('  Daemon not reachable. Restart the TUI to reconnect.'));
+  }
+}
+
+async function cmdShow(C, root, log) {
+  log(C.muted('  Fetching addresses...'));
+  try {
+    const data = await getDaemonStatus(root);
+    log(renderShow(C, data));
   } catch {
     log(C.pink('  Daemon not reachable. Restart the TUI to reconnect.'));
   }
@@ -840,6 +892,9 @@ export async function launchTui() {
         break;
       case 'status':
         await cmdStatus(C, root, log);
+        break;
+      case 'show':
+        await cmdShow(C, root, log);
         break;
       case 'import':
       case 'import mnemonic':

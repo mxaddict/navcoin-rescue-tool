@@ -271,6 +271,7 @@ function renderStatus(C, data) {
         : src.syncStatus === 'syncing' ||
             src.syncStatus === 'syncing-addresses' ||
             src.syncStatus === 'syncing-txs' ||
+            src.syncStatus === 'syncing-utxo' ||
             src.syncStatus === 'connecting' ||
             src.syncStatus === 'connected' ||
             src.syncStatus === 'opening'
@@ -290,7 +291,9 @@ function renderStatus(C, data) {
           ? 'addr'
           : src.syncStatus === 'syncing-txs'
             ? 'txs'
-            : '';
+            : src.syncStatus === 'syncing-utxo'
+              ? 'utxo'
+              : '';
       const phaseLabel = phase ? `, ${phase}` : '';
       syncLabel = `syncing (${src.syncProgress}%${phaseLabel})`;
     } else if (src.syncStatus === 'connecting' && src.connectingAt) {
@@ -1157,9 +1160,12 @@ export async function launchTui() {
 
       if (anyInProgress) {
         const syncing = data.sources.filter((s) =>
-          ['syncing', 'syncing-addresses', 'syncing-txs'].includes(
-            s.syncStatus,
-          ),
+          [
+            'syncing',
+            'syncing-addresses',
+            'syncing-txs',
+            'syncing-utxo',
+          ].includes(s.syncStatus),
         );
         const connecting = data.sources.filter((s) =>
           ['opening', 'connecting', 'connected'].includes(s.syncStatus),
@@ -1174,7 +1180,9 @@ export async function launchTui() {
                   ? ', addr'
                   : s.syncStatus === 'syncing-txs'
                     ? ', txs'
-                    : '';
+                    : s.syncStatus === 'syncing-utxo'
+                      ? ', utxo'
+                      : '';
               return `syncing (${s.syncProgress}%${phase})`;
             })
             .join('  ');

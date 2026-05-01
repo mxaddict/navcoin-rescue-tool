@@ -1055,6 +1055,54 @@ class WalletFile extends events.EventEmitter {
     }
   }
 
+  async SyncUtxos() {
+    if (!this.client || this.client.status === 0) {
+      await this.Connect();
+    }
+
+    this.emit('bootstrap_started');
+
+    let scriptHashes = await this.GetScriptHashes();
+    const total = scriptHashes.length;
+    this.emit('scripthash_progress', 0, total);
+
+    const BATCH_SIZE = 10;
+    let totalUtxos = [];
+
+    for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
+      const batch = scriptHashes.slice(batchStart, batchStart + BATCH_SIZE);
+      const index = batchStart + 1;
+      this.emit('scripthash_progress', index, total);
+
+      const promises = batch.map(async (s) => {
+        try {
+          const utxos = await this.client.blockchain_scripthash_listunspent(s);
+          return utxos.map((u) => ({ ...u, scriptHash: s }));
+        } catch {
+          return [];
+        }
+      });
+
+      const results = await Promise.all(promises);
+      for (const utxos of results) {
+        totalUtxos.push(...utxos);
+      }
+    }
+
+    for (const utxo of totalUtxos) {
+      await this.db.AddTxCandidate(
+        utxo.tx_hash,
+        utxo.height,
+        utxo.value,
+        utxo.scriptHash,
+      );
+    }
+
+    this.emit('bootstrap_finished');
+    this.spendingPassword = '';
+    this.emit('sync_finished');
+  }
+
   async SyncTxHashes() {
     let staking =
       arguments.length > 0 && arguments[0] !== undefined

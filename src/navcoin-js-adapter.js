@@ -69,7 +69,11 @@ export function getWalletStorageDetails(sourceId, root = getAppDataRoot()) {
   };
 }
 
-export async function createImportedWallet(source, root = getAppDataRoot(), onProgress = null) {
+export async function createImportedWallet(
+  source,
+  root = getAppDataRoot(),
+  onProgress = null,
+) {
   const storage = getWalletStorageDetails(source.id, root);
   const dataFileExists = await fs
     .access(storage.dataFile)

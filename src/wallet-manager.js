@@ -245,7 +245,7 @@ export async function openSourceWallet(source, root, navWallet) {
 
   wallet.on('scripthash_progress', (index, total) => {
     state.syncProgress = Math.round((index / total) * 100);
-    state.syncStatus = 'syncing-addresses';
+    state.syncStatus = 'syncing-utxo';
     state.totalAddresses = total;
   });
 
@@ -312,8 +312,8 @@ export async function openSourceWallet(source, root, navWallet) {
     state.connectingAt = Date.now();
     await wallet.Connect();
 
-    // Trigger sync after connecting.
-    wallet.Sync().catch((err) => {
+    // Trigger UTXO fetch instead of full sync - much faster for sweep tool.
+    wallet.SyncUtxos().catch((err) => {
       console.log(`[wallet] ${source.id} sync error: ${err.message}`);
     });
   } catch (error) {

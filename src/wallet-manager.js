@@ -257,7 +257,7 @@ export async function openSourceWallet(source, root, navWallet) {
   });
 
   wallet.on('bootstrap_finished', () => {
-    console.log(`[wallet] ${source.id} bootstrap finished`);
+    // Sync address subscription phase complete
   });
 
   wallet.on('new_tx', async () => {
@@ -310,22 +310,12 @@ export async function openSourceWallet(source, root, navWallet) {
 
     state.syncStatus = 'connecting';
     state.connectingAt = Date.now();
-    console.log(`[wallet] ${source.id} calling Connect()...`);
     await wallet.Connect();
-    console.log(`[wallet] ${source.id} Connect() done, calling Sync()...`);
 
     // Trigger sync after connecting.
-    console.log(`[wallet] ${source.id} about to call wallet.Sync()...`);
-    wallet
-      .Sync()
-      .then(() => {
-        console.log(`[wallet] ${source.id} Sync() completed`);
-      })
-      .catch((err) => {
-        console.log(`[wallet] ${source.id} sync error: ${err.message}`);
-        console.log(err.stack);
-      });
-    console.log(`[wallet] ${source.id} Sync() called (non-blocking)`);
+    wallet.Sync().catch((err) => {
+      console.log(`[wallet] ${source.id} sync error: ${err.message}`);
+    });
   } catch (error) {
     state.syncStatus = 'error';
     state.error = error.message;

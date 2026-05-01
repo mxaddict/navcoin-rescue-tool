@@ -1140,6 +1140,8 @@ export async function launchTui() {
         'connecting',
         'connected',
         'syncing',
+        'syncing-addresses',
+        'syncing-txs',
         'no-servers',
       ]);
 
@@ -1152,7 +1154,11 @@ export async function launchTui() {
       );
 
       if (anyInProgress) {
-        const syncing = data.sources.filter((s) => s.syncStatus === 'syncing');
+        const syncing = data.sources.filter((s) =>
+          ['syncing', 'syncing-addresses', 'syncing-txs'].includes(
+            s.syncStatus,
+          ),
+        );
         const connecting = data.sources.filter((s) =>
           ['opening', 'connecting', 'connected'].includes(s.syncStatus),
         );

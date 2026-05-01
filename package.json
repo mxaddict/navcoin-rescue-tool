@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@babel/runtime": "^7.29.2",
+    "blessed": "^0.1.81",
+    "chalk": "^5.6.2",
     "indexeddbshim": "^16.1.0",
     "navcoin-js": "^1.1.182"
   }

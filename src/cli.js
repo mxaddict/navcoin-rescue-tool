@@ -57,10 +57,9 @@ function printHelp() {
   );
 }
 
-function printTuiPlaceholder() {
-  process.stdout.write(
-    `${CLI_NAME} TUI not implemented yet. Use \`${CLI_NAME} start\` to initialize local state.\n`,
-  );
+async function handleTui() {
+  const { launchTui } = await import('./tui.js');
+  await launchTui();
 }
 
 async function handleStart() {
@@ -455,7 +454,7 @@ async function main(argv) {
 
   switch (command) {
     case undefined:
-      printTuiPlaceholder();
+      await handleTui();
       return;
     case 'start':
       await handleStart();

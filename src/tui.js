@@ -13,7 +13,6 @@ import {
   sweepConfirm,
 } from './daemon-client.js';
 import {
-  CLI_NAME,
   DAEMON_HOST,
   DAEMON_PORT,
   SUPPORTED_MNEMONIC_WALLET_TYPES,
@@ -29,25 +28,122 @@ const blessed = require('blessed');
 const { default: chalk } = await import('chalk');
 
 // ---------------------------------------------------------------------------
-// Navio brand palette (terminal-safe approximations via chalk hex)
+// Terminal background detection
 // ---------------------------------------------------------------------------
-const C = {
-  magenta: (s) => chalk.hex('#ec1ec6')(s),
-  blue: (s) => chalk.hex('#1d8ff9')(s),
-  fuchsia: (s) => chalk.hex('#d946ef')(s),
-  cyan: (s) => chalk.hex('#06b6d4')(s),
-  teal: (s) => chalk.hex('#0f766e')(s),
-  pink: (s) => chalk.hex('#be185d')(s),
-  indigo: (s) => chalk.hex('#6366f1')(s),
-  muted: (s) => chalk.hex('#9ca3af')(s),
-  bold: (s) => chalk.bold(s),
-  boldMagenta: (s) => chalk.bold.hex('#ec1ec6')(s),
-  boldCyan: (s) => chalk.bold.hex('#06b6d4')(s),
-  gradient: (s) => chalk.bold.hex('#d946ef')(s),
-};
 
-// Separator line — fills terminal width with a dim rule.
-const SEP = C.muted('─'.repeat(80));
+/**
+ * Query the terminal background color via OSC 11.
+ * Returns { r, g, b } (0-255) or null if unsupported/timeout.
+ * Must be called before blessed takes over stdin/stdout.
+ */
+async function queryTerminalBg() {
+  // Only attempt on TTY with a writable stdout.
+  if (!process.stdout.isTTY || !process.stdin.isTTY) return null;
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, 200);
+
+    let buf = '';
+
+    function onData(chunk) {
+      buf += chunk.toString();
+      // OSC 11 response: ESC ] 11 ; rgb:rrrr/gggg/bbbb BEL  or ST
+      const match = buf.match(
+        /\x1b\]11;rgb:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)(?:\x07|\x1b\\)/i,
+      );
+      if (match) {
+        cleanup();
+        // Values are 16-bit (0-65535) — scale to 8-bit.
+        resolve({
+          r: Math.round(parseInt(match[1], 16) / 257),
+          g: Math.round(parseInt(match[2], 16) / 257),
+          b: Math.round(parseInt(match[3], 16) / 257),
+        });
+      }
+    }
+
+    function cleanup() {
+      clearTimeout(timeout);
+      process.stdin.removeListener('data', onData);
+      if (process.stdin.isTTY) {
+        try {
+          process.stdin.setRawMode(false);
+        } catch {}
+      }
+      process.stdin.pause();
+    }
+
+    try {
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+      process.stdin.on('data', onData);
+      // Send OSC 11 query.
+      process.stdout.write('\x1b]11;?\x07');
+    } catch {
+      cleanup();
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Returns true if the given RGB color is perceptually dark
+ * (relative luminance < 0.5).
+ */
+function isColorDark({ r, g, b }) {
+  // sRGB relative luminance (WCAG formula).
+  const toLinear = (c) => {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const L = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+  return L < 0.5;
+}
+
+// ---------------------------------------------------------------------------
+// Navio brand palettes — dark and light terminal variants
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a chalk-based color helper set tuned for the detected background.
+ * All colors sourced from the Navio brand palette (nav.io).
+ */
+function buildPalette(dark) {
+  if (dark) {
+    // Dark terminal — use bright/saturated Navio colors.
+    return {
+      magenta: (s) => chalk.hex('#ec1ec6')(s),
+      blue: (s) => chalk.hex('#1d8ff9')(s),
+      cyan: (s) => chalk.hex('#06b6d4')(s),
+      teal: (s) => chalk.hex('#2dd4bf')(s), // teal-400 — brighter for dark bg
+      pink: (s) => chalk.hex('#f472b6')(s), // pink-400 — brighter for dark bg
+      indigo: (s) => chalk.hex('#818cf8')(s), // indigo-400 — brighter for dark bg
+      muted: (s) => chalk.hex('#9ca3af')(s), // gray-400
+      bold: (s) => chalk.bold(s),
+      boldMagenta: (s) => chalk.bold.hex('#ec1ec6')(s),
+      boldCyan: (s) => chalk.bold.hex('#06b6d4')(s),
+      gradient: (s) => chalk.bold.hex('#d946ef')(s),
+    };
+  } else {
+    // Light terminal — use darker/more saturated variants for contrast.
+    return {
+      magenta: (s) => chalk.hex('#a21caf')(s), // fuchsia-700
+      blue: (s) => chalk.hex('#1d4ed8')(s), // blue-700
+      cyan: (s) => chalk.hex('#0e7490')(s), // cyan-700
+      teal: (s) => chalk.hex('#0f766e')(s), // teal-700
+      pink: (s) => chalk.hex('#be185d')(s), // pink-700
+      indigo: (s) => chalk.hex('#4338ca')(s), // indigo-700
+      muted: (s) => chalk.hex('#4b5563')(s), // gray-600
+      bold: (s) => chalk.bold(s),
+      boldMagenta: (s) => chalk.bold.hex('#a21caf')(s),
+      boldCyan: (s) => chalk.bold.hex('#0e7490')(s),
+      gradient: (s) => chalk.bold.hex('#a21caf')(s),
+    };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Commands and tab-completion
@@ -74,7 +170,12 @@ function navStr(satoshis) {
   return (satoshis / 1e8).toFixed(8);
 }
 
-function renderHelp() {
+function makeSep(C) {
+  return C.muted('─'.repeat(80));
+}
+
+function renderHelp(C) {
+  const SEP = makeSep(C);
   return [
     SEP,
     C.gradient('  navcoin-rescue-tool  ') + C.muted('TUI'),
@@ -94,7 +195,8 @@ function renderHelp() {
   ].join('\n');
 }
 
-function renderStatus(data) {
+function renderStatus(C, data) {
+  const SEP = makeSep(C);
   const lines = [];
   const d = data.daemon;
   const statusColor = d.status === 'running' ? C.teal : C.pink;
@@ -199,7 +301,7 @@ async function ensureDaemonRunning(root, layout, log) {
     // Not running — start it.
   }
 
-  log(C.muted('  Starting daemon...'));
+  log('  Starting daemon...');
 
   const logFd = fs.openSync(layout.daemonLogFile, 'a');
   const child = spawn(process.execPath, [path.join(__dirname, 'daemon.js')], {
@@ -228,17 +330,17 @@ async function ensureDaemonRunning(root, layout, log) {
 // ---------------------------------------------------------------------------
 // Command handlers
 // ---------------------------------------------------------------------------
-async function cmdStatus(root, log) {
+async function cmdStatus(C, root, log) {
   log(C.muted('  Fetching status...'));
   try {
     const data = await getDaemonStatus(root);
-    log(renderStatus(data));
+    log(renderStatus(C, data));
   } catch {
     log(C.pink('  Daemon not reachable. Restart the TUI to reconnect.'));
   }
 }
 
-async function cmdImportMnemonic(root, log, ask) {
+async function cmdImportMnemonic(C, root, log, ask) {
   const walletType = await ask(
     `Wallet type (${SUPPORTED_MNEMONIC_WALLET_TYPES.join('/')}):`,
   );
@@ -271,7 +373,7 @@ async function cmdImportMnemonic(root, log, ask) {
   }
 }
 
-async function cmdImportPrivateKey(root, log, ask) {
+async function cmdImportPrivateKey(C, root, log, ask) {
   const label = await ask('Label:');
 
   const keys = [];
@@ -303,8 +405,7 @@ async function cmdImportPrivateKey(root, log, ask) {
   }
 }
 
-async function cmdRemove(root, log, ask) {
-  // Show source list first so user knows valid IDs.
+async function cmdRemove(C, root, log, ask) {
   try {
     const data = await getDaemonStatus(root);
     if (data.sources.length === 0) {
@@ -343,7 +444,8 @@ async function cmdRemove(root, log, ask) {
   }
 }
 
-async function cmdSweep(root, log, ask) {
+async function cmdSweep(C, root, log, ask) {
+  const SEP = makeSep(C);
   log(C.muted('  Checking sync state...'));
 
   let preview;
@@ -416,33 +518,10 @@ export async function launchTui() {
   const layout = getLayout(root);
   await bootstrapAppData(root);
 
-  // Navio dark background — set on the terminal itself via OSC escape so the
-  // entire window is painted, not just the blessed widget cells.
-  const BG = '#111827';
-  const FG = '#f9fafb'; // gray-50 — near-white, readable on dark bg
-
-  // OSC 11 sets the terminal background colour; OSC 111 resets it to default.
-  // Written directly to stdout so it takes effect before blessed initialises.
-  function setTerminalBg(hex) {
-    // Convert #rrggbb → rrrrggggbbbb (X11 16-bit per channel format).
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    const rr = (r * 257).toString(16).padStart(4, '0');
-    const gg = (g * 257).toString(16).padStart(4, '0');
-    const bb = (b * 257).toString(16).padStart(4, '0');
-    process.stdout.write(`\x1b]11;rgb:${rr}/${gg}/${bb}\x07`);
-  }
-
-  function resetTerminalBg() {
-    process.stdout.write('\x1b]111;\x07');
-  }
-
-  setTerminalBg(BG);
-  // Erase entire screen so all cells are painted with the new background
-  // before blessed initialises — prevents the original terminal color showing
-  // at the edges.
-  process.stdout.write('\x1b[2J');
+  // Detect terminal background before blessed takes over stdin/stdout.
+  const bgColor = await queryTerminalBg();
+  const dark = bgColor ? isColorDark(bgColor) : true; // assume dark if unknown
+  const C = buildPalette(dark);
 
   const screen = blessed.screen({
     smartCSR: true,
@@ -451,7 +530,6 @@ export async function launchTui() {
     // Alacritty that don't fully support all capabilities blessed probes.
     terminal: 'xterm-256color',
     fullUnicode: true,
-    style: { bg: BG, fg: FG },
   });
 
   // ---- Header bar -------------------------------------------------------
@@ -464,7 +542,6 @@ export async function launchTui() {
       C.boldMagenta(' navcoin-rescue-tool ') +
       C.muted('| help  Tab=complete  Ctrl+C=quit'),
     tags: false,
-    style: { bg: BG, fg: FG },
   });
 
   // ---- Separator below header -------------------------------------------
@@ -473,9 +550,8 @@ export async function launchTui() {
     left: 0,
     width: '100%',
     height: 1,
-    content: C.muted('─'.repeat(200)), // blessed clips to terminal width
+    content: C.muted('─'.repeat(200)),
     tags: false,
-    style: { bg: BG, fg: FG },
   });
 
   // ---- Main output box --------------------------------------------------
@@ -489,11 +565,10 @@ export async function launchTui() {
     alwaysScroll: true,
     scrollbar: {
       ch: '▐',
-      style: { fg: '#6366f1', bg: BG },
+      style: { fg: dark ? '#818cf8' : '#4338ca' },
     },
     tags: false,
     wrap: true,
-    style: { bg: BG, fg: FG },
   });
 
   // ---- Separator above input --------------------------------------------
@@ -504,7 +579,6 @@ export async function launchTui() {
     height: 1,
     content: C.muted('─'.repeat(200)),
     tags: false,
-    style: { bg: BG, fg: FG },
   });
 
   // ---- Input box --------------------------------------------------------
@@ -514,10 +588,6 @@ export async function launchTui() {
     width: '100%',
     height: 1,
     inputOnFocus: true,
-    style: {
-      fg: FG,
-      bg: BG,
-    },
   });
 
   screen.append(header);
@@ -532,8 +602,7 @@ export async function launchTui() {
     screen.render();
   }
 
-  // Exclusive ask mode — no command dispatch fires while in ask().
-  // Uses a counter so nested asks (multi-step flows) work correctly.
+  // Exclusive ask mode — uses a depth counter so nested asks work correctly.
   let askDepth = 0;
 
   function ask(question) {
@@ -574,22 +643,22 @@ export async function launchTui() {
         process.exit(0);
         break;
       case 'help':
-        log(renderHelp());
+        log(renderHelp(C));
         break;
       case 'status':
-        await cmdStatus(root, log);
+        await cmdStatus(C, root, log);
         break;
       case 'import mnemonic':
-        await cmdImportMnemonic(root, log, ask);
+        await cmdImportMnemonic(C, root, log, ask);
         break;
       case 'import private-key':
-        await cmdImportPrivateKey(root, log, ask);
+        await cmdImportPrivateKey(C, root, log, ask);
         break;
       case 'remove':
-        await cmdRemove(root, log, ask);
+        await cmdRemove(C, root, log, ask);
         break;
       case 'sweep':
-        await cmdSweep(root, log, ask);
+        await cmdSweep(C, root, log, ask);
         break;
       default:
         log(C.pink(`  Unknown command: ${cmd}`));
@@ -607,12 +676,11 @@ export async function launchTui() {
     }
   });
 
-  // Enter submits — either resolves an active ask() or dispatches a command.
+  // Enter submits — routes to active ask() or dispatches a command.
   inputBox.key('enter', () => {
     const val = inputBox.getValue();
 
     if (askDepth > 0) {
-      // Hand the value to the waiting ask() listener.
       inputBox.emit('submit', val);
       return;
     }
@@ -634,11 +702,12 @@ export async function launchTui() {
     process.exit(0);
   });
 
-  // ---- Auto-start daemon ------------------------------------------------
+  // ---- Startup ----------------------------------------------------------
   log(
     C.gradient('  navcoin-rescue-tool') +
       C.muted('  —  recovery tool for legacy NavCoin wallets'),
   );
+  log(C.muted(`  Theme: ${dark ? 'dark' : 'light'} terminal detected`));
   log('');
 
   const running = await ensureDaemonRunning(root, layout, log);
@@ -649,7 +718,7 @@ export async function launchTui() {
         C.muted(`  http://${DAEMON_HOST}:${DAEMON_PORT}`),
     );
     log('');
-    await cmdStatus(root, log);
+    await cmdStatus(C, root, log);
   } else {
     log(
       C.pink('  Failed to start daemon. Check logs at: ') +
@@ -661,8 +730,7 @@ export async function launchTui() {
   log(C.muted('  Type a command below. Tab to complete. help for reference.'));
 
   // ---- Periodic status refresh every 5s ---------------------------------
-  // Only auto-refreshes output when user is idle (not mid-command).
-  let lastStatusData = null;
+  let lastStatusSnapshot = null;
 
   const refreshTimer = setInterval(async () => {
     try {
@@ -671,7 +739,6 @@ export async function launchTui() {
         (s) => s.syncStatus === 'syncing' || s.syncStatus === 'connecting',
       );
 
-      // Always update header.
       if (syncing) {
         const progress = data.sources
           .filter((s) => s.syncStatus === 'syncing')
@@ -690,7 +757,6 @@ export async function launchTui() {
         );
       }
 
-      // Auto-refresh output only when idle and balances changed.
       if (!dispatching && askDepth === 0) {
         const snapshot = JSON.stringify(
           data.sources.map((s) => ({
@@ -699,12 +765,10 @@ export async function launchTui() {
             syncStatus: s.syncStatus,
           })),
         );
-        if (snapshot !== lastStatusData) {
-          lastStatusData = snapshot;
-          if (syncing || lastStatusData !== null) {
-            log(C.muted('  ↻ Status updated'));
-            log(renderStatus(data));
-          }
+        if (snapshot !== lastStatusSnapshot) {
+          lastStatusSnapshot = snapshot;
+          log(C.muted('  ↻ Status updated'));
+          log(renderStatus(C, data));
         }
       }
 
@@ -721,9 +785,6 @@ export async function launchTui() {
 
   screen.on('destroy', () => {
     clearInterval(refreshTimer);
-    resetTerminalBg();
-    // Clear screen after reset so no cells are left painted in the Navio dark bg.
-    process.stdout.write('\x1b[2J\x1b[H');
   });
 
   inputBox.focus();

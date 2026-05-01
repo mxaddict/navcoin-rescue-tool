@@ -21,8 +21,15 @@ export async function daemonRequest(
 
   if (!response.ok) {
     const text = await response.text();
+    let message;
+    try {
+      const json = JSON.parse(text);
+      message = json.error ?? text;
+    } catch {
+      message = text;
+    }
     throw new Error(
-      text || `Daemon request failed with status ${response.status}`,
+      message || `Daemon request failed with status ${response.status}`,
     );
   }
 

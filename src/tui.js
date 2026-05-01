@@ -419,6 +419,10 @@ export async function launchTui() {
   const screen = blessed.screen({
     smartCSR: true,
     title: 'navcoin-rescue-tool',
+    // Use xterm-256color to avoid terminfo parse errors on terminals like
+    // Alacritty that don't fully support all capabilities blessed probes.
+    terminal: 'xterm-256color',
+    fullUnicode: true,
   });
 
   // ---- Header bar -------------------------------------------------------

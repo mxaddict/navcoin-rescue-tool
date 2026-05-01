@@ -696,15 +696,33 @@ export async function launchTui() {
     });
   });
 
-  // Ctrl+C to quit — must be on both screen and inputBox because blessed
-  // textbox with inputOnFocus captures raw keypresses before screen sees them.
-  function doQuit() {
-    screen.destroy();
-    process.exit(0);
+  // Ctrl+C to quit — requires two presses within 2s.
+  // Must be bound on both screen and inputBox because blessed textbox with
+  // inputOnFocus captures raw keypresses before screen sees them.
+  let ctrlCPending = false;
+  let ctrlCTimer = null;
+
+  function handleCtrlC() {
+    if (ctrlCPending) {
+      clearTimeout(ctrlCTimer);
+      screen.destroy();
+      process.exit(0);
+    }
+
+    ctrlCPending = true;
+    inputSep.setContent(C.pink(' !! Press Ctrl+C again to quit !!'));
+    screen.render();
+
+    ctrlCTimer = setTimeout(() => {
+      ctrlCPending = false;
+      // Restore normal separator content.
+      inputSep.setContent(C.muted('─'.repeat(200)));
+      screen.render();
+    }, 2000);
   }
 
-  screen.key(['C-c'], doQuit);
-  inputBox.key(['C-c'], doQuit);
+  screen.key(['C-c'], handleCtrlC);
+  inputBox.key(['C-c'], handleCtrlC);
 
   // ---- Startup ----------------------------------------------------------
   log(

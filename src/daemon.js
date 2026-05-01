@@ -13,7 +13,7 @@ import {
   writeDaemonState,
 } from './app-data.js';
 import { DAEMON_HOST, DAEMON_PORT } from './constants.js';
-import { getNavWallet } from './navcoin-js-adapter.js';
+import { getNavWallet, resetNavcoinJs } from './navcoin-js-adapter.js';
 import {
   importSource,
   removeSource,
@@ -127,6 +127,7 @@ async function main() {
         const body = await readJsonBody(request);
         await closeSourceWallet(body.sourceId);
         const result = await removeSource(body.sourceId, root);
+        resetNavcoinJs();
         sendJson(response, 200, result);
       } catch (error) {
         sendJson(response, 400, { error: error.message });
@@ -138,6 +139,7 @@ async function main() {
       try {
         await purgeAllWallets();
         const result = await purgeAllSources(root);
+        resetNavcoinJs();
         sendJson(response, 200, result);
       } catch (error) {
         sendJson(response, 400, { error: error.message });

@@ -266,7 +266,10 @@ function renderStatus(C, data) {
     const syncColor =
       src.syncStatus === 'synced'
         ? C.teal
-        : src.syncStatus === 'syncing' || src.syncStatus === 'connecting'
+        : src.syncStatus === 'syncing' ||
+            src.syncStatus === 'connecting' ||
+            src.syncStatus === 'connected' ||
+            src.syncStatus === 'opening'
           ? C.blue
           : src.syncStatus === 'error' || src.syncStatus === 'no-servers'
             ? C.pink
@@ -1001,25 +1004,51 @@ export async function launchTui() {
   const refreshTimer = setInterval(async () => {
     try {
       const data = await getDaemonStatus(root);
-      const syncing = data.sources.some(
-        (s) => s.syncStatus === 'syncing' || s.syncStatus === 'connecting',
+
+      const IN_PROGRESS = new Set([
+        'opening',
+        'connecting',
+        'connected',
+        'syncing',
+        'no-servers',
+      ]);
+
+      const allSettled =
+        data.sources.length > 0 &&
+        data.sources.every((s) => s.syncStatus === 'synced');
+
+      const anyInProgress = data.sources.some((s) =>
+        IN_PROGRESS.has(s.syncStatus),
       );
 
-      if (syncing) {
-        const progress = data.sources
-          .filter((s) => s.syncStatus === 'syncing')
-          .map((s) => `${s.id}: ${s.syncProgress}%`)
-          .join('  ');
+      if (anyInProgress) {
+        const syncing = data.sources.filter((s) => s.syncStatus === 'syncing');
+        const connecting = data.sources.filter((s) =>
+          ['opening', 'connecting', 'connected'].includes(s.syncStatus),
+        );
+
+        let label = '';
+        if (syncing.length > 0) {
+          label = syncing.map((s) => `${s.id}: ${s.syncProgress}%`).join('  ');
+        } else if (connecting.length > 0) {
+          label = connecting.map((s) => `${s.id}: ${s.syncStatus}`).join('  ');
+        }
+
         header.setContent(
           C.boldMagenta(' navcoin-rescue-tool ') +
-            C.blue(`⟳ syncing: ${progress}`) +
+            C.blue(`⟳ ${label}`) +
             C.muted('  Ctrl+C=quit'),
         );
-      } else {
+      } else if (allSettled) {
         header.setContent(
           C.boldMagenta(' navcoin-rescue-tool ') +
             C.teal('● synced') +
             C.muted('  | help  Tab=complete  PgUp/PgDn=scroll  Ctrl+C=quit'),
+        );
+      } else {
+        header.setContent(
+          C.boldMagenta(' navcoin-rescue-tool ') +
+            C.muted('| help  Tab=complete  PgUp/PgDn=scroll  Ctrl+C=quit'),
         );
       }
 

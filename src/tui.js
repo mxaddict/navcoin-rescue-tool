@@ -805,6 +805,15 @@ export async function launchTui() {
 
   const _origListener = inputBox._listener.bind(inputBox);
   inputBox._listener = function (ch, key) {
+    // Swallow Escape — blessed textarea calls done() on escape which removes
+    // the keypress listener and kills input with no way to recover focus.
+    if (key && key.name === 'escape') {
+      inputBox.setValue('');
+      clearHints();
+      screen.render();
+      return;
+    }
+
     if (key && key.name === 'tab') {
       // In an ask() prompt with no choices — ignore tab.
       if (askDepth > 0 && !askChoices) return;

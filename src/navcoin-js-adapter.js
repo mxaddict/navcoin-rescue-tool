@@ -113,7 +113,25 @@ export async function createImportedWallet(source, root = getAppDataRoot()) {
     return getWalletStorageDetails(source.id, root);
   } catch (error) {
     await deleteWalletForSource(source.id, root);
-    throw new Error(`navcoin-js import failed: ${error.message}`);
+
+    // Provide a more actionable error message for common failure modes.
+    const raw = error.message ?? String(error);
+    let message;
+
+    if (
+      raw.includes("reading 'length'") ||
+      raw.includes('Cannot read properties of undefined')
+    ) {
+      message =
+        source.type === 'mnemonic'
+          ? `Wallet type "${source.walletType}" could not derive keys from this mnemonic. ` +
+            `Try a different wallet type. For a standard navcoin-js mnemonic use navcoin-js-v1.`
+          : `navcoin-js could not import the private key — check the WIF format.`;
+    } else {
+      message = `navcoin-js import failed: ${raw}`;
+    }
+
+    throw new Error(message);
   } finally {
     if (typeof wallet.Disconnect === 'function') {
       wallet.Disconnect();

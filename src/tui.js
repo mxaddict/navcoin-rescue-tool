@@ -1107,7 +1107,7 @@ export async function launchTui() {
   log('');
   log(C.muted('  Type a command below. Tab to complete. help for reference.'));
 
-  // ---- Periodic status refresh every 5s ---------------------------------
+  // ---- Periodic status refresh every 1s ---------------------------------
   let lastStatusSnapshot = null;
 
   const refreshTimer = setInterval(async () => {
@@ -1185,7 +1185,7 @@ export async function launchTui() {
       );
       screen.render();
     }
-  }, 5000);
+  }, 1000);
 
   screen.on('destroy', () => {
     clearInterval(refreshTimer);

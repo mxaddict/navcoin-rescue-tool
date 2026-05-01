@@ -1041,7 +1041,7 @@ class Db extends events.EventEmitter {
   }
 
   async WriteConsensusParameters(parameters) {
-    if (!this.db) return;
+    if (!this.db || !this.db.consensus) return;
 
     for (let id in parameters) {
       await this.db.consensus.put(parameters[id]).catch((e) => {
@@ -1053,7 +1053,7 @@ class Db extends events.EventEmitter {
   }
 
   async GetConsensusParameters() {
-    if (!this.db) return;
+    if (!this.db || !this.db.consensus) return;
     return await this.db.consensus.toArray().catch((e) => {
       console.error('GetConsensusParameters error: ' + e.message);
     });

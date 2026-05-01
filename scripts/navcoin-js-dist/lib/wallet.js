@@ -1064,38 +1064,65 @@ class WalletFile extends events.EventEmitter {
 
     const BATCH_SIZE = 10;
     const GAP_LIMIT = 100;
+    const getAddressIndex = (address) => {
+      if (!address.path) return Number.MAX_SAFE_INTEGER;
+      const parts = address.path.split('/');
+      return parseInt(parts[parts.length - 1], 10);
+    };
     let totalUtxos = [];
     let lastUsedIndex = -1;
     let checkedCount = 0;
     let done = false;
 
     while (!done) {
-      // Expand pool if we're near the edge.
-      let addresses = await this.db.GetNavReceivingAddresses(true);
-      const currentPoolSize = addresses.filter((a) => !a.change).length;
+      // Gap-limit scan should only advance over external receiving addresses.
+      let addresses = (await this.db.GetNavReceivingAddresses(true))
+        .filter((a) => !a.change)
+        .sort((a, b) => getAddressIndex(a) - getAddressIndex(b));
+      const currentPoolSize = addresses.length;
 
       if (checkedCount >= currentPoolSize) {
         const needed = checkedCount + BATCH_SIZE;
         await this.NavFillKeyPool(this.spendingPassword, needed);
-        addresses = await this.db.GetNavReceivingAddresses(true);
+        addresses = (await this.db.GetNavReceivingAddresses(true))
+          .filter((a) => !a.change)
+          .sort((a, b) => getAddressIndex(a) - getAddressIndex(b));
       }
 
-      const scriptHashes = await this.GetScriptHashes();
-      const batch = scriptHashes.slice(checkedCount, checkedCount + BATCH_SIZE);
+      const batch = addresses.slice(checkedCount, checkedCount + BATCH_SIZE);
 
       if (batch.length === 0) {
-        await this.NavFillKeyPool(this.spendingPassword, checkedCount + BATCH_SIZE);
+        await this.NavFillKeyPool(
+          this.spendingPassword,
+          checkedCount + BATCH_SIZE,
+        );
         continue;
       }
 
+      const scriptHashes = batch.map((address) => ({
+        address,
+        scriptHash: this.AddressToScriptHash(address.address),
+      }));
+
       // Phase 1: check balances.
       const balanceResults = await Promise.all(
-        batch.map(async (s) => {
+        scriptHashes.map(async ({ address, scriptHash }, batchIndex) => {
           try {
-            const bal = await this.client.blockchain_scripthash_get_balance(s);
-            return { s, funded: (bal.confirmed || 0) + (bal.unconfirmed || 0) > 0 };
+            const bal =
+              await this.client.blockchain_scripthash_get_balance(scriptHash);
+            return {
+              address,
+              scriptHash,
+              funded: (bal.confirmed || 0) + (bal.unconfirmed || 0) > 0,
+              absoluteIndex: checkedCount + batchIndex,
+            };
           } catch {
-            return { s, funded: false };
+            return {
+              address,
+              scriptHash,
+              funded: false,
+              absoluteIndex: checkedCount + batchIndex,
+            };
           }
         }),
       );
@@ -1107,8 +1134,10 @@ class WalletFile extends events.EventEmitter {
         const utxoResults = await Promise.all(
           fundedInBatch.map(async (r) => {
             try {
-              const utxos = await this.client.blockchain_scripthash_listunspent(r.s);
-              return utxos.map((u) => ({ ...u, scriptHash: r.s }));
+              const utxos = await this.client.blockchain_scripthash_listunspent(
+                r.scriptHash,
+              );
+              return utxos.map((u) => ({ ...u, scriptHash: r.scriptHash }));
             } catch {
               return [];
             }
@@ -1117,11 +1146,15 @@ class WalletFile extends events.EventEmitter {
         for (const utxos of utxoResults) {
           totalUtxos.push(...utxos);
         }
-        lastUsedIndex = checkedCount + batch.length;
+        lastUsedIndex = fundedInBatch[fundedInBatch.length - 1].absoluteIndex;
       }
 
       checkedCount += batch.length;
-      this.emit('scripthash_progress', checkedCount, checkedCount + GAP_LIMIT);
+      this.emit(
+        'scripthash_progress',
+        checkedCount,
+        Math.max(currentPoolSize, lastUsedIndex + GAP_LIMIT + 1),
+      );
 
       // Stop when we've checked GAP_LIMIT addresses past the last used one.
       if (checkedCount - lastUsedIndex >= GAP_LIMIT) {

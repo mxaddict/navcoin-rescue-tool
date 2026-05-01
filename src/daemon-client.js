@@ -56,6 +56,10 @@ export function removeDaemonSource(sourceId, root) {
   });
 }
 
+export function purgeDaemon(root) {
+  return daemonRequest('/purge', { method: 'POST', root });
+}
+
 export function sweepPrepare(root) {
   return daemonRequest('/sweep/prepare', { method: 'POST', root });
 }

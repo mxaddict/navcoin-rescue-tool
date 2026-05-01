@@ -158,3 +158,20 @@ export async function removeSource(
   await writeSources({ sources: nextSources }, root);
   return { removedSourceId: sourceId };
 }
+
+export async function purgeAllSources(
+  root = getAppDataRoot(),
+  walletAdapter = {
+    createImportedWallet,
+    deleteWalletForSource,
+  },
+) {
+  const state = await readSources(root);
+
+  for (const source of state.sources) {
+    await walletAdapter.deleteWalletForSource(source.id, root).catch(() => {});
+  }
+
+  await writeSources({ sources: [] }, root);
+  return { purgedCount: state.sources.length };
+}

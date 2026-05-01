@@ -10,6 +10,7 @@ import {
   importDaemonSource,
   removeDaemonSource,
   stopDaemon,
+  purgeDaemon,
   sweepPrepare,
   sweepConfirm,
 } from './daemon-client.js';
@@ -156,6 +157,7 @@ const COMMANDS = [
   'import private-key',
   'remove',
   'sweep',
+  'purge',
   'stop',
   'help',
   'quit',
@@ -209,6 +211,7 @@ function renderHelp(C) {
     `    ${C.cyan('import private-key')}  Import one or more private keys`,
     `    ${C.cyan('remove')}              Remove an imported source`,
     `    ${C.cyan('sweep')}               Sweep all funds to a destination`,
+    `    ${C.cyan('purge')}               Delete all imported wallet data from disk`,
     `    ${C.cyan('stop')}                Stop the daemon and exit the TUI`,
     `    ${C.cyan('help')}                Show this help`,
     `    ${C.cyan('quit')}                Exit the TUI (daemon keeps running)`,
@@ -716,6 +719,34 @@ export async function launchTui() {
         screen.destroy();
         process.exit(0);
         break;
+      case 'purge': {
+        log('');
+        log(
+          C.pink('  !! This will delete ALL imported wallet data from disk !!'),
+        );
+        log(
+          C.pink(
+            '  !! This cannot be undone. Re-import sources to recover. !!',
+          ),
+        );
+        const purgeConfirm = await ask('Type YES to confirm purge:');
+        if (purgeConfirm !== 'YES') {
+          log(C.muted('  Purge cancelled.'));
+          break;
+        }
+        try {
+          const result = await purgeDaemon(root);
+          log(
+            C.teal(
+              `  Purged ${result.purgedCount} source(s). All wallet data deleted.`,
+            ),
+          );
+        } catch (error) {
+          log(C.pink(`  Purge failed: ${error.message}`));
+        }
+        break;
+      }
+
       case 'stop': {
         const confirm = await ask(
           'Stop the daemon and exit? Type YES to confirm:',

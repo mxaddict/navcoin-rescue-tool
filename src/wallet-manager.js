@@ -244,6 +244,11 @@ export async function closeAllWallets() {
   await Promise.all([...walletState.keys()].map(closeSourceWallet));
 }
 
+export async function purgeAllWallets() {
+  await closeAllWallets();
+  walletState.clear();
+}
+
 /**
  * Validate that all sources are fully synced and return a sweep preview.
  *

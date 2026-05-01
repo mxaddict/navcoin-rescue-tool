@@ -14,7 +14,12 @@ import {
 } from './app-data.js';
 import { DAEMON_HOST, DAEMON_PORT } from './constants.js';
 import { getNavWallet } from './navcoin-js-adapter.js';
-import { importSource, removeSource, readSources } from './source-registry.js';
+import {
+  importSource,
+  removeSource,
+  readSources,
+  purgeAllSources,
+} from './source-registry.js';
 import {
   openSourceWallet,
   closeSourceWallet,
@@ -23,6 +28,7 @@ import {
   getSourceState,
   prepareSweep,
   executeSweep,
+  purgeAllWallets,
 } from './wallet-manager.js';
 
 function sendJson(response, statusCode, payload) {
@@ -121,6 +127,17 @@ async function main() {
         const body = await readJsonBody(request);
         await closeSourceWallet(body.sourceId);
         const result = await removeSource(body.sourceId, root);
+        sendJson(response, 200, result);
+      } catch (error) {
+        sendJson(response, 400, { error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/purge') {
+      try {
+        await purgeAllWallets();
+        const result = await purgeAllSources(root);
         sendJson(response, 200, result);
       } catch (error) {
         sendJson(response, 400, { error: error.message });

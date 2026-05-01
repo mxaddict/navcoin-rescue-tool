@@ -18,6 +18,7 @@ import {
   importDaemonSource,
   removeDaemonSource,
   stopDaemon,
+  purgeDaemon,
   sweepPrepare,
   sweepConfirm,
 } from './daemon-client.js';
@@ -53,7 +54,7 @@ process.stdout.on('error', (error) => {
 
 function printHelp() {
   process.stdout.write(
-    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} sweep <address>\n`,
+    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} sweep <address>\n  ${CLI_NAME} purge\n`,
   );
 }
 
@@ -280,6 +281,39 @@ async function handleRemove(argv) {
   }
 }
 
+async function handlePurge() {
+  const root = getAppDataRoot();
+
+  process.stdout.write(
+    '\nThis will delete ALL imported wallet data from disk.\n',
+  );
+  process.stdout.write(
+    'This cannot be undone. Re-import sources to recover.\n\n',
+  );
+
+  const confirm = await prompt('Type YES to confirm purge: ');
+  if (confirm.trim() !== 'YES') {
+    process.stdout.write('Purge cancelled.\n');
+    return;
+  }
+
+  try {
+    const result = await purgeDaemon(root);
+    process.stdout.write(
+      `Purged ${result.purgedCount} source(s). All wallet data deleted.\n`,
+    );
+  } catch (error) {
+    if (isDaemonUnreachable(error)) {
+      process.stderr.write(
+        `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
+      );
+    } else {
+      process.stderr.write(`Purge failed: ${error.message}\n`);
+    }
+    process.exitCode = 1;
+  }
+}
+
 async function handleStop() {
   try {
     await stopDaemon(getAppDataRoot());
@@ -476,6 +510,9 @@ async function main(argv) {
       return;
     case 'sweep':
       await handleSweep(rest);
+      return;
+    case 'purge':
+      await handlePurge();
       return;
     case 'help':
     case '--help':

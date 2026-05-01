@@ -182,6 +182,7 @@ async function main() {
 
     if (request.method === 'POST' && request.url === '/purge') {
       try {
+        await closeAllWallets();
         await purgeAllWallets();
         const result = await purgeAllSources(root);
         resetNavcoinJs();

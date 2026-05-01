@@ -324,12 +324,37 @@ function renderStatus(C, data) {
 // ---------------------------------------------------------------------------
 // Daemon auto-start
 // ---------------------------------------------------------------------------
+async function isPortInUse() {
+  try {
+    await fetch(`http://${DAEMON_HOST}:${DAEMON_PORT}/status`);
+    return true;
+  } catch (error) {
+    // ECONNREFUSED means nothing is listening.
+    return error?.cause?.code !== 'ECONNREFUSED';
+  }
+}
+
 async function ensureDaemonRunning(root, layout, log) {
+  // First try authenticated status check.
   try {
     await getDaemonStatus(root);
     return true;
   } catch {
-    // Not running — start it.
+    // Auth may have failed (missing/stale cookie) — check port directly.
+    if (await isPortInUse()) {
+      log(
+        C.pink(
+          '  A process is already using port 46117 but the auth cookie is missing or stale.',
+        ),
+      );
+      log(
+        C.muted(
+          '  Stop the existing daemon first: kill the process on port 46117.',
+        ),
+      );
+      return false;
+    }
+    // Nothing listening — fall through to start daemon.
   }
 
   log('  Starting daemon...');

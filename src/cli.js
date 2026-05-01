@@ -75,7 +75,29 @@ async function handleStart() {
     process.stdout.write(`App data: ${layout.root}\n`);
     return;
   } catch {
-    // Daemon not running yet.
+    // Auth may have failed — check if something is already on the port.
+    try {
+      await fetch(`http://${DAEMON_HOST}:${DAEMON_PORT}/status`);
+      // Got a response (even 401) — something is listening.
+      process.stderr.write(
+        `Port ${DAEMON_PORT} is already in use but the auth cookie is missing or stale.\n`,
+      );
+      process.stderr.write(
+        `Stop the existing process on port ${DAEMON_PORT} before starting a new daemon.\n`,
+      );
+      process.exitCode = 1;
+      return;
+    } catch (portError) {
+      if (portError?.cause?.code !== 'ECONNREFUSED') {
+        // Something other than connection refused — port may be in use.
+        process.stderr.write(
+          `Port ${DAEMON_PORT} check failed: ${portError.message}\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      // ECONNREFUSED — nothing listening, safe to start.
+    }
   }
 
   const logFd = fs.openSync(layout.daemonLogFile, 'a');

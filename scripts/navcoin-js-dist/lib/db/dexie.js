@@ -103,14 +103,6 @@ class Db extends events.EventEmitter {
       _dexie.default.dependencies.IDBKeyRange =
         IDBKeyRange || window.IDBKeyRange;
 
-      // Delete the tx DB before reopening — it is a working cache with no
-      // persistent state we need to keep, and indexeddbshim's SQLite backend
-      // throws ConstraintError if the object stores already exist in the file.
-      // Must be done after setting dependencies so indexeddbshim is wired up.
-      try {
-        await _dexie.default.delete('___tx___' + filename);
-      } catch {}
-
       this.db = new _dexie.default(filename, {
         indexedDB: indexedDB || window.indexedDB,
         IDBKeyRange: IDBKeyRange || window.IDBKeyRange,
@@ -160,6 +152,10 @@ class Db extends events.EventEmitter {
         consensus: '&id',
       });
       this.dbTx.version(2).stores({
+        txs: '&hash',
+        txKeys: '&hash',
+      });
+      this.dbTx.version(3).stores({
         txs: '&hash',
         txKeys: '&hash',
         candidates: '&input, network',

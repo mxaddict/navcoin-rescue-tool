@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,6 +8,7 @@ import {
   getAppDataRoot,
   readStatus,
 } from '../src/app-data.js';
+import { makeProjectTempDir } from './test-helpers.js';
 
 test('getAppDataRoot uses platform-specific locations', () => {
   assert.equal(
@@ -22,13 +22,20 @@ test('getAppDataRoot uses platform-specific locations', () => {
 });
 
 test('bootstrapAppData creates initial metadata files', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ntr-'));
+  const root = await makeProjectTempDir('app-data');
 
-  await bootstrapAppData(root);
-  const status = await readStatus(root);
-  const authCookie = await fs.readFile(path.join(root, 'auth.cookie'), 'utf8');
+  try {
+    await bootstrapAppData(root);
+    const status = await readStatus(root);
+    const authCookie = await fs.readFile(
+      path.join(root, 'auth.cookie'),
+      'utf8',
+    );
 
-  assert.equal(status.daemon.status, 'initialized');
-  assert.deepEqual(status.sources, { sources: [] });
-  assert.match(authCookie, /^[a-f0-9]+\n$/);
+    assert.equal(status.daemon.status, 'initialized');
+    assert.deepEqual(status.sources, { sources: [] });
+    assert.match(authCookie, /^[a-f0-9]+\n$/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

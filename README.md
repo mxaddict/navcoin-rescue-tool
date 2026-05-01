@@ -15,12 +15,12 @@ What works now:
 
 - daemon lifecycle commands: `ntr start`, `ntr status`, `ntr stop`
 - daemon-backed local source registry in `sources.json`
-- metadata-only import flows for mnemonic and private-key sources
+- `navcoin-js`-backed wallet container creation for mnemonic and private-key
+  imports
 - source removal and duplicate-source rejection
 
 What does not work yet:
 
-- no `navcoin-js` wallet integration
 - no real balance discovery or address reporting
 - no sweep transaction creation or broadcast
 - no TUI or GUI implementation yet
@@ -28,8 +28,8 @@ What does not work yet:
 ## Safety Warning
 
 - Do not use this tool with real recovery material or real coins yet.
-- Current imports only persist metadata, but the planned tool will store
-  sensitive wallet state locally.
+- Current imports now create local wallet DB files and should still be treated as
+  sensitive state.
 - The recovery workflow is intended for one-time rescue and sweep, not daily
   wallet use.
 - The current MVP plan uses a static wallet password for imported wallet state:
@@ -82,13 +82,13 @@ Stop daemon:
 ntr stop
 ```
 
-Import mnemonic source metadata:
+Import mnemonic source:
 
 ```bash
 ntr import mnemonic \
-  --wallet-type navcoin-core \
+  --wallet-type navcoin-js-v1 \
   --label "Main wallet" \
-  --phrase "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu"
+  --phrase "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 ```
 
 Supported mnemonic wallet types:
@@ -136,7 +136,7 @@ Files:
 - `daemon.json`: daemon runtime metadata
 - `auth.cookie`: local API auth token for daemon clients
 - `sources.json`: imported source registry
-- `wallets/`: reserved for per-source wallet databases
+- `wallets/`: per-source `navcoin-js` wallet databases
 - `logs/daemon.log`: daemon log output
 
 ## Architecture
@@ -154,9 +154,9 @@ Files:
 
 Near-term work:
 
-1. connect imported sources to per-source wallet database creation
-2. add `navcoin-js` integration boundary for mnemonic and private-key imports
-3. replace sync placeholders with real sync state and richer status reporting
+1. replace sync placeholders with real sync state and richer status reporting
+2. add wallet-backed address and balance reporting to `status`
+3. reopen and reconcile existing wallet DBs on daemon restart
 
 Longer-term direction:
 

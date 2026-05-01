@@ -103,7 +103,7 @@ async function handleStatus() {
 
     for (const source of status.sources) {
       process.stdout.write(
-        `- ${source.id} ${source.label} [${source.type}${source.walletType ? `:${source.walletType}` : ''}] status=${source.status} sync=${source.syncStatus}\n`,
+        `- ${source.id} ${source.label} [${source.type}${source.walletType ? `:${source.walletType}` : ''}] status=${source.status} sync=${source.syncStatus}${source.wallet ? ` wallet=${source.wallet.databaseName}` : ''}\n`,
       );
     }
   } catch {
@@ -183,6 +183,12 @@ async function handleImport(argv) {
     process.stdout.write(`Label: ${result.source.label}\n`);
     if (result.source.walletType) {
       process.stdout.write(`Wallet type: ${result.source.walletType}\n`);
+    }
+    if (result.source.wallet) {
+      process.stdout.write(
+        `Wallet database: ${result.source.wallet.databaseName}\n`,
+      );
+      process.stdout.write(`Wallet file: ${result.source.wallet.dataFile}\n`);
     }
     process.stdout.write(`Status: ${result.source.status}\n`);
     process.stdout.write(`Sync: ${result.source.syncStatus}\n`);

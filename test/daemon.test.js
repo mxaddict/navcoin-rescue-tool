@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -16,6 +14,7 @@ import {
   removeDaemonSource,
   stopDaemon,
 } from '../src/daemon-client.js';
+import { getProjectRoot, makeProjectTempDir } from './test-helpers.js';
 
 async function waitForReady(child) {
   return new Promise((resolve, reject) => {
@@ -55,8 +54,8 @@ test('daemon status requires auth cookie and supports stop', async (t) => {
     return;
   }
 
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ntr-daemon-'));
-  const projectRoot = path.join(import.meta.dirname, '..');
+  const root = await makeProjectTempDir('daemon');
+  const projectRoot = getProjectRoot();
 
   await bootstrapAppData(root);
 
@@ -101,8 +100,8 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
     return;
   }
 
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ntr-daemon-'));
-  const projectRoot = path.join(import.meta.dirname, '..');
+  const root = await makeProjectTempDir('daemon');
+  const projectRoot = getProjectRoot();
 
   await bootstrapAppData(root);
 
@@ -121,29 +120,35 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
     const imported = await importDaemonSource(
       {
         type: 'mnemonic',
-        walletType: 'navcoin-core',
+        walletType: 'navcoin-js-v1',
         label: 'Main wallet',
         phrase:
-          'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu',
+          'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
       },
       root,
     );
 
     assert.equal(imported.source.label, 'Main wallet');
-    assert.equal(imported.source.status, 'imported');
+    assert.equal(imported.source.status, 'ready');
+    assert.equal(imported.source.syncStatus, 'wallet-created');
+    assert.equal(imported.source.wallet.backend, 'navcoin-js');
 
     const status = await getDaemonStatus(root);
     assert.equal(status.sourceCount, 1);
     assert.equal(status.sources[0].id, imported.source.id);
+    assert.equal(
+      status.sources[0].wallet.databaseName,
+      `${imported.source.id}.db`,
+    );
 
     await assert.rejects(
       importDaemonSource(
         {
           type: 'mnemonic',
-          walletType: 'navcoin-core',
+          walletType: 'navcoin-js-v1',
           label: 'Duplicate wallet',
           phrase:
-            'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu',
+            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
         },
         root,
       ),
@@ -156,6 +161,20 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
     await removeDaemonSource(imported.source.id, root);
     const finalState = await readStatus(root);
     assert.deepEqual(finalState.sources.sources, []);
+
+    // Private-key import via daemon (runs navcoin-js in subprocess).
+    const privateKeyImported = await importDaemonSource(
+      {
+        type: 'private-key',
+        label: 'Loose keys',
+        keys: ['PCbhgKMp6ym9MgtMQ3XYxqnMrG3yFwAuQgTmZznbLxWExwxXH2pM'],
+      },
+      root,
+    );
+
+    assert.equal(privateKeyImported.source.status, 'ready');
+    assert.equal(privateKeyImported.source.type, 'private-key');
+    assert.equal(privateKeyImported.source.wallet.backend, 'navcoin-js');
 
     await stopDaemon(root);
     await new Promise((resolve) => child.on('exit', resolve));

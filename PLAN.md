@@ -49,7 +49,10 @@ CLI invocation should be `ntr` for short, frequent use.
 
 - MVP should only support recovery formats already supported by `navcoin-js`.
 - That means mnemonic import for supported wallet types and private-key import.
-- `wallet.dat` support is explicitly deferred until after MVP.
+- `wallet.dat` ingestion is not planned.
+- For `navcoin-core` recovery, prefer extracting the mnemonic from the original
+  wallet without requiring a full sync, then import that mnemonic into this
+  tool.
 
 ## Initial Non-Goals
 
@@ -92,10 +95,12 @@ CLI invocation should be `ntr` for short, frequent use.
   - auth-cookie protected `POST /remove`
   - auth-cookie protected `POST /daemon/stop`
   - `ntr start`, `ntr status`, and `ntr stop` wired to daemon lifecycle
-  - `ntr import mnemonic` and `ntr import private-key` metadata flows
+  - isolated `navcoin-js` adapter boundary for source wallet creation
+  - `ntr import mnemonic` and `ntr import private-key` wallet-backed imports
   - `ntr remove <source-id>` source removal flow
   - per-source persisted registry with fingerprint-based duplicate detection
-  - richer `status` output with source ids, labels, types, and sync placeholders
+  - per-source wallet DB files stored under `wallets/`
+  - richer `status` output with source ids, labels, types, and wallet info
   - repo `.gitignore` for dependencies, local artifacts, and scratch app data
 - Verified:
   - unit tests for app-data path resolution and bootstrap
@@ -104,11 +109,11 @@ CLI invocation should be `ntr` for short, frequent use.
   - CLI smoke test for `ntr start`, `ntr status`, and `ntr stop`
   - CLI smoke test for `ntr import`, `ntr remove`, and per-source `status`
   - initial GitHub Actions CI workflow for format and test checks
+  - real `navcoin-js` wallet DB creation for imported sources
 - Next slice:
-  - connect imported sources to per-source wallet database creation
-  - define `navcoin-js` integration boundary for mnemonic and private-key
-    imports
   - replace sync placeholders with real daemon-managed sync state
+  - add wallet-backed address and balance reporting to `status`
+  - define daemon-side wallet reopen flow on restart
 - Deferred to later slices:
   - TUI default flow
   - sweep implementation
@@ -165,8 +170,8 @@ Start with the smallest useful persistent path:
 4. status command with full source, sync, address, and balance reporting
 5. sweep NAV to a destination address with strict confirmation
 
-After that, expand import coverage where needed, then solve `wallet.dat`
-ingestion later.
+After that, expand import coverage where needed, then improve mnemonic and
+private-key recovery flows instead of adding `wallet.dat` ingestion.
 
 ## Shared Architecture
 
@@ -261,8 +266,6 @@ ingestion later.
   before fingerprinting so the fingerprint is stable.
 - Wallet type should be included in the fingerprint input so the same mnemonic
   can be imported and tested against multiple wallet types without colliding.
-- For future `wallet.dat` support, fingerprinting should hash the extracted
-  wallet details, not the raw wallet file bytes.
 - If an imported source fingerprint already exists, import should stop with a
   duplicate-source error.
 

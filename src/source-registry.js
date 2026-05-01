@@ -3,6 +3,10 @@ import fs from 'node:fs/promises';
 
 import { getAppDataRoot, getLayout } from './app-data.js';
 import {
+  createImportedWallet,
+  deleteWalletForSource,
+} from './navcoin-js-adapter.js';
+import {
   SUPPORTED_MNEMONIC_WALLET_TYPES,
   SUPPORTED_SOURCE_TYPES,
 } from './constants.js';
@@ -87,7 +91,14 @@ export async function writeSources(sourcesState, root = getAppDataRoot()) {
   return sourcesState;
 }
 
-export async function importSource(input, root = getAppDataRoot()) {
+export async function importSource(
+  input,
+  root = getAppDataRoot(),
+  walletAdapter = {
+    createImportedWallet,
+    deleteWalletForSource,
+  },
+) {
   const validated = validateImportInput(input);
   const fingerprint = buildFingerprint([
     validated.type,
@@ -101,30 +112,58 @@ export async function importSource(input, root = getAppDataRoot()) {
     throw new Error(`Duplicate source: ${sourceId}`);
   }
 
+  const preparedSource = {
+    id: sourceId,
+    label: validated.label,
+    type: validated.type,
+    walletType: validated.walletType,
+    fingerprint,
+    normalizedDetails: validated.normalizedDetails,
+  };
+
   const source = {
     id: sourceId,
     label: validated.label,
     type: validated.type,
     walletType: validated.walletType,
     fingerprint,
-    status: 'imported',
-    syncStatus: 'not-synced',
+    status: 'ready',
+    syncStatus: 'wallet-created',
     createdAt: new Date().toISOString(),
+    error: null,
   };
 
-  state.sources.push(source);
-  await writeSources(state, root);
-  return source;
+  try {
+    source.wallet = await walletAdapter.createImportedWallet(
+      preparedSource,
+      root,
+    );
+    state.sources.push(source);
+    await writeSources(state, root);
+    return source;
+  } catch (error) {
+    await walletAdapter.deleteWalletForSource(sourceId, root);
+    throw error;
+  }
 }
 
-export async function removeSource(sourceId, root = getAppDataRoot()) {
+export async function removeSource(
+  sourceId,
+  root = getAppDataRoot(),
+  walletAdapter = {
+    createImportedWallet,
+    deleteWalletForSource,
+  },
+) {
   const state = await readSources(root);
+  const source = state.sources.find((entry) => entry.id === sourceId);
   const nextSources = state.sources.filter((source) => source.id !== sourceId);
 
   if (nextSources.length === state.sources.length) {
     throw new Error(`Unknown source id: ${sourceId}`);
   }
 
+  await walletAdapter.deleteWalletForSource(source.id, root);
   await writeSources({ sources: nextSources }, root);
   return { removedSourceId: sourceId };
 }

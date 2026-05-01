@@ -9,8 +9,26 @@ import {
   closeSourceWallet,
   getAllSourceStates,
   getSourceState,
+  resetElectrumNodeSelectionCache,
 } from '../src/wallet-manager.js';
 import { makeProjectTempDir } from './test-helpers.js';
+
+class AlwaysOpenWebSocket {
+  constructor() {
+    this.listeners = new Map();
+    queueMicrotask(() => {
+      this.listeners.get('open')?.forEach((listener) => listener());
+    });
+  }
+
+  addEventListener(event, listener) {
+    const listeners = this.listeners.get(event) ?? [];
+    listeners.push(listener);
+    this.listeners.set(event, listeners);
+  }
+
+  close() {}
+}
 
 // Minimal mock WalletFile that simulates navcoin-js events.
 class MockWalletFile extends EventEmitter {
@@ -48,6 +66,14 @@ class MockWalletFile extends EventEmitter {
     };
   }
 
+  ClearNodeList() {
+    this.electrumNodes = [];
+  }
+
+  AddNode(host, port, proto) {
+    this.electrumNodes.push({ host, port, proto });
+  }
+
   Disconnect() {}
   CloseDb() {}
 }
@@ -58,8 +84,11 @@ function makeMockNavWallet() {
 
 test('wallet manager tracks sync state and exposes addresses/balance', async () => {
   const root = await makeProjectTempDir('wallet-mgr');
+  const OriginalWebSocket = global.WebSocket;
 
   try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
     await bootstrapAppData(root);
 
     const source = {
@@ -93,6 +122,180 @@ test('wallet manager tracks sync state and exposes addresses/balance', async () 
     await closeSourceWallet(source.id);
     assert.equal(getSourceState(source.id), null);
   } finally {
+    global.WebSocket = OriginalWebSocket;
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('wallet manager rotates electrum node on reconnect attempts', async () => {
+  const root = await makeProjectTempDir('wallet-mgr-reconnect');
+  const OriginalWebSocket = global.WebSocket;
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+
+  class ReconnectWalletFile extends EventEmitter {
+    constructor() {
+      super();
+      this.electrumNodes = [];
+      this.electrumNodeIndex = 0;
+      this.connectIndices = [];
+    }
+
+    async Load() {}
+
+    async Connect() {
+      this.connectIndices.push(this.electrumNodeIndex);
+      this.emit(
+        'connected',
+        `${this.electrumNodes[this.electrumNodeIndex].host}:40004`,
+      );
+    }
+
+    async NavReceivingAddresses() {
+      return [];
+    }
+
+    async GetBalance() {
+      return {
+        nav: { confirmed: 0, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      };
+    }
+
+    ClearNodeList() {
+      this.electrumNodes = [];
+    }
+
+    AddNode(host, port, proto) {
+      this.electrumNodes.push({ host, port, proto });
+    }
+
+    Disconnect() {}
+    CloseDb() {}
+  }
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    global.setTimeout = (fn) => {
+      queueMicrotask(fn);
+      return 1;
+    };
+    global.clearTimeout = () => {};
+    resetElectrumNodeSelectionCache();
+
+    await bootstrapAppData(root);
+
+    const source = {
+      id: 'test-source-rotate',
+      type: 'mnemonic',
+      walletType: 'navcoin-js-v1',
+    };
+
+    await openSourceWallet(source, root, { WalletFile: ReconnectWalletFile });
+
+    const state = getSourceState(source.id);
+    state.wallet.emit('disconnected');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(state.wallet.connectIndices, [0, 1]);
+
+    await closeSourceWallet(source.id);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('wallet manager prefers healthy electrum nodes before connect', async () => {
+  const root = await makeProjectTempDir('wallet-mgr-electrum-select');
+  const OriginalWebSocket = global.WebSocket;
+
+  class ProbeWebSocket {
+    constructor(url) {
+      this.url = url;
+      this.listeners = new Map();
+      queueMicrotask(() => {
+        const event = this.url.includes('electrum3.nav.community')
+          ? 'open'
+          : 'error';
+        this.listeners.get(event)?.forEach((listener) => listener());
+      });
+    }
+
+    addEventListener(event, listener) {
+      const listeners = this.listeners.get(event) ?? [];
+      listeners.push(listener);
+      this.listeners.set(event, listeners);
+    }
+
+    close() {}
+  }
+
+  class NodeListWalletFile extends EventEmitter {
+    constructor() {
+      super();
+      this.electrumNodes = [{ host: 'default', port: 1, proto: 'wss' }];
+      this.electrumNodeIndex = 0;
+      this.connectedTo = null;
+    }
+
+    async Load() {}
+
+    ClearNodeList() {
+      this.electrumNodes = [];
+    }
+
+    AddNode(host, port, proto) {
+      this.electrumNodes.push({ host, port, proto });
+    }
+
+    async Connect() {
+      this.connectedTo = this.electrumNodes[this.electrumNodeIndex].host;
+      this.emit('connected', `${this.connectedTo}:40004`);
+      this.emit('sync_finished');
+    }
+
+    async NavReceivingAddresses() {
+      return [];
+    }
+
+    async GetBalance() {
+      return {
+        nav: { confirmed: 0, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      };
+    }
+
+    Disconnect() {}
+    CloseDb() {}
+  }
+
+  try {
+    global.WebSocket = ProbeWebSocket;
+    resetElectrumNodeSelectionCache();
+
+    await bootstrapAppData(root);
+
+    const source = {
+      id: 'test-source-electrum-select',
+      type: 'mnemonic',
+      walletType: 'navcoin-js-v1',
+    };
+
+    await openSourceWallet(source, root, { WalletFile: NodeListWalletFile });
+
+    const state = getSourceState(source.id);
+    assert.equal(state.wallet.connectedTo, 'electrum3.nav.community');
+    assert.equal(state.wallet.electrumNodes[0].host, 'electrum3.nav.community');
+
+    await closeSourceWallet(source.id);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
   }
 });

@@ -10,8 +10,26 @@ import {
   closeAllWallets,
   prepareSweep,
   executeSweep,
+  resetElectrumNodeSelectionCache,
 } from '../src/wallet-manager.js';
 import { makeProjectTempDir } from './test-helpers.js';
+
+class AlwaysOpenWebSocket {
+  constructor() {
+    this.listeners = new Map();
+    queueMicrotask(() => {
+      this.listeners.get('open')?.forEach((listener) => listener());
+    });
+  }
+
+  addEventListener(event, listener) {
+    const listeners = this.listeners.get(event) ?? [];
+    listeners.push(listener);
+    this.listeners.set(event, listeners);
+  }
+
+  close() {}
+}
 
 // Minimal mock WalletFile that simulates navcoin-js events.
 class MockWalletFile extends EventEmitter {
@@ -60,6 +78,14 @@ class MockWalletFile extends EventEmitter {
     return this._sendResult;
   }
 
+  ClearNodeList() {
+    this.electrumNodes = [];
+  }
+
+  AddNode(host, port, proto) {
+    this.electrumNodes.push({ host, port, proto });
+  }
+
   Disconnect() {}
   CloseDb() {}
 }
@@ -76,19 +102,27 @@ function makeNavWallet(opts = {}) {
 
 test('prepareSweep blocks when no sources imported', async () => {
   const root = await makeProjectTempDir('sweep-empty');
+  const OriginalWebSocket = global.WebSocket;
 
   try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
     await bootstrapAppData(root);
     assert.throws(() => prepareSweep(), /No imported sources/);
   } finally {
+    global.WebSocket = OriginalWebSocket;
+    resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
 test('prepareSweep blocks when source not synced', async () => {
   const root = await makeProjectTempDir('sweep-unsynced');
+  const OriginalWebSocket = global.WebSocket;
 
   try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
     await bootstrapAppData(root);
 
     const source = { id: 'src-unsynced', type: 'mnemonic', label: 'Test' };
@@ -100,15 +134,20 @@ test('prepareSweep blocks when source not synced', async () => {
 
     assert.throws(() => prepareSweep(), /not fully synced/);
   } finally {
+    global.WebSocket = OriginalWebSocket;
     await closeAllWallets();
+    resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
 test('prepareSweep returns preview when all sources synced', async () => {
   const root = await makeProjectTempDir('sweep-preview');
+  const OriginalWebSocket = global.WebSocket;
 
   try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
     await bootstrapAppData(root);
 
     const source = { id: 'src-synced', type: 'mnemonic', label: 'Test' };
@@ -121,15 +160,20 @@ test('prepareSweep returns preview when all sources synced', async () => {
     assert.equal(preview.sources[0].nav, 5_0000_0000);
     assert.equal(preview.totalNav, 5_0000_0000);
   } finally {
+    global.WebSocket = OriginalWebSocket;
     await closeAllWallets();
+    resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
 test('executeSweep creates and broadcasts transactions per source', async () => {
   const root = await makeProjectTempDir('sweep-exec');
+  const OriginalWebSocket = global.WebSocket;
 
   try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
     await bootstrapAppData(root);
 
     const source = { id: 'src-exec', type: 'mnemonic', label: 'Test' };
@@ -142,15 +186,20 @@ test('executeSweep creates and broadcasts transactions per source', async () => 
     assert.equal(result.totalFee, 10000);
     assert.equal(result.totalSent, 5_0000_0000 - 10000);
   } finally {
+    global.WebSocket = OriginalWebSocket;
     await closeAllWallets();
+    resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
 test('executeSweep skips zero-balance sources', async () => {
   const root = await makeProjectTempDir('sweep-zero');
+  const OriginalWebSocket = global.WebSocket;
 
   try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
     await bootstrapAppData(root);
 
     // Source with zero balance.
@@ -169,15 +218,20 @@ test('executeSweep skips zero-balance sources', async () => {
     assert.equal(result.totalSent, 0);
     assert.equal(result.totalFee, 0);
   } finally {
+    global.WebSocket = OriginalWebSocket;
     await closeAllWallets();
+    resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
 test('executeSweep throws when SendTransaction returns error', async () => {
   const root = await makeProjectTempDir('sweep-err');
+  const OriginalWebSocket = global.WebSocket;
 
   try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
     await bootstrapAppData(root);
 
     const source = { id: 'src-err', type: 'mnemonic', label: 'Test' };
@@ -192,7 +246,9 @@ test('executeSweep throws when SendTransaction returns error', async () => {
       /Broadcast failed/,
     );
   } finally {
+    global.WebSocket = OriginalWebSocket;
     await closeAllWallets();
+    resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
   }
 });

@@ -5,10 +5,29 @@ import { STATIC_WALLET_PASSWORD, RECOVERY_MIN_POOL_SIZE } from './constants.js';
 // Not persisted - rebuilt on every daemon start.
 const walletState = new Map();
 
+const MAINNET_ELECTRUM_NODES = [
+  { host: 'electrum4.nav.community', port: 40004, proto: 'wss' },
+  { host: 'electrum.nextwallet.org', port: 40004, proto: 'wss' },
+  { host: 'electrum2.nav.community', port: 40004, proto: 'wss' },
+  { host: 'electrum3.nav.community', port: 40004, proto: 'wss' },
+  { host: 'electrum.nav.community', port: 40004, proto: 'wss' },
+];
+
 // How long to wait in 'connecting' before attempting a reconnect (ms).
 const RECONNECT_TIMEOUT_MS = 30_000;
 // How long to wait between reconnect attempts (ms).
 const RECONNECT_INTERVAL_MS = 10_000;
+const ELECTRUM_PROBE_TIMEOUT_MS = 5_000;
+
+let electrumNodeCache = null;
+let electrumNodeCacheAt = 0;
+let electrumNodeProbePromise = null;
+
+export function resetElectrumNodeSelectionCache() {
+  electrumNodeCache = null;
+  electrumNodeCacheAt = 0;
+  electrumNodeProbePromise = null;
+}
 
 function makeInitialState(sourceId) {
   return {
@@ -47,6 +66,78 @@ export function getAllSourceStates() {
   }));
 }
 
+function probeElectrumNode(node) {
+  return new Promise((resolve) => {
+    const url = `${node.proto}://${node.host}:${node.port}`;
+    const ws = new WebSocket(url);
+
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try {
+        ws.close();
+      } catch {
+        // Ignore close errors during probe.
+      }
+      resolve(ok);
+    };
+
+    const timeout = setTimeout(() => finish(false), ELECTRUM_PROBE_TIMEOUT_MS);
+
+    ws.addEventListener('open', () => finish(true), { once: true });
+    ws.addEventListener('error', () => finish(false), { once: true });
+    ws.addEventListener('close', () => finish(false), { once: true });
+  });
+}
+
+async function selectElectrumNodes() {
+  const now = Date.now();
+  if (electrumNodeCache && now - electrumNodeCacheAt < 60_000) {
+    return electrumNodeCache;
+  }
+
+  if (!electrumNodeProbePromise) {
+    electrumNodeProbePromise = (async () => {
+      const results = await Promise.all(
+        MAINNET_ELECTRUM_NODES.map(async (node) => ({
+          node,
+          ok: await probeElectrumNode(node),
+        })),
+      );
+
+      const healthy = results.filter((r) => r.ok).map((r) => r.node);
+      const unhealthy = results.filter((r) => !r.ok).map((r) => r.node);
+      const selected =
+        healthy.length > 0
+          ? [...healthy, ...unhealthy]
+          : MAINNET_ELECTRUM_NODES;
+
+      electrumNodeCache = selected;
+      electrumNodeCacheAt = Date.now();
+      return selected;
+    })();
+  }
+
+  try {
+    return await electrumNodeProbePromise;
+  } finally {
+    electrumNodeProbePromise = null;
+  }
+}
+
+async function configureElectrumNodes(wallet) {
+  const nodes = await selectElectrumNodes();
+
+  wallet.ClearNodeList();
+  for (const node of nodes) {
+    wallet.AddNode(node.host, node.port, node.proto);
+  }
+
+  wallet.electrumNodeIndex = 0;
+}
+
 function scheduleReconnect(source, state, navWallet) {
   clearTimeout(state.reconnectTimer);
   state.reconnectTimer = setTimeout(async () => {
@@ -59,6 +150,15 @@ function scheduleReconnect(source, state, navWallet) {
       !state.wallet
     ) {
       return;
+    }
+
+    const electrumNodes = state.wallet.electrumNodes;
+    if (Array.isArray(electrumNodes) && electrumNodes.length > 1) {
+      const currentIndex = Number.isInteger(state.wallet.electrumNodeIndex)
+        ? state.wallet.electrumNodeIndex
+        : 0;
+      state.wallet.electrumNodeIndex =
+        (currentIndex + 1) % electrumNodes.length;
     }
 
     state.syncStatus = 'connecting';
@@ -98,6 +198,7 @@ export async function openSourceWallet(source, root, navWallet) {
 
   wallet.on('disconnected', () => {
     state.connected = false;
+    state.server = null;
     // Only reschedule reconnect if we were previously connected or syncing —
     // not if we're already in an error or no-servers state.
     if (
@@ -133,6 +234,7 @@ export async function openSourceWallet(source, root, navWallet) {
   wallet.on('no_servers_available', () => {
     state.syncStatus = 'no-servers';
     state.connected = false;
+    state.server = null;
     // Retry after interval — servers may come back up.
     scheduleReconnect(source, state, navWallet);
   });
@@ -164,6 +266,7 @@ export async function openSourceWallet(source, root, navWallet) {
 
   try {
     await wallet.Load({ useP2p: false, minPoolSize: RECOVERY_MIN_POOL_SIZE });
+    await configureElectrumNodes(wallet);
 
     // Seed initial address and balance snapshot before connecting.
     await refreshAddressesAndBalance(source.id, wallet);

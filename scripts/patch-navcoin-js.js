@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Patches navcoin-js dist to fix the sleep() function in ManageElectrumError.
+ * Patches navcoin-js dist to fix reconnect handling and custom node selection.
  *
  * The original sleep() calls msleep() without await, so the delay has no
  * effect and the reconnect loop spins at full speed through dead servers.
  * This patch makes sleep() async and properly awaits msleep(), and also
  * rewrites the compiled dist call sites to await sleep() where upstream fixed
- * the source but the published npm dist has not yet been regenerated.
+ * the source but the published npm dist has not yet been regenerated. It also
+ * fixes an `option.nodes` typo so custom electrum node lists actually work.
  */
 
 import fs from 'node:fs';
@@ -56,6 +57,10 @@ const replacements = [
     'await this.ManageElectrumError(e);\n        sleep(3);',
     'await this.ManageElectrumError(e);\n        await sleep(3);',
   ],
+  [
+    'this.electrumNodes = options.nodes && option.nodes[this.network] ? option.nodes[this.network] : _index2.default[this.network];',
+    'this.electrumNodes = options.nodes && options.nodes[this.network] ? options.nodes[this.network] : _index2.default[this.network];',
+  ],
 ];
 
 let changed = false;
@@ -75,4 +80,4 @@ if (!changed) {
 }
 
 fs.writeFileSync(target, content, 'utf8');
-console.log('patch-navcoin-js: patched sleep() and await call sites');
+console.log('patch-navcoin-js: patched reconnect logic and node selection');

@@ -5,6 +5,7 @@ import { getAppDataRoot, getLayout } from './app-data.js';
 import {
   createImportedWallet,
   deleteWalletForSource,
+  resetNavcoinJs,
 } from './navcoin-js-adapter.js';
 import {
   SUPPORTED_MNEMONIC_WALLET_TYPES,
@@ -167,10 +168,15 @@ export async function purgeAllSources(
   },
 ) {
   const state = await readSources(root);
+  const layout = getLayout(root);
 
-  for (const source of state.sources) {
-    await walletAdapter.deleteWalletForSource(source.id, root).catch(() => {});
-  }
+  // Wipe the entire wallets directory so no stale indexeddbshim SQLite files
+  // (including ___tx___ caches) are left behind to cause ConstraintErrors on
+  // the next import of the same key or mnemonic.
+  await fs.rm(layout.walletsDir, { recursive: true, force: true });
+  await fs.mkdir(layout.walletsDir, { recursive: true });
+
+  resetNavcoinJs();
 
   await writeSources({ sources: [] }, root);
   return { purgedCount: state.sources.length };

@@ -12,6 +12,7 @@ import {
   getDaemonStatus,
   importDaemonSource,
   removeDaemonSource,
+  purgeDaemon,
   stopDaemon,
 } from '../src/daemon-client.js';
 import { getProjectRoot, makeProjectTempDir } from './test-helpers.js';
@@ -211,6 +212,75 @@ test('daemon private-key import works', async (t) => {
     assert.equal(imported.source.status, 'ready');
     assert.equal(imported.source.type, 'private-key');
     assert.equal(imported.source.wallet.backend, 'navcoin-js');
+
+    await stopDaemon(root);
+    await waitForExit(child);
+  } finally {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('daemon survives purge then re-import of same private key', async (t) => {
+  if (await portInUse()) {
+    t.skip('port 46117 already in use');
+    return;
+  }
+
+  const root = await makeProjectTempDir('daemon-purge-reimport');
+  const projectRoot = getProjectRoot();
+
+  await bootstrapAppData(root);
+
+  function spawnDaemon() {
+    return spawn(process.execPath, ['src/daemon.js'], {
+      cwd: projectRoot,
+      env: { ...process.env, NTR_APP_DATA: root },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+
+  let child = spawnDaemon();
+
+  try {
+    // 1. Import a private key.
+    await waitForReady(child);
+    const imported = await importDaemonSource(
+      {
+        type: 'private-key',
+        keys: ['PCbhgKMp6ym9MgtMQ3XYxqnMrG3yFwAuQgTmZznbLxWExwxXH2pM'],
+      },
+      root,
+    );
+    assert.equal(imported.source.type, 'private-key');
+
+    // 2. Purge all wallet data.
+    await purgeDaemon(root);
+    const afterPurge = await getDaemonStatus(root);
+    assert.equal(afterPurge.sourceCount, 0);
+
+    // 3. Stop daemon and restart — simulates closing and reopening the TUI.
+    await stopDaemon(root);
+    await waitForExit(child);
+
+    child = spawnDaemon();
+    await waitForReady(child);
+
+    // 4. Re-import the same private key — this was crashing with ConstraintError.
+    const reimported = await importDaemonSource(
+      {
+        type: 'private-key',
+        keys: ['PCbhgKMp6ym9MgtMQ3XYxqnMrG3yFwAuQgTmZznbLxWExwxXH2pM'],
+      },
+      root,
+    );
+    assert.equal(reimported.source.status, 'ready');
+    assert.equal(reimported.source.type, 'private-key');
+
+    // 5. Daemon still reachable — no crash.
+    const finalStatus = await getDaemonStatus(root);
+    assert.equal(finalStatus.sourceCount, 1);
 
     await stopDaemon(root);
     await waitForExit(child);

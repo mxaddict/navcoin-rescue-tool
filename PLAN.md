@@ -88,20 +88,28 @@ CLI invocation should be `ntr` for short, frequent use.
     `sources.json`, `wallets/`, and `logs/`
   - long-lived localhost daemon bound to `127.0.0.1:46117`
   - auth-cookie protected `GET /status`
+  - auth-cookie protected `POST /import`
+  - auth-cookie protected `POST /remove`
   - auth-cookie protected `POST /daemon/stop`
   - `ntr start`, `ntr status`, and `ntr stop` wired to daemon lifecycle
+  - `ntr import mnemonic` and `ntr import private-key` metadata flows
+  - `ntr remove <source-id>` source removal flow
+  - per-source persisted registry with fingerprint-based duplicate detection
+  - richer `status` output with source ids, labels, types, and sync placeholders
   - repo `.gitignore` for dependencies, local artifacts, and scratch app data
 - Verified:
   - unit tests for app-data path resolution and bootstrap
   - daemon auth and stop lifecycle test
+  - daemon import persistence, duplicate rejection, and remove test
   - CLI smoke test for `ntr start`, `ntr status`, and `ntr stop`
+  - CLI smoke test for `ntr import`, `ntr remove`, and per-source `status`
 - Next slice:
-  - add source registry model and import command contract
-  - define daemon-side source persistence APIs before `navcoin-js` integration
-  - expand `status` output shape toward per-source reporting
+  - connect imported sources to per-source wallet database creation
+  - define `navcoin-js` integration boundary for mnemonic and private-key imports
+  - replace sync placeholders with real daemon-managed sync state
 - Deferred to later slices:
   - TUI default flow
-  - import/remove/sweep implementation
+  - sweep implementation
   - full daemon HTTP API surface
 
 ## CI And Releases

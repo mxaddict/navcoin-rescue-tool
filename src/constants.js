@@ -4,6 +4,14 @@ export const GUI_NAME = 'ntr-gui';
 export const DAEMON_HOST = '127.0.0.1';
 export const DAEMON_PORT = 46117;
 export const STATIC_WALLET_PASSWORD = 'ObsidianSweepKey';
+export const SUPPORTED_MNEMONIC_WALLET_TYPES = [
+  'navcoin-core',
+  'navcash',
+  'next',
+  'navpay',
+  'navcoin-js-v1',
+];
+export const SUPPORTED_SOURCE_TYPES = ['mnemonic', 'private-key'];
 
 export const FILE_LAYOUT = {
   daemon: 'daemon.json',

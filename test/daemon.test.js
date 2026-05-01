@@ -10,7 +10,12 @@ import {
   readAuthCookie,
   readStatus,
 } from '../src/app-data.js';
-import { getDaemonStatus, stopDaemon } from '../src/daemon-client.js';
+import {
+  getDaemonStatus,
+  importDaemonSource,
+  removeDaemonSource,
+  stopDaemon,
+} from '../src/daemon-client.js';
 
 async function waitForReady(child) {
   return new Promise((resolve, reject) => {
@@ -84,6 +89,76 @@ test('daemon status requires auth cookie and supports stop', async (t) => {
 
     const finalState = await readStatus(root);
     assert.equal(finalState.daemon.status, 'stopped');
+  } finally {
+    child.kill('SIGTERM');
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('daemon import persists sources and rejects duplicates', async (t) => {
+  if (await portInUse()) {
+    t.skip('port 46117 already in use');
+    return;
+  }
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ntr-daemon-'));
+  const projectRoot = path.join(import.meta.dirname, '..');
+
+  await bootstrapAppData(root);
+
+  const child = spawn(process.execPath, ['src/daemon.js'], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      NTR_APP_DATA: root,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  try {
+    await waitForReady(child);
+
+    const imported = await importDaemonSource(
+      {
+        type: 'mnemonic',
+        walletType: 'navcoin-core',
+        label: 'Main wallet',
+        phrase:
+          'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu',
+      },
+      root
+    );
+
+    assert.equal(imported.source.label, 'Main wallet');
+    assert.equal(imported.source.status, 'imported');
+
+    const status = await getDaemonStatus(root);
+    assert.equal(status.sourceCount, 1);
+    assert.equal(status.sources[0].id, imported.source.id);
+
+    await assert.rejects(
+      importDaemonSource(
+        {
+          type: 'mnemonic',
+          walletType: 'navcoin-core',
+          label: 'Duplicate wallet',
+          phrase:
+            'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu',
+        },
+        root
+      ),
+      /Duplicate source/
+    );
+
+    const reloaded = await readStatus(root);
+    assert.equal(reloaded.sources.sources.length, 1);
+
+    await removeDaemonSource(imported.source.id, root);
+    const finalState = await readStatus(root);
+    assert.deepEqual(finalState.sources.sources, []);
+
+    await stopDaemon(root);
+    await new Promise((resolve) => child.on('exit', resolve));
   } finally {
     child.kill('SIGTERM');
     await fs.rm(root, { recursive: true, force: true });

@@ -36,3 +36,15 @@ export function getDaemonStatus(root) {
 export function stopDaemon(root) {
   return daemonRequest('/daemon/stop', { method: 'POST', root });
 }
+
+export function importDaemonSource(body, root) {
+  return daemonRequest('/import', { method: 'POST', root, body });
+}
+
+export function removeDaemonSource(sourceId, root) {
+  return daemonRequest('/remove', {
+    method: 'POST',
+    root,
+    body: { sourceId },
+  });
+}

@@ -13,10 +13,25 @@ import {
   writeDaemonState,
 } from './app-data.js';
 import { DAEMON_HOST, DAEMON_PORT } from './constants.js';
+import { importSource, removeSource } from './source-registry.js';
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { 'Content-Type': 'application/json' });
   response.end(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+async function readJsonBody(request) {
+  const chunks = [];
+
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+
+  if (chunks.length === 0) {
+    return {};
+  }
+
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
 async function main() {
@@ -39,7 +54,29 @@ async function main() {
         daemon: status.daemon,
         sourceCount: status.sources.sources.length,
         appData: status.layout.root,
+        sources: status.sources.sources,
       });
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/import') {
+      try {
+        const source = await importSource(await readJsonBody(request), root);
+        sendJson(response, 200, { source });
+      } catch (error) {
+        sendJson(response, 400, { error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/remove') {
+      try {
+        const body = await readJsonBody(request);
+        const result = await removeSource(body.sourceId, root);
+        sendJson(response, 200, result);
+      } catch (error) {
+        sendJson(response, 400, { error: error.message });
+      }
       return;
     }
 

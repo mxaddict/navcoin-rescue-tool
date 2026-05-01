@@ -380,6 +380,14 @@ Notes:
 - The TUI layout should stay minimal:
   - main window for rendered output
   - bottom line for command input
+- The TUI must use the Navio brand palette defined in the Brand Colors section,
+  approximated with the nearest terminal-safe equivalents via chalk and blessed:
+  - background: black / dark (`#111827` nearest)
+  - primary accents: magenta (`#ec1ec6`) and blue (`#1d8ff9`)
+  - labels and headings: fuchsia → cyan gradient approximated with chalk
+  - errors: pink / red (`#be185d` nearest)
+  - success / synced: teal / green (`#0f766e` nearest)
+  - muted / inactive: gray
 - If a daemon is running, the TUI should connect to it and show current state.
 - If no daemon is running, `ntr` should start it automatically and then connect
   the TUI to it.
@@ -403,6 +411,61 @@ Notes:
   - total confirmed, unconfirmed, staked, and sweepable balances
   - current connected server and last sync information
 - `ntr sweep <address>` should always require interactive confirmation.
+
+## Brand Colors
+
+All visual surfaces — TUI, Electron GUI, and any future web UI — must use the
+Navio brand palette sourced from nav.io.
+
+### Core Palette
+
+| Role            | Value                            | Notes                                  |
+| --------------- | -------------------------------- | -------------------------------------- |
+| Magenta primary | `#ec1ec6` / `hsl(310, 90%, 55%)` | Logo gradient start, main accent       |
+| Blue primary    | `#1d8ff9` / `hsl(247, 90%, 55%)` | Logo gradient end, secondary accent    |
+| Fuchsia accent  | `#d946ef`                        | Heading gradient start, CTA button end |
+| Cyan accent     | `#06b6d4`                        | Heading gradient end                   |
+| Indigo accent   | `#6366f1`                        | CTA button gradient start              |
+| Dark background | `#111827`                        | Page/panel background (`gray-900`)     |
+| Card background | `#1f2937`                        | Card/panel surface (`gray-800`)        |
+| Dark navy       | `#121827`                        | Pattern background fill                |
+
+### Glow / Animated Shades
+
+| Role              | Value                            |
+| ----------------- | -------------------------------- |
+| Magenta dark      | `hsl(310, 90%, 25%)` → `#790665` |
+| Magenta bright    | `hsl(310, 90%, 65%)` → `#f655db` |
+| Magenta highlight | `hsl(310, 90%, 75%)` → `#f885e5` |
+| Indigo dark       | `hsl(247, 90%, 25%)` → `#130679` |
+| Indigo bright     | `hsl(247, 90%, 65%)` → `#6855f6` |
+| Indigo highlight  | `hsl(247, 90%, 75%)` → `#9385f8` |
+
+### Feature Accent Colors
+
+Used for per-feature highlights, source type badges, or status indicators:
+
+| Role   | Value     |
+| ------ | --------- |
+| Purple | `#7e22ce` |
+| Teal   | `#0f766e` |
+| Blue   | `#1d4ed8` |
+| Sky    | `#0369a1` |
+| Pink   | `#be185d` |
+
+### Usage Rules
+
+- Backgrounds: `#111827` (primary), `#1f2937` (panels/cards), `#121827` (deep)
+- Primary accents: magenta `#ec1ec6` and blue `#1d8ff9`
+- Gradient headings and key labels: fuchsia `#d946ef` → cyan `#06b6d4`
+- Interactive elements (buttons, selected items): indigo `#6366f1` → fuchsia
+  `#d946ef`
+- Errors and warnings: pink `#be185d`
+- Success / synced states: teal `#0f766e`
+- Muted / inactive text: `gray-400` (`#9ca3af`)
+- TUI must approximate these with the nearest terminal-safe equivalents using
+  chalk and blessed color support
+- Electron GUI must use exact hex values via CSS
 
 ## GUI Shape
 
@@ -476,6 +539,10 @@ Notes:
   - left sidebar for main actions/views
   - main panel for rendered content
   - bottom status bar for daemon and sync state
+- The GUI must use the Navio brand palette defined in the Brand Colors section
+  above using exact hex values via CSS.
+- Background: `#111827`, panels: `#1f2937`, accents: magenta `#ec1ec6` and blue
+  `#1d8ff9`, gradients: fuchsia `#d946ef` → cyan `#06b6d4`.
 
 ### GUI Views
 

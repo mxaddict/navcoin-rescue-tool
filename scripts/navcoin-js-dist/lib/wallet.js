@@ -1062,64 +1062,70 @@ class WalletFile extends events.EventEmitter {
 
     this.emit('bootstrap_started');
 
-    let scriptHashes = await this.GetScriptHashes();
-    const total = scriptHashes.length;
-    this.emit('scripthash_progress', 0, total);
-
     const BATCH_SIZE = 10;
+    const GAP_LIMIT = 100;
+    let totalUtxos = [];
+    let lastUsedIndex = -1;
+    let checkedCount = 0;
+    let done = false;
 
-    // Phase 1: check balances (lightweight RPC) to find funded addresses.
-    let fundedHashes = [];
-    for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
-      const batch = scriptHashes.slice(batchStart, batchStart + BATCH_SIZE);
-      this.emit('scripthash_progress', batchStart + 1, total);
+    while (!done) {
+      // Expand pool if we're near the edge.
+      let addresses = await this.db.GetNavReceivingAddresses(true);
+      const currentPoolSize = addresses.filter((a) => !a.change).length;
 
-      const results = await Promise.all(
+      if (checkedCount >= currentPoolSize) {
+        const needed = checkedCount + BATCH_SIZE;
+        await this.NavFillKeyPool(this.spendingPassword, needed);
+        addresses = await this.db.GetNavReceivingAddresses(true);
+      }
+
+      const scriptHashes = await this.GetScriptHashes();
+      const batch = scriptHashes.slice(checkedCount, checkedCount + BATCH_SIZE);
+
+      if (batch.length === 0) {
+        await this.NavFillKeyPool(this.spendingPassword, checkedCount + BATCH_SIZE);
+        continue;
+      }
+
+      // Phase 1: check balances.
+      const balanceResults = await Promise.all(
         batch.map(async (s) => {
           try {
             const bal = await this.client.blockchain_scripthash_get_balance(s);
-            return {
-              s,
-              funded: (bal.confirmed || 0) + (bal.unconfirmed || 0) > 0,
-            };
+            return { s, funded: (bal.confirmed || 0) + (bal.unconfirmed || 0) > 0 };
           } catch {
             return { s, funded: false };
           }
         }),
       );
 
-      for (const r of results) {
-        if (r.funded) fundedHashes.push(r.s);
+      const fundedInBatch = balanceResults.filter((r) => r.funded);
+
+      // Phase 2: fetch UTXOs for funded addresses only.
+      if (fundedInBatch.length > 0) {
+        const utxoResults = await Promise.all(
+          fundedInBatch.map(async (r) => {
+            try {
+              const utxos = await this.client.blockchain_scripthash_listunspent(r.s);
+              return utxos.map((u) => ({ ...u, scriptHash: r.s }));
+            } catch {
+              return [];
+            }
+          }),
+        );
+        for (const utxos of utxoResults) {
+          totalUtxos.push(...utxos);
+        }
+        lastUsedIndex = checkedCount + batch.length;
       }
-    }
 
-    // Phase 2: fetch UTXOs only for funded addresses.
-    let totalUtxos = [];
-    const fundedTotal = fundedHashes.length;
-    this.emit('scripthash_progress', 0, fundedTotal || 1);
+      checkedCount += batch.length;
+      this.emit('scripthash_progress', checkedCount, checkedCount + GAP_LIMIT);
 
-    for (
-      let batchStart = 0;
-      batchStart < fundedTotal;
-      batchStart += BATCH_SIZE
-    ) {
-      const batch = fundedHashes.slice(batchStart, batchStart + BATCH_SIZE);
-      this.emit('scripthash_progress', batchStart + 1, fundedTotal);
-
-      const results = await Promise.all(
-        batch.map(async (s) => {
-          try {
-            const utxos =
-              await this.client.blockchain_scripthash_listunspent(s);
-            return utxos.map((u) => ({ ...u, scriptHash: s }));
-          } catch {
-            return [];
-          }
-        }),
-      );
-
-      for (const utxos of results) {
-        totalUtxos.push(...utxos);
+      // Stop when we've checked GAP_LIMIT addresses past the last used one.
+      if (checkedCount - lastUsedIndex >= GAP_LIMIT) {
+        done = true;
       }
     }
 

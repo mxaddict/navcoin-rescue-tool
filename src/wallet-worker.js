@@ -48,8 +48,9 @@ const require = createRequire(import.meta.url);
 const PRIVATE_KEY_CONTAINER_MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
-function getWalletMinPoolSize(source, minPoolSize) {
-  return source.type === 'private-key' ? 0 : minPoolSize;
+function getWalletInitialPoolSize(source) {
+  // Initial creation uses a small pool for speed. SyncUtxos expands lazily.
+  return source.type === 'private-key' ? 0 : 10;
 }
 
 async function prunePrivateKeyPool(wallet, source) {
@@ -82,7 +83,7 @@ async function main() {
   for await (const chunk of process.stdin) chunks.push(chunk);
   const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
 
-  const { source, walletsDir, password, minPoolSize } = input;
+  const { source, walletsDir, password } = input;
 
   try {
     global.window = global;
@@ -122,7 +123,7 @@ async function main() {
     console.error('[worker] deriving addresses...');
     await w.Load({
       useP2p: false,
-      minPoolSize: getWalletMinPoolSize(source, minPoolSize),
+      minPoolSize: getWalletInitialPoolSize(source),
     });
     console.error('[worker] addresses derived');
     await prunePrivateKeyPool(w, source);

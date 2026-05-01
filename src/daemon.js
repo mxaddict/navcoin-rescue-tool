@@ -142,10 +142,13 @@ async function main() {
         // Create wallet in background (non-blocking).
         createImportedWallet(source, root)
           .then(() => {
-            console.log(`[daemon] wallet created, opening...`);
+            console.log(
+              `[daemon] wallet created (deriving addresses...), opening...`,
+            );
             return getNavWallet(root);
           })
           .then((navWallet) => {
+            console.log(`[daemon] opening wallet and syncing...`);
             openSourceWallet(source, root, navWallet).catch((err) => {
               console.log(`[daemon] failed to open wallet: ${err.message}`);
             });

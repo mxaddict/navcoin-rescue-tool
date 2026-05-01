@@ -103,9 +103,11 @@ CLI invocation should be `ntr` for short, frequent use.
   - daemon import persistence, duplicate rejection, and remove test
   - CLI smoke test for `ntr start`, `ntr status`, and `ntr stop`
   - CLI smoke test for `ntr import`, `ntr remove`, and per-source `status`
+  - initial GitHub Actions CI workflow for format and test checks
 - Next slice:
   - connect imported sources to per-source wallet database creation
-  - define `navcoin-js` integration boundary for mnemonic and private-key imports
+  - define `navcoin-js` integration boundary for mnemonic and private-key
+    imports
   - replace sync placeholders with real daemon-managed sync state
 - Deferred to later slices:
   - TUI default flow
@@ -116,6 +118,13 @@ CLI invocation should be `ntr` for short, frequent use.
 
 - Use GitHub Actions for CI.
 - CI should run automated tests on every relevant push and pull request.
+- Initial CI scaffold now exists in `.github/workflows/ci.yml` and currently:
+  - runs on push to `main`
+  - runs on pull requests
+  - runs on tags matching `v*`
+  - checks formatting with `npm run format:check`
+  - runs tests with `npm test`
+  - uses workflow concurrency to cancel older runs for the same ref
 - CI should build cross-platform artifacts for supported targets.
 - CI should upload build artifacts for normal pipeline runs so they can be
   downloaded from the workflow.

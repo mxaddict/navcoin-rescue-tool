@@ -1167,7 +1167,17 @@ export async function launchTui() {
 
         let label = '';
         if (syncing.length > 0) {
-          label = syncing.map((s) => `${s.id}: ${s.syncProgress}%`).join('  ');
+          label = syncing
+            .map((s) => {
+              const phase =
+                s.syncStatus === 'syncing-addresses'
+                  ? ', addr'
+                  : s.syncStatus === 'syncing-txs'
+                    ? ', txs'
+                    : '';
+              return `${s.id}: ${s.syncProgress}%${phase}`;
+            })
+            .join('  ');
         } else if (connecting.length > 0) {
           label = connecting.map((s) => `${s.id}: ${s.syncStatus}`).join('  ');
         }

@@ -735,28 +735,32 @@ export async function launchTui() {
     }
   }
 
-  // Tab completion — intercept at screen level with ignoreLocked so blessed
-  // doesn't consume Tab for focus cycling before we see it.
-  // Track the last completed value so repeated Tab presses cycle through matches.
+  // Tab completion — override _listener on the inputBox instance so we
+  // intercept Tab before blessed appends '\t' to the input value.
+  // (screen.key and inputBox.key don't fire — the textarea _listener consumes
+  // all keypresses while readInput is active.)
   let lastCompleted = null;
 
-  screen.key(['tab'], () => {
-    if (askDepth > 0) return; // don't interfere with ask() prompts
-    const current = inputBox.getValue();
-    // If the current value is the result of the last completion, cycle from it;
-    // otherwise start fresh from whatever the user typed.
-    const base = current === lastCompleted ? lastCompleted : current;
-    const completed = tabComplete(
-      base,
-      current === lastCompleted ? current : null,
-    );
-    if (completed) {
-      lastCompleted = completed;
-      inputBox.setValue(completed);
-      inputBox.focus();
-      screen.render();
+  const _origListener = inputBox._listener.bind(inputBox);
+  inputBox._listener = function (ch, key) {
+    if (key && key.name === 'tab') {
+      if (askDepth > 0) return; // don't interfere with ask() prompts
+      const current = inputBox.getValue();
+      const completed = tabComplete(
+        current,
+        current === lastCompleted ? current : null,
+      );
+      if (completed) {
+        lastCompleted = completed;
+        inputBox.setValue(completed);
+        screen.render();
+      }
+      return; // don't pass tab through to the original listener
     }
-  });
+    // Any non-tab key resets the completion cycle.
+    if (key && key.name !== 'tab') lastCompleted = null;
+    return _origListener(ch, key);
+  };
 
   // Reset cycle state when user types anything.
   inputBox.on('keypress', (ch, key) => {

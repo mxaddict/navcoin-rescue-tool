@@ -71,6 +71,17 @@ class Db extends events.EventEmitter {
   constructor() {
     super();
     this.keys = {};
+    this.closing = false;
+  }
+
+  ShouldIgnoreDbError(error) {
+    const message = error?.message || String(error || '');
+    return (
+      this.closing ||
+      message.includes('SQLITE_READONLY') ||
+      message.includes('DatabaseClosedError') ||
+      message.includes('TransactionInactiveError')
+    );
   }
 
   async Open(filename, secret, indexedDB, IDBKeyRange) {
@@ -99,6 +110,7 @@ class Db extends events.EventEmitter {
     }
 
     try {
+      this.closing = false;
       _dexie.default.dependencies.indexedDB = indexedDB || window.indexedDB;
       _dexie.default.dependencies.IDBKeyRange =
         IDBKeyRange || window.IDBKeyRange;
@@ -182,6 +194,8 @@ class Db extends events.EventEmitter {
   }
 
   Close() {
+    this.closing = true;
+    this.open = false;
     if (this.db) this.db.close();
     if (this.dbTx) this.dbTx.close();
     delete this.db;
@@ -215,9 +229,10 @@ class Db extends events.EventEmitter {
 
   async GetPoolSize(type, change) {
     if (!this.db) return;
+    const hasChangeFilter = change !== undefined;
     return await this.db.keys
       .where(
-        change
+        hasChangeFilter
           ? {
               type: type,
               used: 0,
@@ -446,14 +461,16 @@ class Db extends events.EventEmitter {
   }
 
   async SetStatusForScriptHash(s, st) {
-    if (!this.db) return;
+    if (!this.db || this.closing) return;
     await this.db.statuses
       .put({
         scriptHash: s,
         status: st,
       })
       .catch((e) => {
-        console.error('SetStatusForScriptHash error: ' + e.message);
+        if (!this.ShouldIgnoreDbError(e)) {
+          console.error('SetStatusForScriptHash error: ' + e.message);
+        }
       });
   }
 
@@ -732,7 +749,7 @@ class Db extends events.EventEmitter {
   }
 
   async MarkAsFetched(hash) {
-    if (!this.db) return;
+    if (!this.db || this.closing) return;
 
     try {
       await this.db.scriptHistories
@@ -743,9 +760,14 @@ class Db extends events.EventEmitter {
           fetched: 1,
         })
         .catch((e) => {
-          console.error('MarkAsFetched error: ' + e.message);
+          if (!this.ShouldIgnoreDbError(e)) {
+            console.error('MarkAsFetched error: ' + e.message);
+          }
         });
     } catch (e) {
+      if (!this.ShouldIgnoreDbError(e)) {
+        console.error('MarkAsFetched', e);
+      }
       return [];
     }
   }
@@ -905,7 +927,7 @@ class Db extends events.EventEmitter {
   }
 
   async SetTxHeight(hash, height, pos) {
-    if (!this.db) return;
+    if (!this.db || !this.dbTx || this.closing) return;
 
     try {
       await this.dbTx.txs
@@ -917,10 +939,14 @@ class Db extends events.EventEmitter {
           pos: pos,
         })
         .catch((e) => {
-          console.error('SetTxHeight error: ' + e.message);
+          if (!this.ShouldIgnoreDbError(e)) {
+            console.error('SetTxHeight error: ' + e.message);
+          }
         });
     } catch (e) {
-      console.log('SetTxHeight', e);
+      if (!this.ShouldIgnoreDbError(e)) {
+        console.log('SetTxHeight', e);
+      }
     }
   }
 
@@ -992,7 +1018,7 @@ class Db extends events.EventEmitter {
   }
 
   async AddTxCandidate(candidate, network) {
-    if (!this.dbTx) return;
+    if (!this.dbTx || this.closing) return;
 
     try {
       await this.dbTx.candidates
@@ -1006,7 +1032,9 @@ class Db extends events.EventEmitter {
             candidate.tx.inputs[0].outputIndex,
         })
         .catch((e) => {
-          console.error('AddTxCandidate error: ' + e.message);
+          if (!this.ShouldIgnoreDbError(e)) {
+            console.error('AddTxCandidate error: ' + e.message);
+          }
         });
       return true;
     } catch (e) {
@@ -1041,11 +1069,13 @@ class Db extends events.EventEmitter {
   }
 
   async WriteConsensusParameters(parameters) {
-    if (!this.db || !this.db.consensus) return;
+    if (!this.db || !this.db.consensus || this.closing) return;
 
     for (let id in parameters) {
       await this.db.consensus.put(parameters[id]).catch((e) => {
-        console.error('WriteConsensusParameters error: ' + e.message);
+        if (!this.ShouldIgnoreDbError(e)) {
+          console.error('WriteConsensusParameters error: ' + e.message);
+        }
       });
     }
 

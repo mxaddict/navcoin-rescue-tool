@@ -1,5 +1,5 @@
 import { getLayout } from './app-data.js';
-import { STATIC_WALLET_PASSWORD, RECOVERY_MIN_POOL_SIZE } from './constants.js';
+import { STATIC_WALLET_PASSWORD } from './constants.js';
 
 // Per-source wallet state held in daemon memory.
 // Not persisted - rebuilt on every daemon start.
@@ -35,6 +35,11 @@ function makeInitialState(sourceId) {
     wallet: null,
     syncStatus: 'opening',
     syncProgress: 0,
+    syncPhaseProgress: 0,
+    syncStageIndex: 0,
+    syncStageTotal: 1,
+    syncCurrent: 0,
+    syncTotal: 0,
     totalAddresses: 0,
     connected: false,
     server: null,
@@ -50,6 +55,9 @@ function makeInitialState(sourceId) {
     error: null,
     reconnectTimer: null,
     watchdog: null,
+    activeSyncPhase: 'utxo',
+    closing: false,
+    useUtxoOnlySync: true,
   };
 }
 
@@ -62,6 +70,11 @@ export function getAllSourceStates() {
     sourceId: s.sourceId,
     syncStatus: s.syncStatus,
     syncProgress: s.syncProgress,
+    syncPhaseProgress: s.syncPhaseProgress,
+    syncStageIndex: s.syncStageIndex,
+    syncStageTotal: s.syncStageTotal,
+    syncCurrent: s.syncCurrent,
+    syncTotal: s.syncTotal,
     connected: s.connected,
     server: s.server,
     connectingAt: s.connectingAt,
@@ -72,7 +85,26 @@ export function getAllSourceStates() {
 }
 
 function getSourceMinPoolSize(source) {
-  return source.type === 'private-key' ? 0 : RECOVERY_MIN_POOL_SIZE;
+  // Match wallet-worker: start small, then SyncUtxos expands lazily.
+  return source.type === 'private-key' ? 0 : 10;
+}
+
+function setHistorySyncStatus(state, phaseProgress = state.syncPhaseProgress) {
+  state.activeSyncPhase = 'history';
+  state.syncStatus = 'syncing-history';
+  state.syncStageIndex = 1;
+  state.syncStageTotal = 2;
+  state.syncPhaseProgress = phaseProgress;
+  state.syncProgress = Math.max(5, Math.round(phaseProgress / 2));
+}
+
+function setUtxoSyncStatus(state, phaseProgress = state.syncPhaseProgress) {
+  state.activeSyncPhase = 'utxo';
+  state.syncStatus = 'syncing-utxo';
+  state.syncStageIndex = 1;
+  state.syncStageTotal = 1;
+  state.syncPhaseProgress = phaseProgress;
+  state.syncProgress = Math.max(5, phaseProgress);
 }
 
 async function prunePrivateKeyPool(wallet, source) {
@@ -162,6 +194,8 @@ async function configureElectrumNodes(wallet) {
 function scheduleReconnect(source, state, navWallet) {
   clearTimeout(state.reconnectTimer);
   state.reconnectTimer = setTimeout(async () => {
+    if (state.closing) return;
+
     // Don't reconnect if already connected, syncing, synced, or closed.
     if (
       state.connected ||
@@ -215,6 +249,8 @@ export async function openSourceWallet(source, root, navWallet) {
   });
 
   wallet.on('disconnected', () => {
+    if (state.closing) return;
+
     state.connected = false;
     state.server = null;
     // Only reschedule reconnect if we were previously connected or syncing —
@@ -231,27 +267,46 @@ export async function openSourceWallet(source, root, navWallet) {
   });
 
   wallet.on('sync_started', () => {
-    state.syncStatus = 'syncing';
+    if (!state.useUtxoOnlySync && state.activeSyncPhase !== 'utxo') {
+      setHistorySyncStatus(state, 0);
+    }
   });
 
   wallet.on('bootstrap_started', () => {
-    state.syncStatus = 'syncing';
+    if (state.useUtxoOnlySync || state.activeSyncPhase === 'utxo') {
+      setUtxoSyncStatus(state, 0);
+      state.syncCurrent = 0;
+      state.syncTotal = 0;
+    } else {
+      setHistorySyncStatus(state, state.syncPhaseProgress);
+    }
   });
 
   wallet.on('sync_status', (progress) => {
-    state.syncProgress = progress;
-    state.syncStatus = 'syncing-txs';
+    if (!state.useUtxoOnlySync) {
+      setHistorySyncStatus(state, progress);
+    }
   });
 
   wallet.on('scripthash_progress', (index, total) => {
-    state.syncProgress = Math.round((index / total) * 100);
-    state.syncStatus = 'syncing-utxo';
+    setUtxoSyncStatus(state, Math.round((index / total) * 100));
+    state.syncCurrent = index;
+    state.syncTotal = total;
     state.totalAddresses = total;
   });
 
   wallet.on('sync_finished', async () => {
+    if (!state.useUtxoOnlySync && state.activeSyncPhase === 'history') {
+      setUtxoSyncStatus(state, 0);
+      return;
+    }
+
     state.syncStatus = 'synced';
     state.syncProgress = 100;
+    state.syncPhaseProgress = 100;
+    state.syncStageIndex = 1;
+    state.syncStageTotal = 1;
+    state.syncCurrent = state.syncTotal;
     await refreshAddressesAndBalance(source.id, wallet);
   });
 
@@ -264,6 +319,8 @@ export async function openSourceWallet(source, root, navWallet) {
   });
 
   wallet.on('no_servers_available', () => {
+    if (state.closing) return;
+
     state.syncStatus = 'no-servers';
     state.connected = false;
     state.server = null;
@@ -272,6 +329,8 @@ export async function openSourceWallet(source, root, navWallet) {
   });
 
   wallet.on('db_load_error', (error) => {
+    if (state.closing) return;
+
     clearTimeout(state.reconnectTimer);
     state.syncStatus = 'error';
     state.error = String(error);
@@ -300,6 +359,7 @@ export async function openSourceWallet(source, root, navWallet) {
     await wallet.Load({
       useP2p: false,
       minPoolSize: getSourceMinPoolSize(source),
+      skipInitialHistorySync: true,
     });
     await prunePrivateKeyPool(wallet, source);
     await configureElectrumNodes(wallet);
@@ -309,9 +369,11 @@ export async function openSourceWallet(source, root, navWallet) {
 
     state.syncStatus = 'connecting';
     state.connectingAt = Date.now();
+    state.activeSyncPhase = 'utxo';
     await wallet.Connect();
 
-    // Trigger UTXO fetch instead of full sync - much faster for sweep tool.
+    // Rescue mode skips full history sync and hydrates spendable UTXOs only.
+    state.activeSyncPhase = 'utxo';
     wallet.SyncUtxos().catch(() => {});
   } catch (error) {
     state.syncStatus = 'error';
@@ -360,6 +422,7 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
 export async function closeSourceWallet(sourceId) {
   const state = walletState.get(sourceId);
   if (!state) return;
+  state.closing = true;
 
   clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
@@ -383,6 +446,9 @@ export async function closeSourceWallet(sourceId) {
   } catch {
     // Ignore close errors.
   }
+
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = null;
 
   state.wallet = null;
   walletState.delete(sourceId);

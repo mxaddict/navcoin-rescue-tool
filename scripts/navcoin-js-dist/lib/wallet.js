@@ -257,6 +257,7 @@ class WalletFile extends events.EventEmitter {
     this.daoConsultations = {};
     this.daoProposals = {};
     this.minPoolSize = options.minPoolSize;
+    this.skipInitialHistorySync = options.skipInitialHistorySync || false;
     this.useP2p = options.useP2p === undefined ? true : options.useP2p;
     if (!this.db.open) throw new Error('DB did not load.');
     let network = await this.db.GetValue('network');
@@ -430,7 +431,7 @@ class WalletFile extends events.EventEmitter {
     if (!mk) return;
     let filled = 0;
 
-    while ((await this.GetPoolSize(_address_types.default.NAV)) < count) {
+    while ((await this.GetPoolSize(_address_types.default.NAV, 0)) < count) {
       filled++;
       await this.NavCreateAddress(spendingPassword);
     }
@@ -987,11 +988,16 @@ class WalletFile extends events.EventEmitter {
         }
       });
       if (!this.client || this.client !== client) return;
-      await this.Sync();
-      if (!this.client || this.client !== client) return;
-      client.subscribe.on('blockchain.scripthash.subscribe', async (event) => {
-        await this.ReceivedScriptHashStatus(event[0], event[1]);
-      });
+      if (!this.skipInitialHistorySync) {
+        await this.Sync();
+        if (!this.client || this.client !== client) return;
+        client.subscribe.on(
+          'blockchain.scripthash.subscribe',
+          async (event) => {
+            await this.ReceivedScriptHashStatus(event[0], event[1]);
+          },
+        );
+      }
     });
     await this.client.connect('navcoin-js', '1.5');
     if (this.client.status == 0) return false;
@@ -1061,6 +1067,7 @@ class WalletFile extends events.EventEmitter {
     }
 
     this.emit('bootstrap_started');
+    await this.db.ZapWalletTxes();
 
     const BATCH_SIZE = 10;
     const GAP_LIMIT = 100;
@@ -1079,7 +1086,7 @@ class WalletFile extends events.EventEmitter {
       let addresses = (await this.db.GetNavReceivingAddresses(true))
         .filter((a) => !a.change)
         .sort((a, b) => getAddressIndex(a) - getAddressIndex(b));
-      const currentPoolSize = addresses.length;
+      let currentPoolSize = addresses.length;
 
       if (checkedCount >= currentPoolSize) {
         const needed = checkedCount + BATCH_SIZE;
@@ -1087,6 +1094,12 @@ class WalletFile extends events.EventEmitter {
         addresses = (await this.db.GetNavReceivingAddresses(true))
           .filter((a) => !a.change)
           .sort((a, b) => getAddressIndex(a) - getAddressIndex(b));
+        currentPoolSize = addresses.length;
+        this.emit(
+          'scripthash_progress',
+          Math.min(checkedCount + 1, currentPoolSize),
+          currentPoolSize,
+        );
       }
 
       const batch = addresses.slice(checkedCount, checkedCount + BATCH_SIZE);
@@ -1150,11 +1163,7 @@ class WalletFile extends events.EventEmitter {
       }
 
       checkedCount += batch.length;
-      this.emit(
-        'scripthash_progress',
-        checkedCount,
-        Math.max(currentPoolSize, lastUsedIndex + GAP_LIMIT + 1),
-      );
+      this.emit('scripthash_progress', checkedCount, currentPoolSize);
 
       // Stop when we've checked GAP_LIMIT addresses past the last used one.
       if (checkedCount - lastUsedIndex >= GAP_LIMIT) {
@@ -1162,12 +1171,25 @@ class WalletFile extends events.EventEmitter {
       }
     }
 
+    const uniqueTxids = [...new Set(totalUtxos.map((utxo) => utxo.tx_hash))];
+
+    for (const txid of uniqueTxids) {
+      const utxo = totalUtxos.find((item) => item.tx_hash === txid);
+      await this.GetTx(txid, undefined, utxo?.height, false);
+    }
+
     for (const utxo of totalUtxos) {
-      await this.db.AddTxCandidate(
-        utxo.tx_hash,
+      const tx = await this.db.GetTx(utxo.tx_hash);
+      if (!tx) continue;
+
+      const decodedTx = _bitcoreLib.default.Transaction(tx.hex);
+      const output = decodedTx.outputs[utxo.tx_pos];
+      if (!output) continue;
+
+      await this.AddOutput(
+        utxo.tx_hash + ':' + utxo.tx_pos,
+        output,
         utxo.height,
-        utxo.value,
-        utxo.scriptHash,
       );
     }
 

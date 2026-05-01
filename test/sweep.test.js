@@ -41,6 +41,7 @@ class MockWalletFile extends EventEmitter {
       staked: { confirmed: 0, pending: 0 },
     };
     this._syncOnConnect = opts._syncOnConnect ?? true;
+    this._syncUtxos = opts._syncUtxos ?? true;
     this._txResult = opts._txResult ?? {
       tx: 'deadbeef',
       fee: 10000,
@@ -54,10 +55,6 @@ class MockWalletFile extends EventEmitter {
 
   async Connect() {
     this.emit('connected', 'mock-server:40004');
-    if (this._syncOnConnect) {
-      this.emit('sync_started');
-      this.emit('sync_finished');
-    }
   }
 
   async NavReceivingAddresses() {
@@ -89,6 +86,10 @@ class MockWalletFile extends EventEmitter {
   Disconnect() {}
   CloseDb() {}
   SyncUtxos() {
+    if (!this._syncUtxos) return Promise.resolve();
+    this.emit('bootstrap_started');
+    this.emit('scripthash_progress', 10, 10);
+    this.emit('sync_finished');
     return Promise.resolve();
   }
 }
@@ -131,7 +132,10 @@ test('prepareSweep blocks when source not synced', async () => {
     const source = { id: 'src-unsynced', type: 'mnemonic', label: 'Test' };
 
     // Use a wallet that never fires sync_finished.
-    const navWallet = makeNavWallet({ _syncOnConnect: false });
+    const navWallet = makeNavWallet({
+      _syncOnConnect: false,
+      _syncUtxos: false,
+    });
     await openSourceWallet(source, root, navWallet);
     await new Promise((resolve) => setTimeout(resolve, 50));
 

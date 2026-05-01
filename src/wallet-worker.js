@@ -4,7 +4,7 @@
  * Wallet creation worker — runs in a child process so wallet.Load() cannot
  * block the daemon's HTTP server or the main process event loop.
  *
- * Input:  JSON on stdin  { source, walletsDir, password, minPoolSize }
+ * Input:  JSON on stdin  { source, walletsDir, password }
  * Output: JSON on stdout { ok: true, storage } | { ok: false, error }
  */
 

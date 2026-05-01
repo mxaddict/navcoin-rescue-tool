@@ -199,6 +199,39 @@ function makeSep(C) {
   return C.muted('─'.repeat(80));
 }
 
+function formatSyncLabel(src) {
+  if (src.syncStatus === 'syncing-utxo') {
+    const current = src.syncCurrent || 0;
+    const total = src.syncTotal || src.totalAddresses || 0;
+    if (total > 0) return `utxo (${current}/${total} addr)`;
+    return 'utxo';
+  }
+
+  if (
+    src.syncStatus === 'syncing-history' ||
+    src.syncStatus === 'syncing' ||
+    src.syncStatus === 'syncing-addresses' ||
+    src.syncStatus === 'syncing-txs'
+  ) {
+    const phase =
+      src.syncStatus === 'syncing-history'
+        ? 'history'
+        : src.syncStatus === 'syncing-addresses'
+          ? 'addr'
+          : src.syncStatus === 'syncing-txs'
+            ? 'txs'
+            : 'syncing';
+    return `${phase} (${src.syncProgress}%)`;
+  }
+
+  if (src.syncStatus === 'connecting' && src.connectingAt) {
+    const secs = Math.floor((Date.now() - src.connectingAt) / 1000);
+    return `connecting (${secs}s)`;
+  }
+
+  return src.syncStatus;
+}
+
 function renderHelp(C) {
   const SEP = makeSep(C);
   return [
@@ -268,7 +301,8 @@ function renderStatus(C, data) {
     const syncColor =
       src.syncStatus === 'synced'
         ? C.teal
-        : src.syncStatus === 'syncing' ||
+        : src.syncStatus === 'syncing-history' ||
+            src.syncStatus === 'syncing' ||
             src.syncStatus === 'syncing-addresses' ||
             src.syncStatus === 'syncing-txs' ||
             src.syncStatus === 'syncing-utxo' ||
@@ -280,26 +314,7 @@ function renderStatus(C, data) {
             ? C.pink
             : C.muted;
 
-    let syncLabel = src.syncStatus;
-    if (
-      src.syncStatus === 'syncing' ||
-      src.syncStatus === 'syncing-addresses' ||
-      src.syncStatus === 'syncing-txs'
-    ) {
-      const phase =
-        src.syncStatus === 'syncing-addresses'
-          ? 'addr'
-          : src.syncStatus === 'syncing-txs'
-            ? 'txs'
-            : src.syncStatus === 'syncing-utxo'
-              ? 'utxo'
-              : '';
-      const phaseLabel = phase ? `, ${phase}` : '';
-      syncLabel = `syncing (${src.syncProgress}%${phaseLabel})`;
-    } else if (src.syncStatus === 'connecting' && src.connectingAt) {
-      const secs = Math.floor((Date.now() - src.connectingAt) / 1000);
-      syncLabel = `connecting (${secs}s)`;
-    }
+    const syncLabel = formatSyncLabel(src);
 
     const serverLabel = src.server ? C.muted(`  via ${src.server}`) : '';
     lines.push(`  ${C.bold('Sync:')}    ${syncColor(syncLabel)}${serverLabel}`);
@@ -311,38 +326,22 @@ function renderStatus(C, data) {
     const navConf = navStr(src.balance.nav.confirmed);
     const navPend = navStr(src.balance.nav.pending);
     const staked = navStr(src.balance.staked.confirmed);
+    const derived =
+      src.derivedCount ?? src.addresses.filter((a) => !a.isChange).length;
+    const change =
+      src.changeCount ?? src.addresses.filter((a) => a.isChange).length;
+    const used = src.usedCount ?? src.addresses.filter((a) => a.used).length;
     lines.push(
       `  ${C.bold('Balance:')} ${C.cyan(navConf)} NAV  ` +
         `${C.muted(navPend + ' pending')}  ` +
         `${C.indigo(staked)} staked`,
     );
+    lines.push(
+      `  ${C.bold('Addresses:')} ${derived} derived, ${change} change, ${used} used`,
+    );
 
     totalNav += src.balance.nav.confirmed;
     totalStaked += src.balance.staked.confirmed;
-
-    const usedAddrs = src.addresses.filter((a) => a.used);
-    const derived =
-      src.derivedCount ?? src.addresses.filter((a) => !a.isChange).length;
-    const change =
-      src.changeCount ?? src.addresses.filter((a) => a.isChange).length;
-    const used = src.usedCount ?? usedAddrs.length;
-    if (usedAddrs.length > 0) {
-      lines.push(
-        `  ${C.bold('Addresses')} (${derived} derived, ${change} change, ${used} used):`,
-      );
-      for (const addr of usedAddrs) {
-        lines.push(`    ${C.magenta(addr.address)}`);
-      }
-    } else if (src.addresses.length > 0) {
-      const derived =
-        src.derivedCount ?? src.addresses.filter((a) => !a.isChange).length;
-      const change =
-        src.changeCount ?? src.addresses.filter((a) => a.isChange).length;
-      const used = src.usedCount ?? src.addresses.filter((a) => a.used).length;
-      lines.push(
-        `  ${C.bold('Addresses')} (${derived} derived, ${change} change, ${used} used)`,
-      );
-    }
   }
 
   lines.push(SEP);
@@ -1144,10 +1143,11 @@ export async function launchTui() {
         'opening',
         'connecting',
         'connected',
+        'syncing-history',
         'syncing',
         'syncing-addresses',
         'syncing-txs',
-        'no-servers',
+        'syncing-utxo',
       ]);
 
       const allSettled =
@@ -1161,6 +1161,7 @@ export async function launchTui() {
       if (anyInProgress) {
         const syncing = data.sources.filter((s) =>
           [
+            'syncing-history',
             'syncing',
             'syncing-addresses',
             'syncing-txs',
@@ -1175,15 +1176,7 @@ export async function launchTui() {
         if (syncing.length > 0) {
           label = syncing
             .map((s) => {
-              const phase =
-                s.syncStatus === 'syncing-addresses'
-                  ? ', addr'
-                  : s.syncStatus === 'syncing-txs'
-                    ? ', txs'
-                    : s.syncStatus === 'syncing-utxo'
-                      ? ', utxo'
-                      : '';
-              return `syncing (${s.syncProgress}%${phase})`;
+              return formatSyncLabel(s);
             })
             .join('  ');
         } else if (connecting.length > 0) {

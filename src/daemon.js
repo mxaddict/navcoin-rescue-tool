@@ -86,7 +86,53 @@ async function main() {
 
   console.log(`[daemon] log file: ${layout.daemonLogFile}`);
 
+  let shuttingDown = false;
+  let shutdownPromise = null;
+  const sockets = new Set();
+
+  async function performShutdown() {
+    if (shutdownPromise) return shutdownPromise;
+
+    shuttingDown = true;
+    shutdownPromise = (async () => {
+      const forceExitTimer = setTimeout(() => {
+        for (const socket of sockets) {
+          try {
+            socket.destroy();
+          } catch {}
+        }
+        process.exit(0);
+      }, 5000);
+      forceExitTimer.unref();
+
+      try {
+        await closeAllWallets();
+      } catch {}
+
+      try {
+        await writeDaemonState({ status: 'stopped', pid: null }, root);
+      } catch {}
+
+      clearTimeout(forceExitTimer);
+      process.exit(0);
+    })();
+
+    try {
+      server.close(() => {
+        shutdownPromise.catch(() => {});
+      });
+      server.closeIdleConnections?.();
+    } catch {}
+
+    return shutdownPromise;
+  }
+
   const server = http.createServer(async (request, response) => {
+    if (shuttingDown && request.url !== '/daemon/stop') {
+      sendJson(response, 503, { error: 'Daemon is shutting down' });
+      return;
+    }
+
     if (request.headers.authorization !== authCookie) {
       sendJson(response, 401, { error: 'Unauthorized' });
       return;
@@ -102,6 +148,11 @@ async function main() {
           ...source,
           syncStatus: live?.syncStatus ?? source.syncStatus,
           syncProgress: live?.syncProgress ?? 0,
+          syncPhaseProgress: live?.syncPhaseProgress ?? 0,
+          syncStageIndex: live?.syncStageIndex ?? 0,
+          syncStageTotal: live?.syncStageTotal ?? 2,
+          syncCurrent: live?.syncCurrent ?? 0,
+          syncTotal: live?.syncTotal ?? 0,
           totalAddresses: live?.totalAddresses ?? 0,
           connected: live?.connected ?? false,
           server: live?.server ?? null,
@@ -230,11 +281,7 @@ async function main() {
 
     if (request.method === 'POST' && request.url === '/daemon/stop') {
       sendJson(response, 200, { ok: true });
-      server.close(async () => {
-        await closeAllWallets();
-        await writeDaemonState({ status: 'stopped', pid: null }, root);
-        process.exit(0);
-      });
+      void performShutdown();
       return;
     }
 
@@ -259,6 +306,13 @@ async function main() {
     process.exit(1);
   });
 
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.on('close', () => {
+      sockets.delete(socket);
+    });
+  });
+
   server.listen(DAEMON_PORT, DAEMON_HOST, async () => {
     await writeDaemonState(
       {
@@ -276,14 +330,11 @@ async function main() {
   });
 
   const shutdown = async (signal) => {
+    if (shuttingDown) return;
     logStream.write(
       `${new Date().toISOString()} daemon stopping signal=${signal}\n`,
     );
-    server.close(async () => {
-      await closeAllWallets();
-      await writeDaemonState({ status: 'stopped', pid: null }, root);
-      process.exit(0);
-    });
+    void performShutdown();
   };
 
   process.on('SIGINT', shutdown);

@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { getAppDataRoot, getLayout } from './app-data.js';
-import { STATIC_WALLET_PASSWORD, RECOVERY_MIN_POOL_SIZE } from './constants.js';
+import { STATIC_WALLET_PASSWORD } from './constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -134,7 +134,6 @@ export async function createImportedWallet(
         source,
         walletsDir: layout.walletsDir,
         password: STATIC_WALLET_PASSWORD,
-        minPoolSize: RECOVERY_MIN_POOL_SIZE,
       }),
     );
     child.stdin.end();

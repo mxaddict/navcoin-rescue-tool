@@ -143,21 +143,22 @@ async function handleStatus() {
         ? `${source.type}:${source.walletType}`
         : source.type;
       const syncingPhases = [
+        'syncing-history',
         'syncing',
         'syncing-addresses',
         'syncing-txs',
         'syncing-utxo',
       ];
-      const phase =
-        source.syncStatus === 'syncing-addresses'
-          ? 'addr'
-          : source.syncStatus === 'syncing-txs'
-            ? 'txs'
-            : source.syncStatus === 'syncing-utxo'
-              ? 'utxo'
-              : '';
       const syncLabel = syncingPhases.includes(source.syncStatus)
-        ? `syncing(${source.syncProgress}%${phase ? ',' + phase : ''})`
+        ? source.syncStatus === 'syncing-utxo'
+          ? `utxo(${source.syncCurrent ?? 0}/${source.syncTotal || source.totalAddresses || 0} addr)`
+          : source.syncStatus === 'syncing-history'
+            ? `history(${source.syncProgress}%)`
+            : source.syncStatus === 'syncing-addresses'
+              ? `addr(${source.syncProgress}%)`
+              : source.syncStatus === 'syncing-txs'
+                ? `txs(${source.syncProgress}%)`
+                : `syncing(${source.syncProgress}%)`
         : source.syncStatus;
       const serverLabel = source.server ? ` server=${source.server}` : '';
 
@@ -177,15 +178,7 @@ async function handleStatus() {
         `  Balance: ${navConfirmed} NAV confirmed  ${navPending} NAV pending  ${staked} NAV staked\n`,
       );
 
-      const usedAddrs = source.addresses.filter((a) => a.used);
-      if (usedAddrs.length > 0) {
-        process.stdout.write(
-          `  Addresses (${usedAddrs.length} used of ${source.addresses.length}):\n`,
-        );
-        for (const addr of usedAddrs) {
-          process.stdout.write(`    ${addr.address}\n`);
-        }
-      } else if (source.addresses.length > 0) {
+      if (source.addresses.length > 0) {
         const derived =
           source.derivedCount ??
           source.addresses.filter((a) => !a.isChange).length;

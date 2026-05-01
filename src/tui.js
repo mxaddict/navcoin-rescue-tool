@@ -585,12 +585,12 @@ export async function launchTui() {
   });
 
   // ---- Main output box --------------------------------------------------
-  // top=2 (header + headerSep), bottom=3 (warnBox + inputSep + inputBox)
+  // top=2 (header + headerSep), bottom=4 (hintBox + warnBox + inputSep + inputBox)
   const output = blessed.log({
     top: 2,
     left: 0,
     width: '100%',
-    height: '100%-5',
+    height: '100%-6',
     scrollable: true,
     alwaysScroll: true,
     scrollbar: {
@@ -601,7 +601,17 @@ export async function launchTui() {
     wrap: true,
   });
 
-  // ---- Warning row — shown above the separator when Ctrl+C pressed once --
+  // ---- Hint row — tab completion matches shown here ---------------------
+  const hintBox = blessed.box({
+    bottom: 3,
+    left: 0,
+    width: '100%',
+    height: 1,
+    content: '',
+    tags: false,
+  });
+
+  // ---- Warning row — shown when Ctrl+C pressed once ---------------------
   const warnBox = blessed.box({
     bottom: 2,
     left: 0,
@@ -633,6 +643,7 @@ export async function launchTui() {
   container.append(header);
   container.append(headerSep);
   container.append(output);
+  container.append(hintBox);
   container.append(warnBox);
   container.append(inputSep);
   container.append(inputBox);
@@ -649,7 +660,8 @@ export async function launchTui() {
   function ask(question) {
     return new Promise((resolve) => {
       askDepth += 1;
-      // Clear any pending Ctrl+C warning when a prompt takes over.
+      // Clear hints and any pending Ctrl+C warning when a prompt takes over.
+      clearHints();
       if (ctrlCPending) {
         ctrlCPending = false;
         clearTimeout(ctrlCTimer);
@@ -740,34 +752,53 @@ export async function launchTui() {
   // (screen.key and inputBox.key don't fire — the textarea _listener consumes
   // all keypresses while readInput is active.)
   let lastCompleted = null;
+  let completionBase = null; // the typed text that started this completion cycle
+
+  function showHints(matches, active) {
+    if (matches.length === 0) {
+      hintBox.setContent('');
+      return;
+    }
+    const parts = matches.map((m) => (m === active ? C.cyan(m) : C.muted(m)));
+    hintBox.setContent('  ' + parts.join(C.muted('  │  ')));
+  }
+
+  function clearHints() {
+    lastCompleted = null;
+    completionBase = null;
+    hintBox.setContent('');
+  }
 
   const _origListener = inputBox._listener.bind(inputBox);
   inputBox._listener = function (ch, key) {
     if (key && key.name === 'tab') {
       if (askDepth > 0) return; // don't interfere with ask() prompts
+
       const current = inputBox.getValue();
-      const completed = tabComplete(
-        current,
-        current === lastCompleted ? current : null,
-      );
-      if (completed) {
-        lastCompleted = completed;
-        inputBox.setValue(completed);
-        screen.render();
+
+      // First Tab press — lock in the base typed text.
+      if (!completionBase) {
+        completionBase = current;
       }
+
+      const matches = tabMatches(completionBase);
+      if (matches.length === 0) return;
+
+      // Cycle: find index of current in matches, advance by 1.
+      const idx = matches.indexOf(lastCompleted);
+      const next = matches[(idx + 1) % matches.length];
+
+      lastCompleted = next;
+      inputBox.setValue(next);
+      showHints(matches, next);
+      screen.render();
       return; // don't pass tab through to the original listener
     }
-    // Any non-tab key resets the completion cycle.
-    if (key && key.name !== 'tab') lastCompleted = null;
+
+    // Any non-tab key resets the completion cycle and clears hints.
+    clearHints();
     return _origListener(ch, key);
   };
-
-  // Reset cycle state when user types anything.
-  inputBox.on('keypress', (ch, key) => {
-    if (key && key.name !== 'tab') {
-      lastCompleted = null;
-    }
-  });
 
   // Enter submits — routes to active ask() or dispatches a command.
   inputBox.key('enter', () => {
@@ -780,6 +811,7 @@ export async function launchTui() {
 
     if (dispatching) return;
     dispatching = true;
+    clearHints();
     inputBox.setValue('');
     screen.render();
 

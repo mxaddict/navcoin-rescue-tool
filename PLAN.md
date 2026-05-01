@@ -83,72 +83,46 @@ CLI invocation should be `ntr` for short, frequent use.
 
 ## Current Progress
 
-- Completed: initial phase 1 scaffold.
+- Completed core recovery workflow in CLI, daemon, and TUI.
 - Implemented in repo:
   - Node project with `ntr` and `ntr-gui` executables
   - app-data path resolution for Linux, macOS, and Windows
   - initial on-disk layout bootstrap for `daemon.json`, `auth.cookie`,
     `sources.json`, `wallets/`, and `logs/`
   - long-lived localhost daemon bound to `127.0.0.1:46117`
-  - auth-cookie protected `GET /status`
-  - auth-cookie protected `POST /import`
-  - auth-cookie protected `POST /remove`
-  - auth-cookie protected `POST /daemon/stop`
-  - `ntr start`, `ntr status`, and `ntr stop` wired to daemon lifecycle
+  - auth-cookie protected `GET /status`, `POST /import`, `POST /remove`,
+    `POST /purge`, `POST /sweep/prepare`, `POST /sweep/confirm`, and
+    `POST /daemon/stop`
   - isolated `navcoin-js` adapter boundary for source wallet creation
-  - `ntr import mnemonic` and `ntr import private-key` wallet-backed imports
-  - `ntr remove <source-id>` source removal flow
-  - per-source persisted registry with fingerprint-based duplicate detection
-  - per-source wallet DB files stored under `wallets/`
-  - richer `status` output with source ids, labels, types, and wallet info
-  - repo `.gitignore` for dependencies, local artifacts, and scratch app data
+  - child-process wallet creation so large recovery imports do not block the
+    daemon event loop
+  - mnemonic and private-key imports with fingerprint-based duplicate detection
+  - source removal and full purge of imported wallet data
+  - per-source persisted registry with wallet DB files stored under `wallets/`
+  - source ids derived from fingerprints; labels removed from the product
+  - live per-source sync state, balances, connected server, and address tracking
+  - `ntr status` for compact daemon/source status and used-address reporting
+  - `ntr show` for full derived/imported address dumps per source
+  - `ntr sweep <address>` with prepare/confirm flow and exact phrase
+    `SEND MY COINS`
+  - default TUI launched by `ntr` with auto-start, tab completion, scrollback,
+    interactive import/remove/sweep/purge flows, and periodic refresh
+  - `xterm-256color` terminal override to suppress Alacritty terminfo errors
+  - local `postinstall` patching of `navcoin-js` until npm publishes the
+    upstream reconnect fix
+- Current operational notes:
+  - recovery imports use a larger address pool (`RECOVERY_MIN_POOL_SIZE = 100`)
+    to improve legacy wallet discovery coverage
+  - `status` is intentionally compact; `show` is the full address view
+  - the tool remains mainnet-only
 - Verified:
   - unit tests for app-data path resolution and bootstrap
-  - daemon auth and stop lifecycle test
-  - daemon import persistence, duplicate rejection, and remove test
-  - CLI smoke test for `ntr start`, `ntr status`, and `ntr stop`
-  - CLI smoke test for `ntr import`, `ntr remove`, and per-source `status`
-  - initial GitHub Actions CI workflow for format and test checks
+  - daemon auth and stop lifecycle test coverage
+  - daemon import persistence, duplicate rejection, and remove test coverage
+  - sweep prepare/confirm coverage including zero-balance and broadcast errors
+  - wallet-manager sync/address/balance tracking coverage
+  - GitHub Actions CI workflow for format and test checks
   - real `navcoin-js` wallet DB creation for imported sources
-- Completed: sync state, address, and balance reporting.
-- Implemented:
-  - `src/wallet-manager.js` — in-memory per-source wallet state tracker
-  - daemon reopens all registered source wallets on start
-  - per-source `syncStatus`, `syncProgress`, `connected`, `server`, `addresses`,
-    `balance` in `GET /status`
-  - `ntr status` renders per-source addresses and NAV/staked balances
-  - wallet-manager unit tests with mocked wallet
-- Completed: sweep prepare and confirm flow.
-- Implemented:
-  - `prepareSweep()` in `wallet-manager.js` — validates all sources are fully
-    synced, returns `{ totalNav, sources[] }` preview
-  - `executeSweep(destination)` in `wallet-manager.js` — calls
-    `NavCreateTransaction` + `SendTransaction` per source with non-zero balance
-  - `POST /sweep/prepare` daemon endpoint — returns preview or 400 with reason
-  - `POST /sweep/confirm` daemon endpoint — validates `destination` +
-    `confirmPhrase === 'SEND MY COINS'`, re-validates sync, executes sweep
-  - `sweepPrepare` and `sweepConfirm` in `daemon-client.js`
-  - `ntr sweep <address>` — 4-step interactive flow: prepare → re-enter
-    destination → type `SEND MY COINS` → broadcast; aborts on any mismatch
-  - 6 sweep unit tests covering prepare guards, execute path, zero-balance skip,
-    broadcast error handling
-- Completed: TUI default flow.
-- Implemented:
-  - `src/tui.js` — blessed + chalk TUI launched by `ntr` with no arguments
-  - terminal background detection via OSC 11 query before blessed initialises
-  - WCAG luminance check selects dark or light Navio brand palette automatically
-  - layout: header bar, separator, scrollable output, warn row, input separator,
-    command input — all inside a 1-cell padded container
-  - tab completion for all commands
-  - double Ctrl+C to quit with pink warning on first press
-  - `status`, `import mnemonic`, `import private-key`, `remove`, `sweep`
-    commands all wired with multi-step `ask()` prompts
-  - `import private-key` accepts multiple keys, one at a time, blank to finish
-  - `remove` shows source list before asking for ID
-  - auto-starts daemon if not running, waits up to 5s
-  - 5s periodic status poll — auto-refreshes output when idle and state changes,
-    updates header with sync progress or synced indicator
-  - `xterm-256color` terminal override to suppress Alacritty terminfo errors
 - Next slice:
   - Electron GUI (`ntr-gui`)
 - Deferred to later slices:
@@ -249,7 +223,6 @@ private-key recovery flows instead of adding `wallet.dat` ingestion.
 ### Daemon/App Metadata Stored By `ntr`
 
 - source registry
-- source ids and labels
 - mapping from source ids to wallet database names
 - daemon runtime metadata
 - daemon auth cookie metadata
@@ -414,18 +387,21 @@ Notes:
   reliable enough to support the intended workflow.
 - `ntr import`, `ntr remove`, `ntr status`, and `ntr sweep` require the daemon
   to already be running and should error clearly if it is not.
+- `ntr show` should print the full derived/imported address list for each source.
 - `ntr import` should support mnemonic first, with wallet type selection for
   `navcoin-core`, `navcash`, `next`, `navpay`, or `navcoin-js-v1`.
 - `ntr remove` should remove one imported source from daemon-managed state.
-- `ntr status` should be the full human-readable report and include:
+- `ntr status` should be the compact human-readable report and include:
   - every imported source
-  - every derived or imported address
-  - every address balance
-  - addresses shown regardless of whether balance is zero
   - per-source sync state
   - whether each source is caught up to current known network head
   - total confirmed, unconfirmed, staked, and sweepable balances
   - current connected server and last sync information
+- - only used addresses when present, otherwise a compact derived-address count
+- `ntr show` should be the full address report and include:
+  - every imported source
+  - every derived or imported address
+  - addresses shown regardless of whether they have been used yet
 - `ntr sweep <address>` should always require interactive confirmation.
 
 ## Brand Colors

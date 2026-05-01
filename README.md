@@ -17,7 +17,9 @@ What works now:
 - mnemonic and private-key import backed by `navcoin-js`
 - source removal and duplicate-source rejection
 - live Electrum sync with per-source address and balance reporting
+- compact status output via `status` and full per-source address dumps via `show`
 - sweep to a destination address with two-step confirmation (`ntr sweep <address>`)
+- purge of imported wallet data via `ntr purge`
 
 What does not work yet:
 
@@ -72,6 +74,7 @@ The TUI auto-starts the daemon if it is not already running. Commands:
 | Command              | Description                                                |
 | -------------------- | ---------------------------------------------------------- |
 | `status`             | Show daemon and per-source sync, address, and balance info |
+| `show`               | Show all derived/imported addresses for each source        |
 | `import mnemonic`    | Import a mnemonic source interactively                     |
 | `import private-key` | Import one or more WIF private keys interactively          |
 | `remove`             | Remove an imported source                                  |
@@ -97,6 +100,12 @@ Show daemon and source status:
 
 ```bash
 ntr status
+```
+
+Show all derived or imported addresses for each source:
+
+```bash
+ntr show
 ```
 
 Stop the daemon:
@@ -176,6 +185,8 @@ Layout:
 Near-term:
 
 1. Electron GUI client (`ntr-gui`)
+2. Remove the temporary `navcoin-js` postinstall patch after an upstream npm
+   release includes the reconnect fix
 
 Longer-term:
 

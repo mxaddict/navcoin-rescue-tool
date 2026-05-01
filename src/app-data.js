@@ -55,6 +55,31 @@ async function ensureFile(filePath, content, mode) {
   }
 }
 
+export async function writeJsonFileAtomic(filePath, value) {
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`);
+  await fs.rename(tempPath, filePath);
+}
+
+async function readJsonFileWithRetry(filePath, attempts = 3) {
+  let lastError;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return JSON.parse(await fs.readFile(filePath, 'utf8'));
+    } catch (error) {
+      lastError = error;
+      if (error instanceof SyntaxError && attempt < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError;
+}
+
 export async function bootstrapAppData(root = getAppDataRoot()) {
   const layout = getLayout(root);
   const now = new Date().toISOString();
@@ -109,7 +134,7 @@ export async function readAuthCookie(root = getAppDataRoot()) {
 export async function writeDaemonState(partialState, root = getAppDataRoot()) {
   const layout = getLayout(root);
   const current = (await pathExists(layout.daemonFile))
-    ? JSON.parse(await fs.readFile(layout.daemonFile, 'utf8'))
+    ? await readJsonFileWithRetry(layout.daemonFile)
     : {
         host: DAEMON_HOST,
         port: DAEMON_PORT,
@@ -122,23 +147,20 @@ export async function writeDaemonState(partialState, root = getAppDataRoot()) {
     updatedAt: new Date().toISOString(),
   };
 
-  await fs.writeFile(
-    layout.daemonFile,
-    `${JSON.stringify(nextState, null, 2)}\n`,
-  );
+  await writeJsonFileAtomic(layout.daemonFile, nextState);
   return nextState;
 }
 
 export async function readStatus(root = getAppDataRoot()) {
   const layout = getLayout(root);
-  const [daemonRaw, sourcesRaw] = await Promise.all([
-    fs.readFile(layout.daemonFile, 'utf8'),
-    fs.readFile(layout.sourcesFile, 'utf8'),
+  const [daemon, sources] = await Promise.all([
+    readJsonFileWithRetry(layout.daemonFile),
+    readJsonFileWithRetry(layout.sourcesFile),
   ]);
 
   return {
     layout,
-    daemon: JSON.parse(daemonRaw),
-    sources: JSON.parse(sourcesRaw),
+    daemon,
+    sources,
   };
 }

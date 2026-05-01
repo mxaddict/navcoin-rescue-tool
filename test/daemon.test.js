@@ -210,12 +210,12 @@ test('daemon survives purge then re-import of same private key', async () => {
 
     // 2. Purge all wallet data.
     await purgeDaemon(root);
-    const afterPurge = await getDaemonStatus(root);
-    assert.equal(afterPurge.sourceCount, 0);
-
-    // 3. Stop daemon and restart — simulates closing and reopening the TUI.
-    await stopDaemon(root);
     await waitForExit(child);
+
+    const persisted = await readStatus(root);
+    assert.equal(persisted.sources.sources.length, 0);
+
+    // 3. Restart — purge now stops the daemon after deleting data.
 
     child = spawnDaemon(projectRoot, root);
     await waitForReady(child);

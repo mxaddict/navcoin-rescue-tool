@@ -1076,99 +1076,147 @@ class WalletFile extends events.EventEmitter {
       const parts = address.path.split('/');
       return parseInt(parts[parts.length - 1], 10);
     };
-    let totalUtxos = [];
-    let lastUsedIndex = -1;
-    let checkedCount = 0;
-    let done = false;
-
-    while (!done) {
-      // Gap-limit scan should only advance over external receiving addresses.
-      let addresses = (await this.db.GetNavReceivingAddresses(true))
-        .filter((a) => !a.change)
+    const getScriptHashBalance = async (scriptHash) => {
+      try {
+        if (!this.client) return await getScriptHashBalance(scriptHash);
+        return await this.client.blockchain_scripthash_get_balance(scriptHash);
+      } catch (e) {
+        await this.ManageElectrumError(e);
+        await sleep(1);
+        return await getScriptHashBalance(scriptHash);
+      }
+    };
+    const getScriptHashUtxos = async (scriptHash) => {
+      try {
+        if (!this.client) return await getScriptHashUtxos(scriptHash);
+        return await this.client.blockchain_scripthash_listunspent(scriptHash);
+      } catch (e) {
+        await this.ManageElectrumError(e);
+        await sleep(1);
+        return await getScriptHashUtxos(scriptHash);
+      }
+    };
+    const getBranchAddresses = async (includeChange) =>
+      (await this.db.GetNavReceivingAddresses(true))
+        .filter((a) => Boolean(a.change) === includeChange)
         .sort((a, b) => getAddressIndex(a) - getAddressIndex(b));
-      let currentPoolSize = addresses.length;
-
-      if (checkedCount >= currentPoolSize) {
-        const needed = checkedCount + BATCH_SIZE;
-        await this.NavFillKeyPool(this.spendingPassword, needed);
-        addresses = (await this.db.GetNavReceivingAddresses(true))
-          .filter((a) => !a.change)
-          .sort((a, b) => getAddressIndex(a) - getAddressIndex(b));
-        currentPoolSize = addresses.length;
-        this.emit(
-          'scripthash_progress',
-          Math.min(checkedCount + 1, currentPoolSize),
-          currentPoolSize,
-        );
-      }
-
-      const batch = addresses.slice(checkedCount, checkedCount + BATCH_SIZE);
-
-      if (batch.length === 0) {
-        await this.NavFillKeyPool(
-          this.spendingPassword,
-          checkedCount + BATCH_SIZE,
-        );
-        continue;
-      }
-
-      const scriptHashes = batch.map((address) => ({
-        address,
-        scriptHash: this.AddressToScriptHash(address.address),
-      }));
-
-      // Phase 1: check balances.
+    const scanScriptHashBatch = async (scriptHashes, checkedCount) => {
       const balanceResults = await Promise.all(
         scriptHashes.map(async ({ address, scriptHash }, batchIndex) => {
-          try {
-            const bal =
-              await this.client.blockchain_scripthash_get_balance(scriptHash);
-            return {
-              address,
-              scriptHash,
-              funded: (bal.confirmed || 0) + (bal.unconfirmed || 0) > 0,
-              absoluteIndex: checkedCount + batchIndex,
-            };
-          } catch {
-            return {
-              address,
-              scriptHash,
-              funded: false,
-              absoluteIndex: checkedCount + batchIndex,
-            };
-          }
+          const bal = await getScriptHashBalance(scriptHash);
+          return {
+            address,
+            scriptHash,
+            funded: (bal.confirmed || 0) + (bal.unconfirmed || 0) > 0,
+            absoluteIndex: checkedCount + batchIndex,
+          };
         }),
       );
 
       const fundedInBatch = balanceResults.filter((r) => r.funded);
 
-      // Phase 2: fetch UTXOs for funded addresses only.
       if (fundedInBatch.length > 0) {
         const utxoResults = await Promise.all(
           fundedInBatch.map(async (r) => {
-            try {
-              const utxos = await this.client.blockchain_scripthash_listunspent(
-                r.scriptHash,
-              );
-              return utxos.map((u) => ({ ...u, scriptHash: r.scriptHash }));
-            } catch {
-              return [];
-            }
+            const utxos = await getScriptHashUtxos(r.scriptHash);
+            return utxos.map((u) => ({ ...u, scriptHash: r.scriptHash }));
           }),
         );
         for (const utxos of utxoResults) {
           totalUtxos.push(...utxos);
         }
-        lastUsedIndex = fundedInBatch[fundedInBatch.length - 1].absoluteIndex;
+        return fundedInBatch[fundedInBatch.length - 1].absoluteIndex;
       }
 
-      checkedCount += batch.length;
-      this.emit('scripthash_progress', checkedCount, currentPoolSize);
+      return -1;
+    };
+    let totalUtxos = [];
+    let externalFinalCount = 0;
 
-      // Stop when we've checked GAP_LIMIT addresses past the last used one.
-      if (checkedCount - lastUsedIndex >= GAP_LIMIT) {
-        done = true;
+    const scanBranch = async (includeChange, baseChecked) => {
+      let lastUsedIndex = -1;
+      let checkedCount = 0;
+      let done = false;
+
+      while (!done) {
+        let addresses = await getBranchAddresses(includeChange);
+        let currentPoolSize = addresses.length;
+        const otherBranchPoolSize = (await getBranchAddresses(!includeChange))
+          .length;
+
+        if (checkedCount >= currentPoolSize) {
+          const needed = checkedCount + BATCH_SIZE;
+          await this.NavFillKeyPool(this.spendingPassword, needed);
+          addresses = await getBranchAddresses(includeChange);
+          currentPoolSize = addresses.length;
+          this.emit(
+            'scripthash_progress',
+            baseChecked + Math.min(checkedCount + 1, currentPoolSize),
+            baseChecked + currentPoolSize + otherBranchPoolSize,
+          );
+        }
+
+        const batch = addresses.slice(checkedCount, checkedCount + BATCH_SIZE);
+
+        if (batch.length === 0) {
+          await this.NavFillKeyPool(
+            this.spendingPassword,
+            checkedCount + BATCH_SIZE,
+          );
+          continue;
+        }
+
+        const scriptHashes = batch.map((address) => ({
+          address,
+          scriptHash: this.AddressToScriptHash(address.address),
+        }));
+
+        lastUsedIndex = await scanScriptHashBatch(scriptHashes, checkedCount);
+
+        checkedCount += batch.length;
+        this.emit(
+          'scripthash_progress',
+          baseChecked + checkedCount,
+          baseChecked + currentPoolSize + otherBranchPoolSize,
+        );
+
+        if (checkedCount - lastUsedIndex >= GAP_LIMIT) {
+          done = true;
+        }
       }
+
+      return checkedCount;
+    };
+
+    this.emit('utxo_phase', 'receive');
+    externalFinalCount = await scanBranch(false, 0);
+    this.emit('utxo_phase', 'change');
+    const changeFinalCount = await scanBranch(true, externalFinalCount);
+
+    this.emit('utxo_phase', 'stake');
+    const stakingAddresses = await this.GetStakingAddresses();
+    const stakingScriptHashes = [];
+    for (const stakingAddress of stakingAddresses) {
+      const scriptHashes = await this.GetScriptHashes(stakingAddress);
+      for (const scriptHash of scriptHashes) {
+        stakingScriptHashes.push({ scriptHash });
+      }
+    }
+    for (
+      let batchStart = 0;
+      batchStart < stakingScriptHashes.length;
+      batchStart += BATCH_SIZE
+    ) {
+      const batch = stakingScriptHashes.slice(
+        batchStart,
+        batchStart + BATCH_SIZE,
+      );
+      await scanScriptHashBatch(batch, batchStart);
+      this.emit(
+        'scripthash_progress',
+        externalFinalCount + changeFinalCount + batchStart + batch.length,
+        externalFinalCount + changeFinalCount + stakingScriptHashes.length,
+      );
     }
 
     const uniqueTxids = [...new Set(totalUtxos.map((utxo) => utxo.tx_hash))];

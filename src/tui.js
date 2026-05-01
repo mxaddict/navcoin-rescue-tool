@@ -207,6 +207,20 @@ function formatSyncLabel(src) {
     return 'utxo';
   }
 
+  if (src.syncStatus === 'syncing-change') {
+    const current = src.syncCurrent || 0;
+    const total = src.syncTotal || src.totalAddresses || 0;
+    if (total > 0) return `change (${current}/${total} addr)`;
+    return 'change';
+  }
+
+  if (src.syncStatus === 'syncing-stake') {
+    const current = src.syncCurrent || 0;
+    const total = src.syncTotal || 0;
+    if (total > 0) return `stake (${current}/${total} script)`;
+    return 'stake';
+  }
+
   if (
     src.syncStatus === 'syncing-history' ||
     src.syncStatus === 'syncing' ||
@@ -306,6 +320,8 @@ function renderStatus(C, data) {
             src.syncStatus === 'syncing-addresses' ||
             src.syncStatus === 'syncing-txs' ||
             src.syncStatus === 'syncing-utxo' ||
+            src.syncStatus === 'syncing-change' ||
+            src.syncStatus === 'syncing-stake' ||
             src.syncStatus === 'connecting' ||
             src.syncStatus === 'connected' ||
             src.syncStatus === 'opening'
@@ -887,6 +903,9 @@ export async function launchTui() {
               `  Purged ${result.purgedCount} source(s). All wallet data deleted.`,
             ),
           );
+          log(C.muted('  Daemon stopped. Exiting TUI...'));
+          screen.destroy();
+          process.exit(0);
         } catch (error) {
           log(C.pink(`  Purge failed: ${error.message}`));
         }
@@ -1148,6 +1167,8 @@ export async function launchTui() {
         'syncing-addresses',
         'syncing-txs',
         'syncing-utxo',
+        'syncing-change',
+        'syncing-stake',
       ]);
 
       const allSettled =
@@ -1166,6 +1187,8 @@ export async function launchTui() {
             'syncing-addresses',
             'syncing-txs',
             'syncing-utxo',
+            'syncing-change',
+            'syncing-stake',
           ].includes(s.syncStatus),
         );
         const connecting = data.sources.filter((s) =>

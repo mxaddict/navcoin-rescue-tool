@@ -148,17 +148,23 @@ async function handleStatus() {
         'syncing-addresses',
         'syncing-txs',
         'syncing-utxo',
+        'syncing-change',
+        'syncing-stake',
       ];
       const syncLabel = syncingPhases.includes(source.syncStatus)
         ? source.syncStatus === 'syncing-utxo'
           ? `utxo(${source.syncCurrent ?? 0}/${source.syncTotal || source.totalAddresses || 0} addr)`
-          : source.syncStatus === 'syncing-history'
-            ? `history(${source.syncProgress}%)`
-            : source.syncStatus === 'syncing-addresses'
-              ? `addr(${source.syncProgress}%)`
-              : source.syncStatus === 'syncing-txs'
-                ? `txs(${source.syncProgress}%)`
-                : `syncing(${source.syncProgress}%)`
+          : source.syncStatus === 'syncing-change'
+            ? `change(${source.syncCurrent ?? 0}/${source.syncTotal || source.totalAddresses || 0} addr)`
+            : source.syncStatus === 'syncing-stake'
+              ? `stake(${source.syncCurrent ?? 0}/${source.syncTotal || 0} script)`
+              : source.syncStatus === 'syncing-history'
+                ? `history(${source.syncProgress}%)`
+                : source.syncStatus === 'syncing-addresses'
+                  ? `addr(${source.syncProgress}%)`
+                  : source.syncStatus === 'syncing-txs'
+                    ? `txs(${source.syncProgress}%)`
+                    : `syncing(${source.syncProgress}%)`
         : source.syncStatus;
       const serverLabel = source.server ? ` server=${source.server}` : '';
 

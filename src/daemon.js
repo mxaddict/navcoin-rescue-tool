@@ -238,6 +238,9 @@ async function main() {
         const result = await purgeAllSources(root);
         resetNavcoinJs();
         sendJson(response, 200, result);
+        response.on('finish', () => {
+          void performShutdown();
+        });
       } catch (error) {
         sendJson(response, 400, { error: error.message });
       }

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 
-import { getAppDataRoot, getLayout } from './app-data.js';
+import { getAppDataRoot, getLayout, writeJsonFileAtomic } from './app-data.js';
 import {
   createImportedWallet,
   deleteWalletForSource,
@@ -78,10 +78,7 @@ export async function readSources(root = getAppDataRoot()) {
 
 export async function writeSources(sourcesState, root = getAppDataRoot()) {
   const layout = getLayout(root);
-  await fs.writeFile(
-    layout.sourcesFile,
-    `${JSON.stringify(sourcesState, null, 2)}\n`,
-  );
+  await writeJsonFileAtomic(layout.sourcesFile, sourcesState);
   return sourcesState;
 }
 

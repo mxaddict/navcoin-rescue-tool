@@ -4,6 +4,7 @@ import { STATIC_WALLET_PASSWORD } from './constants.js';
 // Per-source wallet state held in daemon memory.
 // Not persisted - rebuilt on every daemon start.
 const walletState = new Map();
+const openingWallets = new Map();
 
 const MAINNET_ELECTRUM_NODES = [
   { host: 'electrum4.nav.community', port: 40004, proto: 'wss' },
@@ -58,6 +59,7 @@ function makeInitialState(sourceId) {
     activeSyncPhase: 'utxo',
     closing: false,
     useUtxoOnlySync: true,
+    connectPromise: null,
   };
 }
 
@@ -100,7 +102,9 @@ function setHistorySyncStatus(state, phaseProgress = state.syncPhaseProgress) {
 
 function setUtxoSyncStatus(state, phaseProgress = state.syncPhaseProgress) {
   state.activeSyncPhase = 'utxo';
-  state.syncStatus = 'syncing-utxo';
+  if (!['syncing-change', 'syncing-stake'].includes(state.syncStatus)) {
+    state.syncStatus = 'syncing-utxo';
+  }
   state.syncStageIndex = 1;
   state.syncStageTotal = 1;
   state.syncPhaseProgress = phaseProgress;
@@ -202,6 +206,7 @@ function scheduleReconnect(source, state, navWallet) {
       state.syncStatus === 'synced' ||
       state.syncStatus === 'syncing' ||
       state.syncStatus === 'error' ||
+      state.connectPromise ||
       !state.wallet
     ) {
       return;
@@ -220,167 +225,201 @@ function scheduleReconnect(source, state, navWallet) {
     state.connectingAt = Date.now();
 
     try {
-      await state.wallet.Connect();
+      state.connectPromise = state.wallet.Connect();
+      await state.connectPromise;
     } catch {
       // Connect() errors are non-fatal — watchdog will retry.
+    } finally {
+      state.connectPromise = null;
     }
   }, RECONNECT_INTERVAL_MS);
 }
 
 export async function openSourceWallet(source, root, navWallet) {
-  const layout = getLayout(root);
-  const state = makeInitialState(source.id);
-  walletState.set(source.id, state);
-
-  const wallet = new navWallet.WalletFile({
-    file: `${source.id}.db`,
-    password: STATIC_WALLET_PASSWORD,
-    spendingPassword: STATIC_WALLET_PASSWORD,
-    network: 'mainnet',
-    log: false,
-  });
-
-  state.wallet = wallet;
-
-  wallet.on('connected', (server) => {
-    state.connected = true;
-    state.syncStatus = 'connected';
-    state.server = server;
-  });
-
-  wallet.on('disconnected', () => {
-    if (state.closing) return;
-
-    state.connected = false;
-    state.server = null;
-    // Only reschedule reconnect if we were previously connected or syncing —
-    // not if we're already in an error or no-servers state.
-    if (
-      state.syncStatus !== 'error' &&
-      state.syncStatus !== 'no-servers' &&
-      state.wallet
-    ) {
-      state.syncStatus = 'connecting';
-      state.connectingAt = Date.now();
-      scheduleReconnect(source, state, navWallet);
-    }
-  });
-
-  wallet.on('sync_started', () => {
-    if (!state.useUtxoOnlySync && state.activeSyncPhase !== 'utxo') {
-      setHistorySyncStatus(state, 0);
-    }
-  });
-
-  wallet.on('bootstrap_started', () => {
-    if (state.useUtxoOnlySync || state.activeSyncPhase === 'utxo') {
-      setUtxoSyncStatus(state, 0);
-      state.syncCurrent = 0;
-      state.syncTotal = 0;
-    } else {
-      setHistorySyncStatus(state, state.syncPhaseProgress);
-    }
-  });
-
-  wallet.on('sync_status', (progress) => {
-    if (!state.useUtxoOnlySync) {
-      setHistorySyncStatus(state, progress);
-    }
-  });
-
-  wallet.on('scripthash_progress', (index, total) => {
-    setUtxoSyncStatus(state, Math.round((index / total) * 100));
-    state.syncCurrent = index;
-    state.syncTotal = total;
-    state.totalAddresses = total;
-  });
-
-  wallet.on('sync_finished', async () => {
-    if (!state.useUtxoOnlySync && state.activeSyncPhase === 'history') {
-      setUtxoSyncStatus(state, 0);
-      return;
-    }
-
-    state.syncStatus = 'synced';
-    state.syncProgress = 100;
-    state.syncPhaseProgress = 100;
-    state.syncStageIndex = 1;
-    state.syncStageTotal = 1;
-    state.syncCurrent = state.syncTotal;
-    await refreshAddressesAndBalance(source.id, wallet);
-  });
-
-  wallet.on('bootstrap_finished', () => {
-    // Sync address subscription phase complete
-  });
-
-  wallet.on('new_tx', async () => {
-    await refreshAddressesAndBalance(source.id, wallet);
-  });
-
-  wallet.on('no_servers_available', () => {
-    if (state.closing) return;
-
-    state.syncStatus = 'no-servers';
-    state.connected = false;
-    state.server = null;
-    // Retry after interval — servers may come back up.
-    scheduleReconnect(source, state, navWallet);
-  });
-
-  wallet.on('db_load_error', (error) => {
-    if (state.closing) return;
-
-    clearTimeout(state.reconnectTimer);
-    state.syncStatus = 'error';
-    state.error = String(error);
-    state.wallet = null;
-  });
-
-  // Watchdog: if stuck in 'connecting' for too long, try reconnecting.
-  state.watchdog = setInterval(() => {
-    if (!walletState.has(source.id)) {
-      clearInterval(state.watchdog);
-      return;
-    }
-
-    if (
-      state.syncStatus === 'connecting' &&
-      state.connectingAt !== null &&
-      Date.now() - state.connectingAt > RECONNECT_TIMEOUT_MS &&
-      !state.reconnectTimer &&
-      state.wallet
-    ) {
-      scheduleReconnect(source, state, navWallet);
-    }
-  }, 5_000);
-
-  try {
-    await wallet.Load({
-      useP2p: false,
-      minPoolSize: getSourceMinPoolSize(source),
-      skipInitialHistorySync: true,
-    });
-    await prunePrivateKeyPool(wallet, source);
-    await configureElectrumNodes(wallet);
-
-    // Seed initial address and balance snapshot before connecting.
-    await refreshAddressesAndBalance(source.id, wallet);
-
-    state.syncStatus = 'connecting';
-    state.connectingAt = Date.now();
-    state.activeSyncPhase = 'utxo';
-    await wallet.Connect();
-
-    // Rescue mode skips full history sync and hydrates spendable UTXOs only.
-    state.activeSyncPhase = 'utxo';
-    wallet.SyncUtxos().catch(() => {});
-  } catch (error) {
-    state.syncStatus = 'error';
-    state.error = error.message;
+  const existing = walletState.get(source.id);
+  if (existing && existing.wallet && !existing.closing) {
+    return existing;
   }
 
-  return state;
+  if (openingWallets.has(source.id)) {
+    return openingWallets.get(source.id);
+  }
+
+  const openPromise = (async () => {
+    const layout = getLayout(root);
+    const state = makeInitialState(source.id);
+    walletState.set(source.id, state);
+
+    const wallet = new navWallet.WalletFile({
+      file: `${source.id}.db`,
+      password: STATIC_WALLET_PASSWORD,
+      spendingPassword: STATIC_WALLET_PASSWORD,
+      network: 'mainnet',
+      log: false,
+    });
+
+    state.wallet = wallet;
+
+    wallet.on('connected', (server) => {
+      state.connected = true;
+      state.syncStatus = 'connected';
+      state.server = server;
+    });
+
+    wallet.on('disconnected', () => {
+      if (state.closing) return;
+
+      state.connected = false;
+      state.server = null;
+      // Only reschedule reconnect if we were previously connected or syncing —
+      // not if we're already in an error or no-servers state.
+      if (
+        state.syncStatus !== 'error' &&
+        state.syncStatus !== 'no-servers' &&
+        state.wallet
+      ) {
+        state.syncStatus = 'connecting';
+        state.connectingAt = Date.now();
+        scheduleReconnect(source, state, navWallet);
+      }
+    });
+
+    wallet.on('sync_started', () => {
+      if (!state.useUtxoOnlySync && state.activeSyncPhase !== 'utxo') {
+        setHistorySyncStatus(state, 0);
+      }
+    });
+
+    wallet.on('bootstrap_started', () => {
+      if (state.useUtxoOnlySync || state.activeSyncPhase === 'utxo') {
+        setUtxoSyncStatus(state, 0);
+        state.syncCurrent = 0;
+        state.syncTotal = 0;
+      } else {
+        setHistorySyncStatus(state, state.syncPhaseProgress);
+      }
+    });
+
+    wallet.on('sync_status', (progress) => {
+      if (!state.useUtxoOnlySync) {
+        setHistorySyncStatus(state, progress);
+      }
+    });
+
+    wallet.on('scripthash_progress', (index, total) => {
+      setUtxoSyncStatus(state, Math.round((index / total) * 100));
+      state.syncCurrent = index;
+      state.syncTotal = total;
+      state.totalAddresses = total;
+    });
+
+    wallet.on('utxo_phase', (phase) => {
+      state.syncStatus =
+        phase === 'change'
+          ? 'syncing-change'
+          : phase === 'stake'
+            ? 'syncing-stake'
+            : 'syncing-utxo';
+    });
+
+    wallet.on('sync_finished', async () => {
+      if (!state.useUtxoOnlySync && state.activeSyncPhase === 'history') {
+        setUtxoSyncStatus(state, 0);
+        return;
+      }
+
+      state.syncStatus = 'synced';
+      state.syncProgress = 100;
+      state.syncPhaseProgress = 100;
+      state.syncStageIndex = 1;
+      state.syncStageTotal = 1;
+      state.syncCurrent = state.syncTotal;
+      await refreshAddressesAndBalance(source.id, wallet);
+    });
+
+    wallet.on('bootstrap_finished', () => {
+      // Sync address subscription phase complete
+    });
+
+    wallet.on('new_tx', async () => {
+      await refreshAddressesAndBalance(source.id, wallet);
+    });
+
+    wallet.on('no_servers_available', () => {
+      if (state.closing) return;
+
+      state.syncStatus = 'no-servers';
+      state.connected = false;
+      state.server = null;
+      // Retry after interval — servers may come back up.
+      scheduleReconnect(source, state, navWallet);
+    });
+
+    wallet.on('db_load_error', (error) => {
+      if (state.closing) return;
+
+      clearTimeout(state.reconnectTimer);
+      state.syncStatus = 'error';
+      state.error = String(error);
+      state.wallet = null;
+    });
+
+    // Watchdog: if stuck in 'connecting' for too long, try reconnecting.
+    state.watchdog = setInterval(() => {
+      if (!walletState.has(source.id)) {
+        clearInterval(state.watchdog);
+        return;
+      }
+
+      if (
+        state.syncStatus === 'connecting' &&
+        state.connectingAt !== null &&
+        Date.now() - state.connectingAt > RECONNECT_TIMEOUT_MS &&
+        !state.reconnectTimer &&
+        state.wallet
+      ) {
+        scheduleReconnect(source, state, navWallet);
+      }
+    }, 5_000);
+
+    try {
+      await wallet.Load({
+        useP2p: false,
+        minPoolSize: getSourceMinPoolSize(source),
+        skipInitialHistorySync: true,
+      });
+      await prunePrivateKeyPool(wallet, source);
+      await configureElectrumNodes(wallet);
+
+      // Seed initial address and balance snapshot before connecting.
+      await refreshAddressesAndBalance(source.id, wallet);
+
+      state.syncStatus = 'connecting';
+      state.connectingAt = Date.now();
+      state.activeSyncPhase = 'utxo';
+      state.connectPromise = wallet.Connect();
+      await state.connectPromise;
+
+      // Rescue mode skips full history sync and hydrates spendable UTXOs only.
+      state.activeSyncPhase = 'utxo';
+      wallet.SyncUtxos().catch(() => {});
+    } catch (error) {
+      state.syncStatus = 'error';
+      state.error = error.message;
+    } finally {
+      state.connectPromise = null;
+    }
+
+    return state;
+  })();
+
+  openingWallets.set(source.id, openPromise);
+
+  try {
+    return await openPromise;
+  } finally {
+    openingWallets.delete(source.id);
+  }
 }
 
 async function refreshAddressesAndBalance(sourceId, wallet) {
@@ -420,6 +459,7 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
 }
 
 export async function closeSourceWallet(sourceId) {
+  openingWallets.delete(sourceId);
   const state = walletState.get(sourceId);
   if (!state) return;
   state.closing = true;

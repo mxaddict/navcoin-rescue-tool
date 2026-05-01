@@ -994,7 +994,7 @@ class Db extends events.EventEmitter {
     delete tx.tx;
 
     try {
-      await this.dbTx.txs.add(tx).catch((e) => {
+      await this.dbTx.txs.put(tx).catch((e) => {
         console.error('AddTx error: ' + e.message);
       });
       return true;

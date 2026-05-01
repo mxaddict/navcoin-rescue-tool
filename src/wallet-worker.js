@@ -64,9 +64,23 @@ async function main() {
       log: false,
     };
 
+    console.error(
+      '[wallet-worker] source type:',
+      source.type,
+      'walletType:',
+      source.walletType,
+      'mnemonic length:',
+      source.normalizedDetails?.length,
+    );
     if (source.type === 'mnemonic') {
       options.mnemonic = source.normalizedDetails.replaceAll('\n', ' ');
       options.type = source.walletType;
+      console.error(
+        '[wallet-worker] creating wallet with type:',
+        options.type,
+        'mnemonic words:',
+        options.mnemonic.split(' ').length,
+      );
     } else {
       options.mnemonic = PRIVATE_KEY_CONTAINER_MNEMONIC;
       options.type = 'navcoin-js-v1';

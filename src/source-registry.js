@@ -119,6 +119,7 @@ export async function importSource(
     type: validated.type,
     walletType: validated.walletType,
     fingerprint,
+    normalizedDetails: validated.normalizedDetails,
     status: 'ready',
     syncStatus: 'wallet-created',
     createdAt: new Date().toISOString(),

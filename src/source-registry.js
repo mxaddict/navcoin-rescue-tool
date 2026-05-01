@@ -36,11 +36,6 @@ export function validateImportInput(input) {
     throw new Error(`Unsupported source type: ${input.type}`);
   }
 
-  const label = typeof input.label === 'string' ? input.label.trim() : '';
-  if (!label) {
-    throw new Error('Source label is required.');
-  }
-
   if (input.type === 'mnemonic') {
     if (!SUPPORTED_MNEMONIC_WALLET_TYPES.includes(input.walletType)) {
       throw new Error(`Unsupported wallet type: ${input.walletType}`);
@@ -58,7 +53,6 @@ export function validateImportInput(input) {
 
     return {
       type: 'mnemonic',
-      label,
       walletType: input.walletType,
       normalizedDetails: normalizedMnemonic,
     };
@@ -71,7 +65,6 @@ export function validateImportInput(input) {
 
   return {
     type: 'private-key',
-    label,
     walletType: null,
     normalizedDetails: normalizedKeys.join('\n'),
   };
@@ -114,7 +107,6 @@ export async function importSource(
 
   const preparedSource = {
     id: sourceId,
-    label: validated.label,
     type: validated.type,
     walletType: validated.walletType,
     fingerprint,
@@ -123,7 +115,6 @@ export async function importSource(
 
   const source = {
     id: sourceId,
-    label: validated.label,
     type: validated.type,
     walletType: validated.walletType,
     fingerprint,

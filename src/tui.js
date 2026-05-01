@@ -252,7 +252,7 @@ function renderStatus(C, data) {
       ? `${src.type}:${src.walletType}`
       : src.type;
     lines.push(
-      `  ${C.boldMagenta('Source')}  ${src.label}  ${C.muted(`[${typeLabel}]  ${src.id}`)}`,
+      `  ${C.boldMagenta('Source')}  ${C.muted(`[${typeLabel}]`)}  ${src.id}`,
     );
 
     const syncColor =
@@ -363,13 +363,13 @@ async function cmdStatus(C, root, log) {
 async function cmdImportMnemonic(C, root, log, ask) {
   const walletType = await ask(
     `Wallet type (${SUPPORTED_MNEMONIC_WALLET_TYPES.join('/')}):`,
+    SUPPORTED_MNEMONIC_WALLET_TYPES,
   );
   if (!SUPPORTED_MNEMONIC_WALLET_TYPES.includes(walletType)) {
     log(C.pink(`  Unknown wallet type: ${walletType}`));
     log(C.muted(`  Supported: ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}`));
     return;
   }
-  const label = await ask('Label:');
   const phrase = await ask('Mnemonic phrase:');
 
   if (!phrase) {
@@ -380,13 +380,11 @@ async function cmdImportMnemonic(C, root, log, ask) {
   log(C.muted('  Importing...'));
   try {
     const result = await importDaemonSource(
-      { type: 'mnemonic', walletType, label, phrase },
+      { type: 'mnemonic', walletType, phrase },
       root,
     );
     log(C.teal(`  Imported: ${result.source.id}`));
-    log(
-      `  Label: ${result.source.label}   Wallet type: ${result.source.walletType}`,
-    );
+    log(`  Wallet type: ${result.source.walletType}`);
     log(C.muted('  Syncing in the background — check `status` for progress.'));
   } catch (error) {
     log(C.pink(`  Import failed: ${error.message}`));
@@ -394,8 +392,6 @@ async function cmdImportMnemonic(C, root, log, ask) {
 }
 
 async function cmdImportPrivateKey(C, root, log, ask) {
-  const label = await ask('Label:');
-
   const keys = [];
   log(
     C.muted('  Enter WIF private keys one at a time. Leave blank to finish.'),
@@ -414,11 +410,11 @@ async function cmdImportPrivateKey(C, root, log, ask) {
   log(C.muted(`  Importing ${keys.length} key(s)...`));
   try {
     const result = await importDaemonSource(
-      { type: 'private-key', label, keys },
+      { type: 'private-key', keys },
       root,
     );
     log(C.teal(`  Imported: ${result.source.id}`));
-    log(`  Label: ${result.source.label}   Keys: ${keys.length}`);
+    log(`  Keys: ${keys.length}`);
     log(C.muted('  Syncing in the background — check `status` for progress.'));
   } catch (error) {
     log(C.pink(`  Import failed: ${error.message}`));
@@ -437,7 +433,7 @@ async function cmdRemove(C, root, log, ask) {
       const typeLabel = src.walletType
         ? `${src.type}:${src.walletType}`
         : src.type;
-      log(`  ${C.magenta(src.id)}  ${src.label}  ${C.muted(`[${typeLabel}]`)}`);
+      log(`  ${C.magenta(src.id)}  ${C.muted(`[${typeLabel}]`)}`);
     }
   } catch {
     log(C.pink('  Could not fetch source list. Daemon unreachable.'));
@@ -657,9 +653,14 @@ export async function launchTui() {
   // Exclusive ask mode — uses a depth counter so nested asks work correctly.
   let askDepth = 0;
 
-  function ask(question) {
+  // Active choices for ask() tab completion — set while a prompted question
+  // with choices is active, null otherwise.
+  let askChoices = null;
+
+  function ask(question, choices = null) {
     return new Promise((resolve) => {
       askDepth += 1;
+      askChoices = choices;
       // Clear hints and any pending Ctrl+C warning when a prompt takes over.
       clearHints();
       if (ctrlCPending) {
@@ -676,6 +677,8 @@ export async function launchTui() {
 
       function onSubmit(val) {
         askDepth -= 1;
+        askChoices = null;
+        clearHints();
         inputSep.setContent(C.muted('─'.repeat(200)));
         inputBox.setValue('');
         screen.render();
@@ -718,7 +721,10 @@ export async function launchTui() {
               : null;
 
         if (!importType) {
-          const choice = await ask('Import type (mnemonic/private-key):');
+          const choice = await ask('Import type (mnemonic/private-key):', [
+            'mnemonic',
+            'private-key',
+          ]);
           if (choice === 'mnemonic' || choice === 'private-key') {
             importType = choice;
           } else {
@@ -772,25 +778,31 @@ export async function launchTui() {
   const _origListener = inputBox._listener.bind(inputBox);
   inputBox._listener = function (ch, key) {
     if (key && key.name === 'tab') {
-      if (askDepth > 0) return; // don't interfere with ask() prompts
+      // In an ask() prompt with no choices — ignore tab.
+      if (askDepth > 0 && !askChoices) return;
 
       const current = inputBox.getValue();
 
-      // First Tab press — lock in the base typed text.
-      if (!completionBase) {
+      // First Tab press — lock in the base typed text (use null sentinel so
+      // empty string is a valid locked base).
+      if (completionBase === null) {
         completionBase = current;
       }
 
-      const matches = tabMatches(completionBase);
-      if (matches.length === 0) return;
+      // Determine the pool of candidates from the locked base.
+      const pool = askChoices
+        ? askChoices.filter((c) => c.startsWith(completionBase))
+        : tabMatches(completionBase);
 
-      // Cycle: find index of current in matches, advance by 1.
-      const idx = matches.indexOf(lastCompleted);
-      const next = matches[(idx + 1) % matches.length];
+      if (pool.length === 0) return;
+
+      // Cycle: find index of lastCompleted in pool, advance by 1.
+      const idx = pool.indexOf(lastCompleted);
+      const next = pool[(idx + 1) % pool.length];
 
       lastCompleted = next;
       inputBox.setValue(next);
-      showHints(matches, next);
+      showHints(pool, next);
       screen.render();
       return; // don't pass tab through to the original listener
     }
@@ -888,7 +900,7 @@ export async function launchTui() {
       if (syncing) {
         const progress = data.sources
           .filter((s) => s.syncStatus === 'syncing')
-          .map((s) => `${s.label}: ${s.syncProgress}%`)
+          .map((s) => `${s.id}: ${s.syncProgress}%`)
           .join('  ');
         header.setContent(
           C.boldMagenta(' navcoin-rescue-tool ') +

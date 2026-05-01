@@ -53,7 +53,7 @@ process.stdout.on('error', (error) => {
 
 function printHelp() {
   process.stdout.write(
-    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --label <label> --phrase <words>\n  ${CLI_NAME} import private-key --label <label> --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} sweep <address>\n`,
+    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} sweep <address>\n`,
   );
 }
 
@@ -126,7 +126,6 @@ async function handleStatus() {
       const serverLabel = source.server ? ` server=${source.server}` : '';
 
       process.stdout.write(`\nSource: ${source.id} [${typeLabel}]\n`);
-      process.stdout.write(`  Label:  ${source.label}\n`);
       process.stdout.write(
         `  Status: ${source.status}  Sync: ${syncLabel}${serverLabel}\n`,
       );
@@ -205,7 +204,6 @@ async function handleImport(argv) {
         {
           type: 'mnemonic',
           walletType: options['wallet-type'],
-          label: options.label,
           phrase: options.phrase,
         },
         root,
@@ -219,7 +217,6 @@ async function handleImport(argv) {
       result = await importDaemonSource(
         {
           type: 'private-key',
-          label: options.label,
           keys,
         },
         root,
@@ -231,7 +228,6 @@ async function handleImport(argv) {
     }
 
     process.stdout.write(`Imported source: ${result.source.id}\n`);
-    process.stdout.write(`Label: ${result.source.label}\n`);
     if (result.source.walletType) {
       process.stdout.write(`Wallet type: ${result.source.walletType}\n`);
     }

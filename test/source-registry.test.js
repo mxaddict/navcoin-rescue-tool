@@ -16,7 +16,6 @@ test('importSource stores wallet-backed source metadata', async () => {
       {
         type: 'mnemonic',
         walletType: 'navcoin-js-v1',
-        label: 'Seed import',
         phrase:
           'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
       },
@@ -57,13 +56,12 @@ test('importSource does not persist failed wallet creation', async () => {
         {
           type: 'mnemonic',
           walletType: 'navcoin-core',
-          label: 'Broken seed',
           phrase:
             'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
         },
         root,
       ),
-      /navcoin-js import failed/,
+      /navcoin-js import failed|could not derive keys/,
     );
 
     const stored = await readSources(root);

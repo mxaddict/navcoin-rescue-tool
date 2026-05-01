@@ -121,14 +121,12 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
       {
         type: 'mnemonic',
         walletType: 'navcoin-js-v1',
-        label: 'Main wallet',
         phrase:
           'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
       },
       root,
     );
 
-    assert.equal(imported.source.label, 'Main wallet');
     assert.equal(imported.source.status, 'ready');
     assert.equal(imported.source.syncStatus, 'wallet-created');
     assert.equal(imported.source.wallet.backend, 'navcoin-js');
@@ -146,7 +144,6 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
         {
           type: 'mnemonic',
           walletType: 'navcoin-js-v1',
-          label: 'Duplicate wallet',
           phrase:
             'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
         },
@@ -166,7 +163,6 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
     const privateKeyImported = await importDaemonSource(
       {
         type: 'private-key',
-        label: 'Loose keys',
         keys: ['PCbhgKMp6ym9MgtMQ3XYxqnMrG3yFwAuQgTmZznbLxWExwxXH2pM'],
       },
       root,

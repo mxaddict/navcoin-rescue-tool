@@ -191,6 +191,8 @@ ingestion later.
 
 - `daemon.json` should store daemon runtime and discovery metadata.
 - `auth.cookie` should store the daemon-generated local API auth cookie.
+- `auth.cookie` should use `0600` permissions on platforms that support those
+  file permissions.
 - `sources.json` should store the source registry and source-to-wallet mapping.
 - `wallets/` should store one `navcoin-js` wallet database per source.
 - `logs/` should store daemon logs.
@@ -206,11 +208,20 @@ ingestion later.
   be detected as a duplicate.
 - Use the fingerprint-derived source id for source tracking, duplicate
   detection, and wallet database naming.
-- Source fingerprints should be derived by hashing normalized source details.
+- Source fingerprints should be derived by hashing normalized source details
+  with SHA-256.
 - For mnemonic or private-key imports, the fingerprint should be based on the
   normalized imported details, not transient UI or file metadata.
+- Mnemonic normalization should split into words and then re-join using
+  `.join("\n")` so the canonical mnemonic representation is consistent.
+- If multiple private keys are imported together, they should be sorted by value
+  before fingerprinting so the fingerprint is stable.
+- Wallet type should be included in the fingerprint input so the same mnemonic
+  can be imported and tested against multiple wallet types without colliding.
 - For future `wallet.dat` support, fingerprinting should hash the extracted
   wallet details, not the raw wallet file bytes.
+- If an imported source fingerprint already exists, import should stop with a
+  duplicate-source error.
 
 ### Corruption And Partial-Failure Handling
 
@@ -244,6 +255,8 @@ ingestion later.
 - Import warning text should make it clear that the user should treat local disk
   access as sensitive until the sweep is complete and local wallet data is
   removed.
+- The tool is recovery-focused and does not need a strict log-redaction policy
+  for post-recovery secrecy assumptions.
 
 ## Local API Direction
 
@@ -257,11 +270,14 @@ ingestion later.
 - Bind the local API to `127.0.0.1` only so it is not reachable from the
   network.
 - Use fixed daemon port `46117`.
+- If port `46117` is already in use, daemon startup should fail with a clear
+  error telling the user that something is already using the port.
 - On daemon start, generate a local auth cookie and write it to `auth.cookie` in
   the app data directory.
 - `ntr`, the TUI, and `ntr-gui` should read that cookie file and use it when
   calling the daemon API.
 - The daemon should require the auth cookie for local API access.
+- Clients should send the auth cookie as `Authorization: <cookie>`.
 - Daemon discovery should use a simple HTTP request to the local daemon
   endpoint.
 - The daemon should expose a status endpoint that clients can call to confirm it
@@ -316,6 +332,7 @@ Notes:
   - every imported source
   - every derived or imported address
   - every address balance
+  - addresses shown regardless of whether balance is zero
   - per-source sync state
   - whether each source is caught up to current known network head
   - total confirmed, unconfirmed, staked, and sweepable balances
@@ -384,6 +401,8 @@ Notes:
 - Publish one checksum file per artifact instead of one combined checksum file.
 - Checksum file naming should mirror the artifact name, for example:
   - `navcoin-rescue-tool-v0.0.1-linux-x86_64.tar.gz.sha256`
+- Archive layout should place `ntr`, `ntr-gui`, and `README` at the top level of
+  the extracted archive.
 
 ### GUI Layout
 

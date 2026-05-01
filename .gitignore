@@ -1,0 +1,17 @@
+node_modules/
+coverage/
+dist/
+tmp/
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.env
+.env.*
+!.env.example
+
+# Repo-local scratch app data if used during development.
+.ntr/
+navcoin-rescue-tool/

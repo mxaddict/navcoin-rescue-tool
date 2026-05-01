@@ -78,6 +78,32 @@ CLI invocation should be `ntr` for short, frequent use.
 12. Add CI pipelines for cross-platform builds and artifacts.
 13. Test against known legacy wallet samples and edge cases.
 
+## Current Progress
+
+- Completed: initial phase 1 scaffold.
+- Implemented in repo:
+  - Node project with `ntr` and `ntr-gui` executables
+  - app-data path resolution for Linux, macOS, and Windows
+  - initial on-disk layout bootstrap for `daemon.json`, `auth.cookie`,
+    `sources.json`, `wallets/`, and `logs/`
+  - long-lived localhost daemon bound to `127.0.0.1:46117`
+  - auth-cookie protected `GET /status`
+  - auth-cookie protected `POST /daemon/stop`
+  - `ntr start`, `ntr status`, and `ntr stop` wired to daemon lifecycle
+  - repo `.gitignore` for dependencies, local artifacts, and scratch app data
+- Verified:
+  - unit tests for app-data path resolution and bootstrap
+  - daemon auth and stop lifecycle test
+  - CLI smoke test for `ntr start`, `ntr status`, and `ntr stop`
+- Next slice:
+  - add source registry model and import command contract
+  - define daemon-side source persistence APIs before `navcoin-js` integration
+  - expand `status` output shape toward per-source reporting
+- Deferred to later slices:
+  - TUI default flow
+  - import/remove/sweep implementation
+  - full daemon HTTP API surface
+
 ## CI And Releases
 
 - Use GitHub Actions for CI.

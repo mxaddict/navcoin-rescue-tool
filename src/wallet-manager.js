@@ -5,6 +5,11 @@ import { STATIC_WALLET_PASSWORD } from './constants.js';
 // Not persisted - rebuilt on every daemon start.
 const walletState = new Map();
 
+// How long to wait in 'connecting' before attempting a reconnect (ms).
+const RECONNECT_TIMEOUT_MS = 30_000;
+// How long to wait between reconnect attempts (ms).
+const RECONNECT_INTERVAL_MS = 10_000;
+
 function makeInitialState(sourceId) {
   return {
     sourceId,
@@ -13,12 +18,14 @@ function makeInitialState(sourceId) {
     syncProgress: 0,
     connected: false,
     server: null,
+    connectingAt: null,
     addresses: [],
     balance: {
       nav: { confirmed: 0, pending: 0 },
       staked: { confirmed: 0, pending: 0 },
     },
     error: null,
+    reconnectTimer: null,
   };
 }
 
@@ -33,10 +40,36 @@ export function getAllSourceStates() {
     syncProgress: s.syncProgress,
     connected: s.connected,
     server: s.server,
+    connectingAt: s.connectingAt,
     addresses: s.addresses,
     balance: s.balance,
     error: s.error,
   }));
+}
+
+function scheduleReconnect(source, state, navWallet) {
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = setTimeout(async () => {
+    // Don't reconnect if already connected, syncing, synced, or closed.
+    if (
+      state.connected ||
+      state.syncStatus === 'synced' ||
+      state.syncStatus === 'syncing' ||
+      state.syncStatus === 'error' ||
+      !state.wallet
+    ) {
+      return;
+    }
+
+    state.syncStatus = 'connecting';
+    state.connectingAt = Date.now();
+
+    try {
+      await state.wallet.Connect();
+    } catch {
+      // Connect() errors are non-fatal — watchdog will retry.
+    }
+  }, RECONNECT_INTERVAL_MS);
 }
 
 export async function openSourceWallet(source, root, navWallet) {
@@ -55,13 +88,27 @@ export async function openSourceWallet(source, root, navWallet) {
   state.wallet = wallet;
 
   wallet.on('connected', (server) => {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
     state.connected = true;
     state.server = server;
     state.syncStatus = 'connected';
+    state.connectingAt = null;
   });
 
   wallet.on('disconnected', () => {
     state.connected = false;
+    // Only reschedule reconnect if we were previously connected or syncing —
+    // not if we're already in an error or no-servers state.
+    if (
+      state.syncStatus !== 'error' &&
+      state.syncStatus !== 'no-servers' &&
+      state.wallet
+    ) {
+      state.syncStatus = 'connecting';
+      state.connectingAt = Date.now();
+      scheduleReconnect(source, state, navWallet);
+    }
   });
 
   wallet.on('sync_started', () => {
@@ -86,13 +133,34 @@ export async function openSourceWallet(source, root, navWallet) {
   wallet.on('no_servers_available', () => {
     state.syncStatus = 'no-servers';
     state.connected = false;
+    // Retry after interval — servers may come back up.
+    scheduleReconnect(source, state, navWallet);
   });
 
   wallet.on('db_load_error', (error) => {
+    clearTimeout(state.reconnectTimer);
     state.syncStatus = 'error';
     state.error = String(error);
     state.wallet = null;
   });
+
+  // Watchdog: if stuck in 'connecting' for too long, try reconnecting.
+  const watchdog = setInterval(() => {
+    if (!walletState.has(source.id)) {
+      clearInterval(watchdog);
+      return;
+    }
+
+    if (
+      state.syncStatus === 'connecting' &&
+      state.connectingAt !== null &&
+      Date.now() - state.connectingAt > RECONNECT_TIMEOUT_MS &&
+      !state.reconnectTimer &&
+      state.wallet
+    ) {
+      scheduleReconnect(source, state, navWallet);
+    }
+  }, 5_000);
 
   try {
     await wallet.Load({ useP2p: false });
@@ -101,6 +169,7 @@ export async function openSourceWallet(source, root, navWallet) {
     await refreshAddressesAndBalance(source.id, wallet);
 
     state.syncStatus = 'connecting';
+    state.connectingAt = Date.now();
     await wallet.Connect();
   } catch (error) {
     state.syncStatus = 'error';
@@ -144,7 +213,15 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
 
 export async function closeSourceWallet(sourceId) {
   const state = walletState.get(sourceId);
-  if (!state?.wallet) return;
+  if (!state) return;
+
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = null;
+
+  if (!state.wallet) {
+    walletState.delete(sourceId);
+    return;
+  }
 
   try {
     state.wallet.Disconnect();

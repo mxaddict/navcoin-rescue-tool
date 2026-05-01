@@ -269,10 +269,13 @@ function renderStatus(C, data) {
             ? C.pink
             : C.muted;
 
-    const syncLabel =
-      src.syncStatus === 'syncing'
-        ? `syncing (${src.syncProgress}%)`
-        : src.syncStatus;
+    let syncLabel = src.syncStatus;
+    if (src.syncStatus === 'syncing') {
+      syncLabel = `syncing (${src.syncProgress}%)`;
+    } else if (src.syncStatus === 'connecting' && src.connectingAt) {
+      const secs = Math.floor((Date.now() - src.connectingAt) / 1000);
+      syncLabel = `connecting (${secs}s)`;
+    }
 
     const serverLabel = src.server ? C.muted(`  via ${src.server}`) : '';
     lines.push(`  ${C.bold('Sync:')}    ${syncColor(syncLabel)}${serverLabel}`);

@@ -9,6 +9,7 @@ import {
   getDaemonStatus,
   importDaemonSource,
   removeDaemonSource,
+  stopDaemon,
   sweepPrepare,
   sweepConfirm,
 } from './daemon-client.js';
@@ -155,6 +156,7 @@ const COMMANDS = [
   'import private-key',
   'remove',
   'sweep',
+  'stop',
   'help',
   'quit',
 ];
@@ -207,8 +209,9 @@ function renderHelp(C) {
     `    ${C.cyan('import private-key')}  Import one or more private keys`,
     `    ${C.cyan('remove')}              Remove an imported source`,
     `    ${C.cyan('sweep')}               Sweep all funds to a destination`,
+    `    ${C.cyan('stop')}                Stop the daemon and exit the TUI`,
     `    ${C.cyan('help')}                Show this help`,
-    `    ${C.cyan('quit')}                Exit the TUI`,
+    `    ${C.cyan('quit')}                Exit the TUI (daemon keeps running)`,
     '',
     C.muted('  Tab auto-completes commands.  Ctrl+C to quit.'),
     SEP,
@@ -701,9 +704,29 @@ export async function launchTui() {
     switch (cmd) {
       case 'quit':
       case 'exit':
+        log(C.muted('  Daemon keeps running. Use `stop` to shut it down.'));
         screen.destroy();
         process.exit(0);
         break;
+      case 'stop': {
+        const confirm = await ask(
+          'Stop the daemon and exit? Type YES to confirm:',
+        );
+        if (confirm !== 'YES') {
+          log(C.muted('  Stop cancelled.'));
+          break;
+        }
+        log(C.muted('  Stopping daemon...'));
+        try {
+          await stopDaemon(root);
+          log(C.teal('  Daemon stopped.'));
+        } catch {
+          log(C.pink('  Daemon not reachable — may already be stopped.'));
+        }
+        screen.destroy();
+        process.exit(0);
+        break;
+      }
       case 'help':
         log(renderHelp(C));
         break;

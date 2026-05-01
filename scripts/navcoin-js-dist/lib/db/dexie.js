@@ -154,10 +154,6 @@ class Db extends events.EventEmitter {
       this.dbTx.version(2).stores({
         txs: '&hash',
         txKeys: '&hash',
-      });
-      this.dbTx.version(3).stores({
-        txs: '&hash',
-        txKeys: '&hash',
         candidates: '&input, network',
       });
       this.db.on('versionchange', function (event) {

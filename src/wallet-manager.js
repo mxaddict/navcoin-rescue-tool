@@ -308,11 +308,13 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
 
   try {
     const rawAddresses = await wallet.NavReceivingAddresses(true);
-    state.addresses = rawAddresses.map((a) => ({
-      address: a.address,
-      path: a.path,
-      used: a.used === 1,
-    }));
+    state.addresses = rawAddresses
+      .filter((a) => !a.change)
+      .map((a) => ({
+        address: a.address,
+        path: a.path,
+        used: a.used === 1,
+      }));
   } catch {
     // Non-fatal: leave previous address list intact.
   }

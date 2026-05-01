@@ -555,12 +555,12 @@ export async function launchTui() {
   });
 
   // ---- Main output box --------------------------------------------------
-  // top=2 (header + sep), bottom=2 (promptSep + input)
+  // top=2 (header + headerSep), bottom=3 (warnBox + inputSep + inputBox)
   const output = blessed.log({
     top: 2,
     left: 0,
     width: '100%',
-    height: '100%-4',
+    height: '100%-5',
     scrollable: true,
     alwaysScroll: true,
     scrollbar: {
@@ -569,6 +569,16 @@ export async function launchTui() {
     },
     tags: false,
     wrap: true,
+  });
+
+  // ---- Warning row — shown above the separator when Ctrl+C pressed once --
+  const warnBox = blessed.box({
+    bottom: 2,
+    left: 0,
+    width: '100%',
+    height: 1,
+    content: '',
+    tags: false,
   });
 
   // ---- Separator above input --------------------------------------------
@@ -593,6 +603,7 @@ export async function launchTui() {
   screen.append(header);
   screen.append(headerSep);
   screen.append(output);
+  screen.append(warnBox);
   screen.append(inputSep);
   screen.append(inputBox);
 
@@ -608,6 +619,12 @@ export async function launchTui() {
   function ask(question) {
     return new Promise((resolve) => {
       askDepth += 1;
+      // Clear any pending Ctrl+C warning when a prompt takes over.
+      if (ctrlCPending) {
+        ctrlCPending = false;
+        clearTimeout(ctrlCTimer);
+        warnBox.setContent('');
+      }
       inputSep.setContent(
         C.cyan(' ? ') + question + C.muted(' (Enter to submit)'),
       );
@@ -710,13 +727,12 @@ export async function launchTui() {
     }
 
     ctrlCPending = true;
-    inputSep.setContent(C.pink(' !! Press Ctrl+C again to quit !!'));
+    warnBox.setContent(C.pink(' !! Press Ctrl+C again to quit !!'));
     screen.render();
 
     ctrlCTimer = setTimeout(() => {
       ctrlCPending = false;
-      // Restore normal separator content.
-      inputSep.setContent(C.muted('─'.repeat(200)));
+      warnBox.setContent('');
       screen.render();
     }, 2000);
   }

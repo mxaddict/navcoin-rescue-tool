@@ -214,7 +214,7 @@ function renderHelp(C) {
     `    ${C.cyan('quit')}                Exit the TUI (daemon keeps running)`,
     '',
     C.muted(
-      '  Tab auto-completes commands.  PgUp/PgDn or Shift+↑↓ to scroll.  Ctrl+C to quit.',
+      '  Tab auto-completes.  PgUp/PgDn or Shift+↑↓ scrolls.  Ctrl+M toggles mouse (off = free text select).  Ctrl+C to quit.',
     ),
     SEP,
   ].join('\n');
@@ -551,9 +551,9 @@ export async function launchTui() {
     // Alacritty that don't fully support all capabilities blessed probes.
     terminal: 'xterm-256color',
     fullUnicode: true,
-    // Mouse mode is intentionally disabled — enabling it intercepts the
-    // terminal's native mouse events and breaks text selection for copy/paste.
-    // Scrolling is handled via keyboard shortcuts instead.
+    // Mouse mode enables scroll wheel support. Text selection still works in
+    // most terminals by holding Shift while clicking and dragging.
+    mouse: true,
   });
 
   // ---- Outer container — provides 1-cell padding on all sides ------------
@@ -574,9 +574,7 @@ export async function launchTui() {
     height: 1,
     content:
       C.boldMagenta(' navcoin-rescue-tool ') +
-      C.muted(
-        '| help  Tab=complete  PgUp/PgDn=scroll  Shift+↑↓=scroll  Ctrl+C=quit',
-      ),
+      C.muted('| help  Tab=complete  Ctrl+M=toggle mouse  Ctrl+C=quit'),
     tags: false,
   });
 
@@ -600,6 +598,7 @@ export async function launchTui() {
     scrollable: true,
     alwaysScroll: true,
     keys: true,
+    mouse: true,
     scrollbar: {
       ch: '▐',
       style: { fg: dark ? '#818cf8' : '#4338ca' },
@@ -891,8 +890,7 @@ export async function launchTui() {
   screen.key(['C-c'], handleCtrlC);
   inputBox.key(['C-c'], handleCtrlC);
 
-  // ---- Keyboard scroll — keeps native text selection working by avoiding
-  // mouse mode. Page/arrow keys scroll the output while input has focus.
+  // ---- Keyboard scroll bindings (work regardless of mouse mode).
   inputBox.key(['pageup'], () => {
     output.scroll(-output.height);
     screen.render();
@@ -909,6 +907,37 @@ export async function launchTui() {
     output.scroll(1);
     screen.render();
   });
+
+  // ---- Mouse toggle (Ctrl+M) --------------------------------------------
+  // Mouse mode: scroll wheel works but text selection requires Shift+drag.
+  // No-mouse mode: native text selection and native scroll both work freely.
+  let mouseEnabled = true;
+
+  function updateMouseHint() {
+    const hint = mouseEnabled
+      ? C.muted('mouse=on  Ctrl+M=toggle select mode')
+      : C.teal('mouse=off  Ctrl+M=toggle scroll mode');
+    warnBox.setContent(hint);
+    screen.render();
+  }
+
+  function toggleMouse() {
+    mouseEnabled = !mouseEnabled;
+    if (mouseEnabled) {
+      screen.program.enableMouse();
+    } else {
+      screen.program.disableMouse();
+    }
+    updateMouseHint();
+  }
+
+  screen.key(['C-m'], toggleMouse);
+  inputBox.key(['C-m'], toggleMouse);
+
+  // Show initial mouse mode hint briefly on startup.
+  setTimeout(() => {
+    if (warnBox.getContent() === '') updateMouseHint();
+  }, 2000);
 
   // ---- Startup ----------------------------------------------------------
   log(
@@ -961,7 +990,7 @@ export async function launchTui() {
         header.setContent(
           C.boldMagenta(' navcoin-rescue-tool ') +
             C.teal('● synced') +
-            C.muted('  | help  Tab=complete  PgUp/PgDn=scroll  Ctrl+C=quit'),
+            C.muted('  | help  Tab=complete  Ctrl+M=mouse  Ctrl+C=quit'),
         );
       }
 

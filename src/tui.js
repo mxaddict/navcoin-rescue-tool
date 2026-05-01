@@ -4,12 +4,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
-import {
-  getAppDataRoot,
-  bootstrapAppData,
-  getLayout,
-  readStatus,
-} from './app-data.js';
+import { getAppDataRoot, bootstrapAppData, getLayout } from './app-data.js';
 import {
   getDaemonStatus,
   importDaemonSource,
@@ -48,8 +43,11 @@ const C = {
   bold: (s) => chalk.bold(s),
   boldMagenta: (s) => chalk.bold.hex('#ec1ec6')(s),
   boldCyan: (s) => chalk.bold.hex('#06b6d4')(s),
-  gradient: (s) => chalk.bold.hex('#d946ef')(s), // fuchsia for headings
+  gradient: (s) => chalk.bold.hex('#d946ef')(s),
 };
+
+// Separator line — fills terminal width with a dim rule.
+const SEP = C.muted('─'.repeat(80));
 
 // ---------------------------------------------------------------------------
 // Commands and tab-completion
@@ -66,8 +64,7 @@ const COMMANDS = [
 
 function tabComplete(partial) {
   if (!partial) return null;
-  const match = COMMANDS.find((c) => c.startsWith(partial));
-  return match ?? null;
+  return COMMANDS.find((c) => c.startsWith(partial)) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,19 +76,21 @@ function navStr(satoshis) {
 
 function renderHelp() {
   return [
-    C.gradient('  navcoin-rescue-tool TUI'),
+    SEP,
+    C.gradient('  navcoin-rescue-tool  ') + C.muted('TUI'),
+    SEP,
     '',
-    C.bold('Commands:'),
-    `  ${C.cyan('status')}                      Show daemon and source status`,
-    `  ${C.cyan('import mnemonic')}             Import a mnemonic source`,
-    `  ${C.cyan('import private-key')}          Import a private key source`,
-    `  ${C.cyan('remove')}                      Remove an imported source`,
-    `  ${C.cyan('sweep')}                       Sweep all funds to a destination`,
-    `  ${C.cyan('help')}                        Show this help`,
-    `  ${C.cyan('quit')}                        Exit the TUI`,
+    C.bold('  Commands:'),
+    `    ${C.cyan('status')}              Show daemon and source status`,
+    `    ${C.cyan('import mnemonic')}     Import a mnemonic source`,
+    `    ${C.cyan('import private-key')}  Import one or more private keys`,
+    `    ${C.cyan('remove')}              Remove an imported source`,
+    `    ${C.cyan('sweep')}               Sweep all funds to a destination`,
+    `    ${C.cyan('help')}                Show this help`,
+    `    ${C.cyan('quit')}                Exit the TUI`,
     '',
-    C.muted('  Use Tab to auto-complete commands.'),
-    C.muted('  Press Ctrl+C or type quit to exit.'),
+    C.muted('  Tab auto-completes commands.  Ctrl+C to quit.'),
+    SEP,
   ].join('\n');
 }
 
@@ -100,9 +99,10 @@ function renderStatus(data) {
   const d = data.daemon;
   const statusColor = d.status === 'running' ? C.teal : C.pink;
 
-  lines.push(C.gradient('  Daemon Status'));
+  lines.push(SEP);
+  lines.push(C.gradient('  Daemon'));
   lines.push(
-    `  ${C.bold('Status:')}   ${statusColor(d.status)}   ${C.muted(`pid=${d.pid ?? 'none'}`)}`,
+    `  ${C.bold('Status:')}   ${statusColor(d.status)}  ${C.muted(`pid=${d.pid ?? 'none'}`)}`,
   );
   lines.push(
     `  ${C.bold('API:')}      ${C.muted(`http://${d.host}:${d.port}`)}`,
@@ -117,6 +117,7 @@ function renderStatus(data) {
         '  No sources imported. Use `import mnemonic` or `import private-key`.',
       ),
     );
+    lines.push(SEP);
     return lines.join('\n');
   }
 
@@ -124,19 +125,18 @@ function renderStatus(data) {
   let totalStaked = 0;
 
   for (const src of data.sources) {
-    lines.push('');
+    lines.push(SEP);
     const typeLabel = src.walletType
       ? `${src.type}:${src.walletType}`
       : src.type;
-    lines.push(`  ${C.boldMagenta('Source')} ${C.muted(src.id)}`);
     lines.push(
-      `  ${C.bold('Label:')}  ${src.label}   ${C.muted(`[${typeLabel}]`)}`,
+      `  ${C.boldMagenta('Source')}  ${src.label}  ${C.muted(`[${typeLabel}]  ${src.id}`)}`,
     );
 
     const syncColor =
       src.syncStatus === 'synced'
         ? C.teal
-        : src.syncStatus === 'syncing'
+        : src.syncStatus === 'syncing' || src.syncStatus === 'connecting'
           ? C.blue
           : src.syncStatus === 'error' || src.syncStatus === 'no-servers'
             ? C.pink
@@ -147,20 +147,20 @@ function renderStatus(data) {
         ? `syncing (${src.syncProgress}%)`
         : src.syncStatus;
 
-    const serverLabel = src.server ? C.muted(` via ${src.server}`) : '';
-    lines.push(`  ${C.bold('Sync:')}   ${syncColor(syncLabel)}${serverLabel}`);
+    const serverLabel = src.server ? C.muted(`  via ${src.server}`) : '';
+    lines.push(`  ${C.bold('Sync:')}    ${syncColor(syncLabel)}${serverLabel}`);
 
     if (src.liveError) {
-      lines.push(`  ${C.pink('Error:')}  ${src.liveError}`);
+      lines.push(`  ${C.pink('Error:')}   ${src.liveError}`);
     }
 
     const navConf = navStr(src.balance.nav.confirmed);
     const navPend = navStr(src.balance.nav.pending);
     const staked = navStr(src.balance.staked.confirmed);
     lines.push(
-      `  ${C.bold('Balance:')} ${C.cyan(navConf)} NAV confirmed  ` +
-        `${C.muted(navPend + ' NAV pending')}  ` +
-        `${C.indigo(staked)} NAV staked`,
+      `  ${C.bold('Balance:')} ${C.cyan(navConf)} NAV  ` +
+        `${C.muted(navPend + ' pending')}  ` +
+        `${C.indigo(staked)} staked`,
     );
 
     totalNav += src.balance.nav.confirmed;
@@ -175,7 +175,7 @@ function renderStatus(data) {
     }
   }
 
-  lines.push('');
+  lines.push(SEP);
   lines.push(C.gradient('  Totals'));
   lines.push(
     `  ${C.bold('NAV:')}    ${C.cyan(navStr(totalNav))} NAV confirmed`,
@@ -183,6 +183,7 @@ function renderStatus(data) {
   lines.push(
     `  ${C.bold('Staked:')} ${C.indigo(navStr(totalStaked))} NAV staked`,
   );
+  lines.push(SEP);
 
   return lines.join('\n');
 }
@@ -208,7 +209,6 @@ async function ensureDaemonRunning(root, layout, log) {
   });
   fs.closeSync(logFd);
 
-  // Wait up to 5s for daemon to be ready.
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 200));
@@ -226,21 +226,6 @@ async function ensureDaemonRunning(root, layout, log) {
 }
 
 // ---------------------------------------------------------------------------
-// Prompt helpers — multi-step interactive flows inside the TUI
-// ---------------------------------------------------------------------------
-function tuiPrompt(inputBox, question) {
-  return new Promise((resolve) => {
-    inputBox.setValue(question + ' ');
-    inputBox.once('submit', (val) => {
-      const answer = val.slice(question.length + 1).trim();
-      inputBox.setValue('');
-      resolve(answer);
-    });
-    inputBox.readInput();
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Command handlers
 // ---------------------------------------------------------------------------
 async function cmdStatus(root, log) {
@@ -249,20 +234,26 @@ async function cmdStatus(root, log) {
     const data = await getDaemonStatus(root);
     log(renderStatus(data));
   } catch {
-    log(C.pink('  Daemon not reachable. Run `ntr start` or restart the TUI.'));
+    log(C.pink('  Daemon not reachable. Restart the TUI to reconnect.'));
   }
 }
 
 async function cmdImportMnemonic(root, log, ask) {
   const walletType = await ask(
-    `Wallet type (${SUPPORTED_MNEMONIC_WALLET_TYPES.join('/')}): `,
+    `Wallet type (${SUPPORTED_MNEMONIC_WALLET_TYPES.join('/')}):`,
   );
   if (!SUPPORTED_MNEMONIC_WALLET_TYPES.includes(walletType)) {
     log(C.pink(`  Unknown wallet type: ${walletType}`));
+    log(C.muted(`  Supported: ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}`));
     return;
   }
-  const label = await ask('Label: ');
-  const phrase = await ask('Mnemonic phrase: ');
+  const label = await ask('Label:');
+  const phrase = await ask('Mnemonic phrase:');
+
+  if (!phrase) {
+    log(C.muted('  Import cancelled.'));
+    return;
+  }
 
   log(C.muted('  Importing...'));
   try {
@@ -274,37 +265,76 @@ async function cmdImportMnemonic(root, log, ask) {
     log(
       `  Label: ${result.source.label}   Wallet type: ${result.source.walletType}`,
     );
-    log(C.muted('  Wallet DB will sync in the background.'));
+    log(C.muted('  Syncing in the background — check `status` for progress.'));
   } catch (error) {
     log(C.pink(`  Import failed: ${error.message}`));
   }
 }
 
 async function cmdImportPrivateKey(root, log, ask) {
-  const label = await ask('Label: ');
-  const key = await ask('WIF private key: ');
+  const label = await ask('Label:');
 
-  log(C.muted('  Importing...'));
+  const keys = [];
+  log(
+    C.muted('  Enter WIF private keys one at a time. Leave blank to finish.'),
+  );
+  for (;;) {
+    const key = await ask(`Key ${keys.length + 1} (blank to finish):`);
+    if (!key) break;
+    keys.push(key);
+  }
+
+  if (keys.length === 0) {
+    log(C.muted('  No keys entered. Import cancelled.'));
+    return;
+  }
+
+  log(C.muted(`  Importing ${keys.length} key(s)...`));
   try {
     const result = await importDaemonSource(
-      { type: 'private-key', label, keys: [key] },
+      { type: 'private-key', label, keys },
       root,
     );
     log(C.teal(`  Imported: ${result.source.id}`));
-    log(`  Label: ${result.source.label}`);
-    log(C.muted('  Wallet DB will sync in the background.'));
+    log(`  Label: ${result.source.label}   Keys: ${keys.length}`);
+    log(C.muted('  Syncing in the background — check `status` for progress.'));
   } catch (error) {
     log(C.pink(`  Import failed: ${error.message}`));
   }
 }
 
 async function cmdRemove(root, log, ask) {
-  const sourceId = await ask('Source ID to remove: ');
-  const confirm = await ask(`Type YES to confirm removal of ${sourceId}: `);
+  // Show source list first so user knows valid IDs.
+  try {
+    const data = await getDaemonStatus(root);
+    if (data.sources.length === 0) {
+      log(C.muted('  No sources to remove.'));
+      return;
+    }
+    log(C.gradient('  Imported sources:'));
+    for (const src of data.sources) {
+      const typeLabel = src.walletType
+        ? `${src.type}:${src.walletType}`
+        : src.type;
+      log(`  ${C.magenta(src.id)}  ${src.label}  ${C.muted(`[${typeLabel}]`)}`);
+    }
+  } catch {
+    log(C.pink('  Could not fetch source list. Daemon unreachable.'));
+    return;
+  }
+
+  const sourceId = await ask('Source ID to remove:');
+  if (!sourceId) {
+    log(C.muted('  Removal cancelled.'));
+    return;
+  }
+
+  const confirm = await ask(`Type YES to confirm removal of ${sourceId}:`);
   if (confirm !== 'YES') {
     log(C.muted('  Removal cancelled.'));
     return;
   }
+
   try {
     await removeDaemonSource(sourceId, root);
     log(C.teal(`  Removed: ${sourceId}`));
@@ -326,30 +356,36 @@ async function cmdSweep(root, log, ask) {
   }
 
   log('');
+  log(SEP);
   log(C.gradient('  Sweep Preview'));
   log(
-    `  Total NAV: ${C.cyan(navStr(preview.totalNav))} NAV (confirmed, before fee)`,
+    `  Total NAV: ${C.cyan(navStr(preview.totalNav))} NAV  ${C.muted('(confirmed, before fee)')}`,
   );
   log('  Sources:');
   for (const src of preview.sources) {
     log(`    ${C.muted(src.sourceId)}  ${C.cyan(navStr(src.nav))} NAV`);
   }
+  log(SEP);
 
-  const destination = await ask('Destination address: ');
+  const destination = await ask('Destination address:');
   if (!destination) {
     log(C.muted('  Sweep cancelled.'));
     return;
   }
 
-  const reenter = await ask('Re-enter destination address: ');
+  const reenter = await ask('Re-enter destination address:');
   if (reenter !== destination) {
     log(C.pink('  Destination mismatch. Sweep aborted.'));
     return;
   }
 
   log('');
-  log(C.pink('  !! This will broadcast a transaction and cannot be undone !!'));
-  const phrase = await ask('Type SEND MY COINS to confirm: ');
+  log(
+    C.pink(
+      '  !! This will broadcast a real transaction and cannot be undone !!',
+    ),
+  );
+  const phrase = await ask('Type SEND MY COINS to confirm:');
   if (phrase !== 'SEND MY COINS') {
     log(C.muted('  Confirmation phrase incorrect. Sweep aborted.'));
     return;
@@ -385,7 +421,7 @@ export async function launchTui() {
     title: 'navcoin-rescue-tool',
   });
 
-  // ---- Header bar --------------------------------------------------------
+  // ---- Header bar -------------------------------------------------------
   const header = blessed.box({
     top: 0,
     left: 0,
@@ -393,27 +429,48 @@ export async function launchTui() {
     height: 1,
     content:
       C.boldMagenta(' navcoin-rescue-tool ') +
-      C.muted('| type help for commands | Tab to complete | Ctrl+C to quit'),
+      C.muted('| help  Tab=complete  Ctrl+C=quit'),
     tags: false,
   });
 
-  // ---- Main output box ---------------------------------------------------
-  const output = blessed.log({
+  // ---- Separator below header -------------------------------------------
+  const headerSep = blessed.box({
     top: 1,
     left: 0,
     width: '100%',
-    height: '100%-3',
+    height: 1,
+    content: C.muted('─'.repeat(200)), // blessed clips to terminal width
+    tags: false,
+  });
+
+  // ---- Main output box --------------------------------------------------
+  // top=2 (header + sep), bottom=2 (promptSep + input)
+  const output = blessed.log({
+    top: 2,
+    left: 0,
+    width: '100%',
+    height: '100%-4',
     scrollable: true,
     alwaysScroll: true,
     scrollbar: {
-      ch: ' ',
-      style: { bg: 'gray' },
+      ch: '▐',
+      style: { fg: '#6366f1' },
     },
     tags: false,
     wrap: true,
   });
 
-  // ---- Input box ---------------------------------------------------------
+  // ---- Separator above input --------------------------------------------
+  const inputSep = blessed.box({
+    bottom: 1,
+    left: 0,
+    width: '100%',
+    height: 1,
+    content: C.muted('─'.repeat(200)),
+    tags: false,
+  });
+
+  // ---- Input box --------------------------------------------------------
   const inputBox = blessed.textbox({
     bottom: 0,
     left: 0,
@@ -426,52 +483,46 @@ export async function launchTui() {
     },
   });
 
-  // ---- Prompt line (above input) -----------------------------------------
-  const promptLine = blessed.box({
-    bottom: 1,
-    left: 0,
-    width: '100%',
-    height: 1,
-    content: C.magenta(' > '),
-    tags: false,
-  });
-
   screen.append(header);
+  screen.append(headerSep);
   screen.append(output);
-  screen.append(promptLine);
+  screen.append(inputSep);
   screen.append(inputBox);
 
-  // ---- Helpers -----------------------------------------------------------
+  // ---- Helpers ----------------------------------------------------------
   function log(text) {
     output.log(text);
     screen.render();
   }
 
-  // Multi-step ask: temporarily hands input control to a one-shot question.
+  // Exclusive ask mode — no command dispatch fires while in ask().
+  // Uses a counter so nested asks (multi-step flows) work correctly.
+  let askDepth = 0;
+
   function ask(question) {
     return new Promise((resolve) => {
-      promptLine.setContent(C.cyan(' ? ') + question);
-      screen.render();
+      askDepth += 1;
+      inputSep.setContent(
+        C.cyan(' ? ') + question + C.muted(' (Enter to submit)'),
+      );
       inputBox.setValue('');
+      screen.render();
       inputBox.focus();
-      inputBox.once('submit', (val) => {
-        promptLine.setContent(C.magenta(' > '));
+
+      function onSubmit(val) {
+        askDepth -= 1;
+        inputSep.setContent(C.muted('─'.repeat(200)));
         inputBox.setValue('');
         screen.render();
         resolve(val.trim());
-      });
+      }
+
+      inputBox.once('submit', onSubmit);
     });
   }
 
-  // ---- Input handling ----------------------------------------------------
-  let inputBuffer = '';
-  let awaitingSubmit = false;
-
-  function resetInput() {
-    inputBuffer = '';
-    inputBox.setValue('');
-    screen.render();
-  }
+  // ---- Input dispatch ---------------------------------------------------
+  let dispatching = false;
 
   async function dispatch(raw) {
     const cmd = raw.trim();
@@ -479,28 +530,37 @@ export async function launchTui() {
 
     log(C.muted(`\n  $ ${cmd}`));
 
-    if (cmd === 'quit' || cmd === 'exit') {
-      screen.destroy();
-      process.exit(0);
-    } else if (cmd === 'help') {
-      log(renderHelp());
-    } else if (cmd === 'status') {
-      await cmdStatus(root, log);
-    } else if (cmd === 'import mnemonic') {
-      await cmdImportMnemonic(root, log, ask);
-    } else if (cmd === 'import private-key') {
-      await cmdImportPrivateKey(root, log, ask);
-    } else if (cmd === 'remove') {
-      await cmdRemove(root, log, ask);
-    } else if (cmd === 'sweep') {
-      await cmdSweep(root, log, ask);
-    } else {
-      log(C.pink(`  Unknown command: ${cmd}`));
-      log(C.muted('  Type help for available commands.'));
+    switch (cmd) {
+      case 'quit':
+      case 'exit':
+        screen.destroy();
+        process.exit(0);
+        break;
+      case 'help':
+        log(renderHelp());
+        break;
+      case 'status':
+        await cmdStatus(root, log);
+        break;
+      case 'import mnemonic':
+        await cmdImportMnemonic(root, log, ask);
+        break;
+      case 'import private-key':
+        await cmdImportPrivateKey(root, log, ask);
+        break;
+      case 'remove':
+        await cmdRemove(root, log, ask);
+        break;
+      case 'sweep':
+        await cmdSweep(root, log, ask);
+        break;
+      default:
+        log(C.pink(`  Unknown command: ${cmd}`));
+        log(C.muted('  Type help for available commands.'));
     }
   }
 
-  // Tab completion on the raw textbox value.
+  // Tab completion.
   inputBox.key('tab', () => {
     const current = inputBox.getValue();
     const completed = tabComplete(current);
@@ -510,16 +570,25 @@ export async function launchTui() {
     }
   });
 
-  inputBox.on('submit', async (val) => {
-    if (awaitingSubmit) return; // let ask() handle it
-    resetInput();
-    awaitingSubmit = true;
-    try {
-      await dispatch(val);
-    } finally {
-      awaitingSubmit = false;
-      inputBox.focus();
+  // Enter submits — either resolves an active ask() or dispatches a command.
+  inputBox.key('enter', () => {
+    const val = inputBox.getValue();
+
+    if (askDepth > 0) {
+      // Hand the value to the waiting ask() listener.
+      inputBox.emit('submit', val);
+      return;
     }
+
+    if (dispatching) return;
+    dispatching = true;
+    inputBox.setValue('');
+    screen.render();
+
+    dispatch(val).finally(() => {
+      dispatching = false;
+      inputBox.focus();
+    });
   });
 
   // Ctrl+C to quit.
@@ -528,12 +597,7 @@ export async function launchTui() {
     process.exit(0);
   });
 
-  // Enter key submits.
-  inputBox.key('enter', () => {
-    inputBox.emit('submit', inputBox.getValue());
-  });
-
-  // ---- Auto-start daemon -------------------------------------------------
+  // ---- Auto-start daemon ------------------------------------------------
   log(
     C.gradient('  navcoin-rescue-tool') +
       C.muted('  —  recovery tool for legacy NavCoin wallets'),
@@ -557,41 +621,62 @@ export async function launchTui() {
   }
 
   log('');
-  log(C.muted('  Type a command below. Tab to complete.'));
+  log(C.muted('  Type a command below. Tab to complete. help for reference.'));
 
-  // ---- Periodic status refresh every 5s ----------------------------------
+  // ---- Periodic status refresh every 5s ---------------------------------
+  // Only auto-refreshes output when user is idle (not mid-command).
+  let lastStatusData = null;
+
   const refreshTimer = setInterval(async () => {
     try {
       const data = await getDaemonStatus(root);
       const syncing = data.sources.some(
         (s) => s.syncStatus === 'syncing' || s.syncStatus === 'connecting',
       );
+
+      // Always update header.
       if (syncing) {
         const progress = data.sources
           .filter((s) => s.syncStatus === 'syncing')
           .map((s) => `${s.label}: ${s.syncProgress}%`)
           .join('  ');
-        // Update header with sync progress.
         header.setContent(
           C.boldMagenta(' navcoin-rescue-tool ') +
-            C.blue(`syncing: ${progress}`) +
-            C.muted(' | Tab to complete | Ctrl+C to quit'),
+            C.blue(`⟳ syncing: ${progress}`) +
+            C.muted('  Ctrl+C=quit'),
         );
       } else {
         header.setContent(
           C.boldMagenta(' navcoin-rescue-tool ') +
-            C.muted(
-              '| type help for commands | Tab to complete | Ctrl+C to quit',
-            ),
+            C.teal('● synced') +
+            C.muted('  | help  Tab=complete  Ctrl+C=quit'),
         );
       }
+
+      // Auto-refresh output only when idle and balances changed.
+      if (!dispatching && askDepth === 0) {
+        const snapshot = JSON.stringify(
+          data.sources.map((s) => ({
+            id: s.id,
+            balance: s.balance,
+            syncStatus: s.syncStatus,
+          })),
+        );
+        if (snapshot !== lastStatusData) {
+          lastStatusData = snapshot;
+          if (syncing || lastStatusData !== null) {
+            log(C.muted('  ↻ Status updated'));
+            log(renderStatus(data));
+          }
+        }
+      }
+
       screen.render();
     } catch {
-      // Daemon went away.
       header.setContent(
         C.boldMagenta(' navcoin-rescue-tool ') +
-          C.pink('daemon offline') +
-          C.muted(' | Ctrl+C to quit'),
+          C.pink('● daemon offline') +
+          C.muted('  Ctrl+C=quit'),
       );
       screen.render();
     }

@@ -302,12 +302,18 @@ function renderStatus(C, data) {
     totalNav += src.balance.nav.confirmed;
     totalStaked += src.balance.staked.confirmed;
 
-    if (src.addresses.length > 0) {
-      lines.push(`  ${C.bold('Addresses')} (${src.addresses.length}):`);
-      for (const addr of src.addresses) {
-        const usedLabel = addr.used ? C.muted(' [used]') : '';
-        lines.push(`    ${C.magenta(addr.address)}${usedLabel}`);
+    const usedAddrs = src.addresses.filter((a) => a.used);
+    if (usedAddrs.length > 0) {
+      lines.push(
+        `  ${C.bold('Addresses')} (${usedAddrs.length} used of ${src.addresses.length}):`,
+      );
+      for (const addr of usedAddrs) {
+        lines.push(`    ${C.magenta(addr.address)}`);
       }
+    } else if (src.addresses.length > 0) {
+      lines.push(
+        `  ${C.bold('Addresses')} (${src.addresses.length} derived, none used yet)`,
+      );
     }
   }
 

@@ -164,12 +164,18 @@ async function handleStatus() {
         `  Balance: ${navConfirmed} NAV confirmed  ${navPending} NAV pending  ${staked} NAV staked\n`,
       );
 
-      if (source.addresses.length > 0) {
-        process.stdout.write(`  Addresses (${source.addresses.length}):\n`);
-        for (const addr of source.addresses) {
-          const usedLabel = addr.used ? ' [used]' : '';
-          process.stdout.write(`    ${addr.address}${usedLabel}\n`);
+      const usedAddrs = source.addresses.filter((a) => a.used);
+      if (usedAddrs.length > 0) {
+        process.stdout.write(
+          `  Addresses (${usedAddrs.length} used of ${source.addresses.length}):\n`,
+        );
+        for (const addr of usedAddrs) {
+          process.stdout.write(`    ${addr.address}\n`);
         }
+      } else if (source.addresses.length > 0) {
+        process.stdout.write(
+          `  Addresses (${source.addresses.length} derived, none used yet)\n`,
+        );
       }
     }
   } catch {

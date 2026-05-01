@@ -118,13 +118,25 @@ CLI invocation should be `ntr` for short, frequent use.
     `balance` in `GET /status`
   - `ntr status` renders per-source addresses and NAV/staked balances
   - wallet-manager unit tests with mocked wallet
+- Completed: sweep prepare and confirm flow.
+- Implemented:
+  - `prepareSweep()` in `wallet-manager.js` — validates all sources are fully
+    synced, returns `{ totalNav, sources[] }` preview
+  - `executeSweep(destination)` in `wallet-manager.js` — calls
+    `NavCreateTransaction` + `SendTransaction` per source with non-zero balance
+  - `POST /sweep/prepare` daemon endpoint — returns preview or 400 with reason
+  - `POST /sweep/confirm` daemon endpoint — validates `destination` +
+    `confirmPhrase === 'SEND MY COINS'`, re-validates sync, executes sweep
+  - `sweepPrepare` and `sweepConfirm` in `daemon-client.js`
+  - `ntr sweep <address>` — 4-step interactive flow: prepare → re-enter
+    destination → type `SEND MY COINS` → broadcast; aborts on any mismatch
+  - 6 sweep unit tests covering prepare guards, execute path, zero-balance skip,
+    broadcast error handling
 - Next slice:
-  - sweep prepare and confirm flow
-  - `ntr sweep <address>` with destination re-entry and `SEND MY COINS` phrase
+  - TUI default flow (`ntr` with no arguments)
 - Deferred to later slices:
-  - TUI default flow
-  - sweep implementation
-  - full daemon HTTP API surface
+  - Electron GUI (`ntr-gui`)
+  - CI release pipeline (cross-platform artifacts on version tags)
 
 ## CI And Releases
 

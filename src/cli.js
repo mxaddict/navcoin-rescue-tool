@@ -31,6 +31,18 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Return true when an error looks like the daemon is not reachable.
+ * fetch throws a TypeError with cause ECONNREFUSED when nothing is listening.
+ */
+function isDaemonUnreachable(error) {
+  return (
+    error?.cause?.code === 'ECONNREFUSED' ||
+    error?.message?.includes('ECONNREFUSED') ||
+    error?.message?.includes('fetch failed')
+  );
+}
+
 process.stdout.on('error', (error) => {
   if (error.code === 'EPIPE') {
     process.exit(0);
@@ -226,11 +238,17 @@ async function handleImport(argv) {
     process.stdout.write(`Status: ${result.source.status}\n`);
     process.stdout.write(`Sync: ${result.source.syncStatus}\n`);
   } catch (error) {
-    process.stderr.write(`${error.message}\n`);
-    if (sourceType === 'mnemonic') {
+    if (isDaemonUnreachable(error)) {
       process.stderr.write(
-        `Supported wallet types: ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}\n`,
+        `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
       );
+    } else {
+      process.stderr.write(`${error.message}\n`);
+      if (sourceType === 'mnemonic') {
+        process.stderr.write(
+          `Supported wallet types: ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}\n`,
+        );
+      }
     }
     process.exitCode = 1;
   }
@@ -249,7 +267,13 @@ async function handleRemove(argv) {
     const result = await removeDaemonSource(sourceId, getAppDataRoot());
     process.stdout.write(`Removed source: ${result.removedSourceId}\n`);
   } catch (error) {
-    process.stderr.write(`${error.message}\n`);
+    if (isDaemonUnreachable(error)) {
+      process.stderr.write(
+        `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
+      );
+    } else {
+      process.stderr.write(`${error.message}\n`);
+    }
     process.exitCode = 1;
   }
 }
@@ -347,7 +371,13 @@ async function handleSweep(argv) {
     const response = await sweepPrepare(root);
     preview = response.preview;
   } catch (error) {
-    process.stderr.write(`Sweep blocked: ${error.message}\n`);
+    if (isDaemonUnreachable(error)) {
+      process.stderr.write(
+        `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
+      );
+    } else {
+      process.stderr.write(`Sweep blocked: ${error.message}\n`);
+    }
     process.exitCode = 1;
     return;
   }
@@ -409,7 +439,13 @@ async function handleSweep(argv) {
       }
     }
   } catch (error) {
-    process.stderr.write(`Sweep failed: ${error.message}\n`);
+    if (isDaemonUnreachable(error)) {
+      process.stderr.write(
+        `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
+      );
+    } else {
+      process.stderr.write(`Sweep failed: ${error.message}\n`);
+    }
     process.exitCode = 1;
   }
 }

@@ -16,6 +16,22 @@ const require = createRequire(import.meta.url);
 const PRIVATE_KEY_CONTAINER_MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
+function getWalletMinPoolSize(source, minPoolSize) {
+  return source.type === 'private-key' ? 0 : minPoolSize;
+}
+
+async function prunePrivateKeyPool(wallet, source) {
+  if (source.type !== 'private-key') return;
+
+  // navcoin-js falls back to a 10-address pool when minPoolSize is falsy.
+  // For imported WIF containers, keep only the explicit imported keys.
+  await wallet.db.db.keys
+    .where('type')
+    .equals(1)
+    .filter((key) => key.path !== 'imported')
+    .delete();
+}
+
 async function main() {
   // Read stdin.
   const chunks = [];
@@ -58,7 +74,11 @@ async function main() {
 
     const w = new wallet.WalletFile(options);
 
-    await w.Load({ useP2p: false, minPoolSize });
+    await w.Load({
+      useP2p: false,
+      minPoolSize: getWalletMinPoolSize(source, minPoolSize),
+    });
+    await prunePrivateKeyPool(w, source);
 
     if (source.type === 'private-key') {
       for (const key of source.normalizedDetails.split('\n')) {

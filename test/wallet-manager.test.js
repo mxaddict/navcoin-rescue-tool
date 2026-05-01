@@ -299,3 +299,107 @@ test('wallet manager prefers healthy electrum nodes before connect', async () =>
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('wallet manager hides dummy pool addresses for private-key sources', async () => {
+  const root = await makeProjectTempDir('wallet-mgr-private-key');
+  const OriginalWebSocket = global.WebSocket;
+
+  class PrivateKeyWalletFile extends EventEmitter {
+    constructor() {
+      super();
+      this.electrumNodes = [];
+      this.electrumNodeIndex = 0;
+      this.keys = [];
+      this.db = {
+        db: {
+          keys: {
+            where: (field) => {
+              assert.equal(field, 'type');
+              return {
+                equals: (value) => {
+                  assert.equal(value, 1);
+                  return {
+                    filter: (predicate) => ({
+                      delete: async () => {
+                        this.keys = this.keys.filter((key) => !predicate(key));
+                      },
+                    }),
+                  };
+                },
+              };
+            },
+          },
+        },
+      };
+    }
+
+    async Load() {
+      this.keys = [
+        ...Array.from({ length: 10 }, (_, i) => ({
+          type: 1,
+          address: `dummy-${i}`,
+          path: `m/44'/130'/0'/0/${i}`,
+          used: 0,
+        })),
+        {
+          type: 1,
+          address: 'imported-addr',
+          path: 'imported',
+          used: 0,
+        },
+      ];
+    }
+
+    ClearNodeList() {
+      this.electrumNodes = [];
+    }
+
+    AddNode(host, port, proto) {
+      this.electrumNodes.push({ host, port, proto });
+    }
+
+    async Connect() {
+      this.emit('connected', 'mock-server:40004');
+      this.emit('sync_finished');
+    }
+
+    async NavReceivingAddresses() {
+      return this.keys;
+    }
+
+    async GetBalance() {
+      return {
+        nav: { confirmed: 0, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      };
+    }
+
+    Disconnect() {}
+    CloseDb() {}
+  }
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = {
+      id: 'test-source-private-key',
+      type: 'private-key',
+      walletType: null,
+    };
+
+    await openSourceWallet(source, root, { WalletFile: PrivateKeyWalletFile });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const state = getSourceState(source.id);
+    assert.equal(state.addresses.length, 1);
+    assert.equal(state.addresses[0].path, 'imported');
+
+    await closeSourceWallet(source.id);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

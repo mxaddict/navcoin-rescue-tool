@@ -66,6 +66,22 @@ export function getAllSourceStates() {
   }));
 }
 
+function getSourceMinPoolSize(source) {
+  return source.type === 'private-key' ? 0 : RECOVERY_MIN_POOL_SIZE;
+}
+
+async function prunePrivateKeyPool(wallet, source) {
+  if (source.type !== 'private-key') return;
+
+  // Imported private-key sources should expose only explicitly imported keys,
+  // not the dummy navcoin-js container pool addresses.
+  await wallet.db.db.keys
+    .where('type')
+    .equals(1)
+    .filter((key) => key.path !== 'imported')
+    .delete();
+}
+
 function probeElectrumNode(node) {
   return new Promise((resolve) => {
     const url = `${node.proto}://${node.host}:${node.port}`;
@@ -265,7 +281,11 @@ export async function openSourceWallet(source, root, navWallet) {
   }, 5_000);
 
   try {
-    await wallet.Load({ useP2p: false, minPoolSize: RECOVERY_MIN_POOL_SIZE });
+    await wallet.Load({
+      useP2p: false,
+      minPoolSize: getSourceMinPoolSize(source),
+    });
+    await prunePrivateKeyPool(wallet, source);
     await configureElectrumNodes(wallet);
 
     // Seed initial address and balance snapshot before connecting.

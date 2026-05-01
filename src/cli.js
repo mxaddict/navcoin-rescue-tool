@@ -102,9 +102,39 @@ async function handleStatus() {
     process.stdout.write(`Imported sources: ${status.sourceCount}\n`);
 
     for (const source of status.sources) {
+      const typeLabel = source.walletType
+        ? `${source.type}:${source.walletType}`
+        : source.type;
+      const syncLabel =
+        source.syncStatus === 'syncing'
+          ? `syncing(${source.syncProgress}%)`
+          : source.syncStatus;
+      const serverLabel = source.server ? ` server=${source.server}` : '';
+
+      process.stdout.write(`\nSource: ${source.id} [${typeLabel}]\n`);
+      process.stdout.write(`  Label:  ${source.label}\n`);
       process.stdout.write(
-        `- ${source.id} ${source.label} [${source.type}${source.walletType ? `:${source.walletType}` : ''}] status=${source.status} sync=${source.syncStatus}${source.wallet ? ` wallet=${source.wallet.databaseName}` : ''}\n`,
+        `  Status: ${source.status}  Sync: ${syncLabel}${serverLabel}\n`,
       );
+
+      if (source.liveError) {
+        process.stdout.write(`  Error:  ${source.liveError}\n`);
+      }
+
+      const navConfirmed = (source.balance.nav.confirmed / 1e8).toFixed(8);
+      const navPending = (source.balance.nav.pending / 1e8).toFixed(8);
+      const staked = (source.balance.staked.confirmed / 1e8).toFixed(8);
+      process.stdout.write(
+        `  Balance: ${navConfirmed} NAV confirmed  ${navPending} NAV pending  ${staked} NAV staked\n`,
+      );
+
+      if (source.addresses.length > 0) {
+        process.stdout.write(`  Addresses (${source.addresses.length}):\n`);
+        for (const addr of source.addresses) {
+          const usedLabel = addr.used ? ' [used]' : '';
+          process.stdout.write(`    ${addr.address}${usedLabel}\n`);
+        }
+      }
     }
   } catch {
     process.stderr.write(

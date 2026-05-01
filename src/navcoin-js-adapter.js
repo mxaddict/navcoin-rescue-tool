@@ -77,6 +77,11 @@ function buildWalletOptions(sourceId, source) {
   return options;
 }
 
+export async function getNavWallet(root = getAppDataRoot()) {
+  const layout = getLayout(root);
+  return initNavcoinJs(layout.walletsDir);
+}
+
 export function getWalletStorageDetails(sourceId, root = getAppDataRoot()) {
   return {
     backend: 'navcoin-js',

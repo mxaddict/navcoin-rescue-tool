@@ -13,7 +13,15 @@ import {
   writeDaemonState,
 } from './app-data.js';
 import { DAEMON_HOST, DAEMON_PORT } from './constants.js';
-import { importSource, removeSource } from './source-registry.js';
+import { getNavWallet } from './navcoin-js-adapter.js';
+import { importSource, removeSource, readSources } from './source-registry.js';
+import {
+  openSourceWallet,
+  closeSourceWallet,
+  closeAllWallets,
+  getAllSourceStates,
+  getSourceState,
+} from './wallet-manager.js';
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { 'Content-Type': 'application/json' });
@@ -41,6 +49,16 @@ async function main() {
   await bootstrapAppData(root);
   const authCookie = await ensureAuthCookie(root);
 
+  // Open existing imported source wallets in background (non-blocking).
+  getNavWallet(root)
+    .then(async (navWallet) => {
+      const stored = await readSources(root);
+      for (const source of stored.sources) {
+        openSourceWallet(source, root, navWallet).catch(() => {});
+      }
+    })
+    .catch(() => {});
+
   const logStream = fs.createWriteStream(layout.daemonLogFile, { flags: 'a' });
   const server = http.createServer(async (request, response) => {
     if (request.headers.authorization !== authCookie) {
@@ -50,11 +68,30 @@ async function main() {
 
     if (request.method === 'GET' && request.url === '/status') {
       const status = await readStatus(root);
+      const syncStates = getAllSourceStates();
+
+      const sources = status.sources.sources.map((source) => {
+        const live = getSourceState(source.id);
+        return {
+          ...source,
+          syncStatus: live?.syncStatus ?? source.syncStatus,
+          syncProgress: live?.syncProgress ?? 0,
+          connected: live?.connected ?? false,
+          server: live?.server ?? null,
+          addresses: live?.addresses ?? [],
+          balance: live?.balance ?? {
+            nav: { confirmed: 0, pending: 0 },
+            staked: { confirmed: 0, pending: 0 },
+          },
+          liveError: live?.error ?? null,
+        };
+      });
+
       sendJson(response, 200, {
         daemon: status.daemon,
-        sourceCount: status.sources.sources.length,
+        sourceCount: sources.length,
         appData: status.layout.root,
-        sources: status.sources.sources,
+        sources,
       });
       return;
     }
@@ -62,6 +99,14 @@ async function main() {
     if (request.method === 'POST' && request.url === '/import') {
       try {
         const source = await importSource(await readJsonBody(request), root);
+
+        // Open the newly imported wallet in background.
+        getNavWallet(root)
+          .then((navWallet) =>
+            openSourceWallet(source, root, navWallet).catch(() => {}),
+          )
+          .catch(() => {});
+
         sendJson(response, 200, { source });
       } catch (error) {
         sendJson(response, 400, { error: error.message });
@@ -72,6 +117,7 @@ async function main() {
     if (request.method === 'POST' && request.url === '/remove') {
       try {
         const body = await readJsonBody(request);
+        await closeSourceWallet(body.sourceId);
         const result = await removeSource(body.sourceId, root);
         sendJson(response, 200, result);
       } catch (error) {
@@ -83,6 +129,7 @@ async function main() {
     if (request.method === 'POST' && request.url === '/daemon/stop') {
       sendJson(response, 200, { ok: true });
       server.close(async () => {
+        await closeAllWallets();
         await writeDaemonState({ status: 'stopped', pid: null }, root);
         process.exit(0);
       });
@@ -131,6 +178,7 @@ async function main() {
       `${new Date().toISOString()} daemon stopping signal=${signal}\n`,
     );
     server.close(async () => {
+      await closeAllWallets();
       await writeDaemonState({ status: 'stopped', pid: null }, root);
       process.exit(0);
     });

@@ -110,10 +110,17 @@ CLI invocation should be `ntr` for short, frequent use.
   - CLI smoke test for `ntr import`, `ntr remove`, and per-source `status`
   - initial GitHub Actions CI workflow for format and test checks
   - real `navcoin-js` wallet DB creation for imported sources
+- Completed: sync state, address, and balance reporting.
+- Implemented:
+  - `src/wallet-manager.js` — in-memory per-source wallet state tracker
+  - daemon reopens all registered source wallets on start
+  - per-source `syncStatus`, `syncProgress`, `connected`, `server`, `addresses`,
+    `balance` in `GET /status`
+  - `ntr status` renders per-source addresses and NAV/staked balances
+  - wallet-manager unit tests with mocked wallet
 - Next slice:
-  - replace sync placeholders with real daemon-managed sync state
-  - add wallet-backed address and balance reporting to `status`
-  - define daemon-side wallet reopen flow on restart
+  - sweep prepare and confirm flow
+  - `ntr sweep <address>` with destination re-entry and `SEND MY COINS` phrase
 - Deferred to later slices:
   - TUI default flow
   - sweep implementation

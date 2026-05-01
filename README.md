@@ -18,10 +18,10 @@ What works now:
 - `navcoin-js`-backed wallet container creation for mnemonic and private-key
   imports
 - source removal and duplicate-source rejection
+- live Electrum sync with per-source address and balance reporting in `status`
 
 What does not work yet:
 
-- no real balance discovery or address reporting
 - no sweep transaction creation or broadcast
 - no TUI or GUI implementation yet
 
@@ -154,9 +154,9 @@ Files:
 
 Near-term work:
 
-1. replace sync placeholders with real sync state and richer status reporting
-2. add wallet-backed address and balance reporting to `status`
-3. reopen and reconcile existing wallet DBs on daemon restart
+1. sweep prepare and confirm flow (`ntr sweep <address>`)
+2. TUI default `ntr` flow
+3. Electron GUI client
 
 Longer-term direction:
 

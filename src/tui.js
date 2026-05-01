@@ -439,6 +439,10 @@ export async function launchTui() {
   }
 
   setTerminalBg(BG);
+  // Erase entire screen so all cells are painted with the new background
+  // before blessed initialises — prevents the original terminal color showing
+  // at the edges.
+  process.stdout.write('\x1b[2J');
 
   const screen = blessed.screen({
     smartCSR: true,
@@ -718,6 +722,8 @@ export async function launchTui() {
   screen.on('destroy', () => {
     clearInterval(refreshTimer);
     resetTerminalBg();
+    // Clear screen after reset so no cells are left painted in the Navio dark bg.
+    process.stdout.write('\x1b[2J\x1b[H');
   });
 
   inputBox.focus();

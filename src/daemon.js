@@ -21,6 +21,8 @@ import {
   closeAllWallets,
   getAllSourceStates,
   getSourceState,
+  prepareSweep,
+  executeSweep,
 } from './wallet-manager.js';
 
 function sendJson(response, statusCode, payload) {
@@ -120,6 +122,41 @@ async function main() {
         await closeSourceWallet(body.sourceId);
         const result = await removeSource(body.sourceId, root);
         sendJson(response, 200, result);
+      } catch (error) {
+        sendJson(response, 400, { error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/sweep/prepare') {
+      try {
+        const preview = prepareSweep();
+        sendJson(response, 200, { preview });
+      } catch (error) {
+        sendJson(response, 400, { error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/sweep/confirm') {
+      try {
+        const body = await readJsonBody(request);
+
+        if (!body.destination) {
+          throw new Error('destination is required');
+        }
+
+        if (body.confirmPhrase !== 'SEND MY COINS') {
+          throw new Error(
+            'confirmPhrase must be exactly "SEND MY COINS" to proceed',
+          );
+        }
+
+        // Re-validate sync state at confirm time.
+        prepareSweep();
+
+        const result = await executeSweep(body.destination);
+        sendJson(response, 200, { result });
       } catch (error) {
         sendJson(response, 400, { error: error.message });
       }

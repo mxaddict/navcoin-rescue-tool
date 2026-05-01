@@ -48,3 +48,15 @@ export function removeDaemonSource(sourceId, root) {
     body: { sourceId },
   });
 }
+
+export function sweepPrepare(root) {
+  return daemonRequest('/sweep/prepare', { method: 'POST', root });
+}
+
+export function sweepConfirm(destination, confirmPhrase, root) {
+  return daemonRequest('/sweep/confirm', {
+    method: 'POST',
+    root,
+    body: { destination, confirmPhrase },
+  });
+}

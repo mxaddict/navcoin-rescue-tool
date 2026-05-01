@@ -165,3 +165,100 @@ export async function closeSourceWallet(sourceId) {
 export async function closeAllWallets() {
   await Promise.all([...walletState.keys()].map(closeSourceWallet));
 }
+
+/**
+ * Validate that all sources are fully synced and return a sweep preview.
+ *
+ * Returns:
+ *   { totalNav, sources: [{ sourceId, nav }] }
+ *
+ * Throws if any source is not synced or has an error.
+ */
+export function prepareSweep() {
+  const states = [...walletState.values()];
+
+  if (states.length === 0) {
+    throw new Error('No imported sources. Import a wallet before sweeping.');
+  }
+
+  for (const state of states) {
+    if (state.error) {
+      throw new Error(
+        `Source ${state.sourceId} is in error state: ${state.error}`,
+      );
+    }
+
+    if (state.syncStatus !== 'synced') {
+      throw new Error(
+        `Source ${state.sourceId} is not fully synced (status: ${state.syncStatus}). Wait for sync to complete.`,
+      );
+    }
+  }
+
+  let totalNav = 0;
+  const sources = [];
+
+  for (const state of states) {
+    const nav = state.balance.nav.confirmed;
+    totalNav += nav;
+    sources.push({ sourceId: state.sourceId, nav });
+  }
+
+  return { totalNav, sources };
+}
+
+/**
+ * Execute the sweep: create and broadcast a NAV transaction from each source
+ * wallet that has a non-zero confirmed balance.
+ *
+ * Returns:
+ *   { hashes: string[], totalSent: number, totalFee: number }
+ *
+ * Throws if any broadcast fails.
+ */
+export async function executeSweep(destination) {
+  const states = [...walletState.values()];
+  const hashes = [];
+  let totalSent = 0;
+  let totalFee = 0;
+
+  for (const state of states) {
+    const nav = state.balance.nav.confirmed;
+
+    if (nav <= 0 || !state.wallet) {
+      continue;
+    }
+
+    const tx = await state.wallet.NavCreateTransaction(
+      destination,
+      nav,
+      '',
+      STATIC_WALLET_PASSWORD,
+      true, // subtractFee — fee comes out of the amount
+    );
+
+    if (!tx || !tx.tx) {
+      throw new Error(
+        `Failed to create transaction for source ${state.sourceId}`,
+      );
+    }
+
+    const result = await state.wallet.SendTransaction(tx.tx);
+
+    if (result.error) {
+      throw new Error(
+        `Broadcast failed for source ${state.sourceId}: ${result.error}`,
+      );
+    }
+
+    const fee = tx.fee ?? 0;
+    totalFee += fee;
+    totalSent += nav - fee;
+
+    if (result.hashes) {
+      hashes.push(...result.hashes);
+    }
+  }
+
+  return { hashes, totalSent, totalFee };
+}

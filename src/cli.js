@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import process from 'node:process';
 import path from 'node:path';
@@ -17,6 +18,8 @@ import {
   importDaemonSource,
   removeDaemonSource,
   stopDaemon,
+  sweepPrepare,
+  sweepConfirm,
 } from './daemon-client.js';
 import { SUPPORTED_MNEMONIC_WALLET_TYPES } from './constants.js';
 import {
@@ -312,8 +315,103 @@ async function waitForDaemonReady(daemon, root) {
   });
 }
 
-function printCommandPlaceholder(command) {
-  process.stdout.write(`${CLI_NAME} ${command} not implemented yet.\n`);
+function prompt(question) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
+async function handleSweep(argv) {
+  const [destination] = argv;
+
+  if (!destination) {
+    process.stderr.write('Usage: ntr sweep <destination-address>\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  const root = getAppDataRoot();
+
+  // Step 1: call prepare — validates all sources are synced, returns preview.
+  let preview;
+
+  try {
+    const response = await sweepPrepare(root);
+    preview = response.preview;
+  } catch (error) {
+    process.stderr.write(`Sweep blocked: ${error.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const totalNav = (preview.totalNav / 1e8).toFixed(8);
+
+  process.stdout.write(`\nSweep preview\n`);
+  process.stdout.write(`  Destination : ${destination}\n`);
+  process.stdout.write(
+    `  Total NAV   : ${totalNav} NAV (confirmed, before fee)\n`,
+  );
+  process.stdout.write(`\nSources:\n`);
+
+  for (const src of preview.sources) {
+    process.stdout.write(
+      `  ${src.sourceId}  ${(src.nav / 1e8).toFixed(8)} NAV\n`,
+    );
+  }
+
+  // Step 2: re-enter destination.
+  const reenter = await prompt(
+    '\nRe-enter the destination address to confirm:\n> ',
+  );
+
+  if (reenter.trim() !== destination) {
+    process.stderr.write('Destination mismatch. Sweep aborted.\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  // Step 3: require SEND MY COINS.
+  process.stdout.write('\nType SEND MY COINS to broadcast the sweep:\n');
+  const phrase = await prompt('> ');
+
+  if (phrase.trim() !== 'SEND MY COINS') {
+    process.stderr.write('Confirmation phrase incorrect. Sweep aborted.\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  // Step 4: execute.
+  try {
+    const response = await sweepConfirm(destination, 'SEND MY COINS', root);
+    const result = response.result;
+
+    process.stdout.write('\nSweep broadcast successfully.\n');
+    process.stdout.write(
+      `  Total sent : ${(result.totalSent / 1e8).toFixed(8)} NAV\n`,
+    );
+    process.stdout.write(
+      `  Total fee  : ${(result.totalFee / 1e8).toFixed(8)} NAV\n`,
+    );
+
+    if (result.hashes && result.hashes.length > 0) {
+      process.stdout.write('  Tx hashes:\n');
+
+      for (const hash of result.hashes) {
+        process.stdout.write(`    ${hash}\n`);
+      }
+    }
+  } catch (error) {
+    process.stderr.write(`Sweep failed: ${error.message}\n`);
+    process.exitCode = 1;
+  }
 }
 
 async function main(argv) {
@@ -339,7 +437,7 @@ async function main(argv) {
       await handleRemove(rest);
       return;
     case 'sweep':
-      printCommandPlaceholder(command);
+      await handleSweep(rest);
       return;
     case 'help':
     case '--help':

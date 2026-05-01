@@ -73,13 +73,13 @@ export async function bootstrapAppData(root = getAppDataRoot()) {
         status: 'initialized',
       },
       null,
-      2
-    ) + '\n'
+      2,
+    ) + '\n',
   );
 
   await ensureFile(
     layout.sourcesFile,
-    JSON.stringify({ sources: [] }, null, 2) + '\n'
+    JSON.stringify({ sources: [] }, null, 2) + '\n',
   );
   await ensureAuthCookie(root);
   await ensureFile(layout.daemonLogFile, '');
@@ -124,7 +124,7 @@ export async function writeDaemonState(partialState, root = getAppDataRoot()) {
 
   await fs.writeFile(
     layout.daemonFile,
-    `${JSON.stringify(nextState, null, 2)}\n`
+    `${JSON.stringify(nextState, null, 2)}\n`,
   );
   return nextState;
 }

@@ -82,7 +82,7 @@ export async function writeSources(sourcesState, root = getAppDataRoot()) {
   const layout = getLayout(root);
   await fs.writeFile(
     layout.sourcesFile,
-    `${JSON.stringify(sourcesState, null, 2)}\n`
+    `${JSON.stringify(sourcesState, null, 2)}\n`,
   );
   return sourcesState;
 }

@@ -7,7 +7,7 @@ function buildUrl(pathname) {
 
 export async function daemonRequest(
   pathname,
-  { method = 'GET', root, body } = {}
+  { method = 'GET', root, body } = {},
 ) {
   const authCookie = await readAuthCookie(root);
   const response = await fetch(buildUrl(pathname), {
@@ -22,7 +22,7 @@ export async function daemonRequest(
   if (!response.ok) {
     const text = await response.text();
     throw new Error(
-      text || `Daemon request failed with status ${response.status}`
+      text || `Daemon request failed with status ${response.status}`,
     );
   }
 

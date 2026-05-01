@@ -13,11 +13,11 @@ import {
 test('getAppDataRoot uses platform-specific locations', () => {
   assert.equal(
     getAppDataRoot('linux', { XDG_DATA_HOME: '/tmp/data' }),
-    path.join('/tmp/data', 'navcoin-rescue-tool')
+    path.join('/tmp/data', 'navcoin-rescue-tool'),
   );
   assert.equal(
     getAppDataRoot('win32', { APPDATA: 'C:\\Users\\me\\AppData\\Roaming' }),
-    path.join('C:\\Users\\me\\AppData\\Roaming', 'navcoin-rescue-tool')
+    path.join('C:\\Users\\me\\AppData\\Roaming', 'navcoin-rescue-tool'),
   );
 });
 

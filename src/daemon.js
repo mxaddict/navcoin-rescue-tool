@@ -102,10 +102,10 @@ async function main() {
             ? 'Port 46117 already in use'
             : error.message,
       },
-      root
+      root,
     );
     logStream.write(
-      `${new Date().toISOString()} ${error.stack || error.message}\n`
+      `${new Date().toISOString()} ${error.stack || error.message}\n`,
     );
     process.exit(1);
   });
@@ -118,17 +118,17 @@ async function main() {
         error: null,
         startedAt: new Date().toISOString(),
       },
-      root
+      root,
     );
     logStream.write(
-      `${new Date().toISOString()} daemon started pid=${process.pid}\n`
+      `${new Date().toISOString()} daemon started pid=${process.pid}\n`,
     );
     process.stdout.write('ready\n');
   });
 
   const shutdown = async (signal) => {
     logStream.write(
-      `${new Date().toISOString()} daemon stopping signal=${signal}\n`
+      `${new Date().toISOString()} daemon stopping signal=${signal}\n`,
     );
     server.close(async () => {
       await writeDaemonState({ status: 'stopped', pid: null }, root);

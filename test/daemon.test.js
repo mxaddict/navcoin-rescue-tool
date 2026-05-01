@@ -22,7 +22,7 @@ async function waitForReady(child) {
     let stdout = '';
     const timeout = setTimeout(
       () => reject(new Error('daemon ready timeout')),
-      3000
+      3000,
     );
 
     child.stdout.on('data', (chunk) => {
@@ -126,7 +126,7 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
         phrase:
           'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu',
       },
-      root
+      root,
     );
 
     assert.equal(imported.source.label, 'Main wallet');
@@ -145,9 +145,9 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
           phrase:
             'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu',
         },
-        root
+        root,
       ),
-      /Duplicate source/
+      /Duplicate source/,
     );
 
     const reloaded = await readStatus(root);

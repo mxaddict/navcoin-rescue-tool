@@ -38,13 +38,13 @@ process.stdout.on('error', (error) => {
 
 function printHelp() {
   process.stdout.write(
-    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --label <label> --phrase <words>\n  ${CLI_NAME} import private-key --label <label> --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} sweep <address>\n`
+    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --label <label> --phrase <words>\n  ${CLI_NAME} import private-key --label <label> --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} sweep <address>\n`,
   );
 }
 
 function printTuiPlaceholder() {
   process.stdout.write(
-    `${CLI_NAME} TUI not implemented yet. Use \`${CLI_NAME} start\` to initialize local state.\n`
+    `${CLI_NAME} TUI not implemented yet. Use \`${CLI_NAME} start\` to initialize local state.\n`,
   );
 }
 
@@ -55,7 +55,7 @@ async function handleStart() {
   try {
     const status = await getDaemonStatus(root);
     process.stdout.write(
-      `Daemon already running with pid ${status.daemon.pid}.\n`
+      `Daemon already running with pid ${status.daemon.pid}.\n`,
     );
     process.stdout.write(`App data: ${layout.root}\n`);
     return;
@@ -96,19 +96,19 @@ async function handleStatus() {
     const status = await getDaemonStatus(getAppDataRoot());
     process.stdout.write(`Daemon status: ${status.daemon.status}\n`);
     process.stdout.write(
-      `Daemon API: http://${status.daemon.host}:${status.daemon.port}\n`
+      `Daemon API: http://${status.daemon.host}:${status.daemon.port}\n`,
     );
     process.stdout.write(`App data: ${status.appData}\n`);
     process.stdout.write(`Imported sources: ${status.sourceCount}\n`);
 
     for (const source of status.sources) {
       process.stdout.write(
-        `- ${source.id} ${source.label} [${source.type}${source.walletType ? `:${source.walletType}` : ''}] status=${source.status} sync=${source.syncStatus}\n`
+        `- ${source.id} ${source.label} [${source.type}${source.walletType ? `:${source.walletType}` : ''}] status=${source.status} sync=${source.syncStatus}\n`,
       );
     }
   } catch {
     process.stderr.write(
-      `No running daemon found. Run \`${CLI_NAME} start\` first.\n`
+      `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
     );
     process.exitCode = 1;
   }
@@ -157,7 +157,7 @@ async function handleImport(argv) {
           label: options.label,
           phrase: options.phrase,
         },
-        root
+        root,
       );
     } else if (sourceType === 'private-key') {
       const keys = options.key
@@ -171,11 +171,11 @@ async function handleImport(argv) {
           label: options.label,
           keys,
         },
-        root
+        root,
       );
     } else {
       throw new Error(
-        `Unsupported import type: ${sourceType}. Use mnemonic or private-key.`
+        `Unsupported import type: ${sourceType}. Use mnemonic or private-key.`,
       );
     }
 
@@ -190,7 +190,7 @@ async function handleImport(argv) {
     process.stderr.write(`${error.message}\n`);
     if (sourceType === 'mnemonic') {
       process.stderr.write(
-        `Supported wallet types: ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}\n`
+        `Supported wallet types: ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}\n`,
       );
     }
     process.exitCode = 1;

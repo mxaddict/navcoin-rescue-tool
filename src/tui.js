@@ -1175,7 +1175,7 @@ export async function launchTui() {
                   : s.syncStatus === 'syncing-txs'
                     ? ', txs'
                     : '';
-              return `syncing ${s.syncProgress}%${phase}`;
+              return `syncing (${s.syncProgress}%${phase})`;
             })
             .join('  ');
         } else if (connecting.length > 0) {

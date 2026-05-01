@@ -1,5 +1,5 @@
 import { getLayout } from './app-data.js';
-import { STATIC_WALLET_PASSWORD } from './constants.js';
+import { STATIC_WALLET_PASSWORD, RECOVERY_MIN_POOL_SIZE } from './constants.js';
 
 // Per-source wallet state held in daemon memory.
 // Not persisted - rebuilt on every daemon start.
@@ -83,6 +83,7 @@ export async function openSourceWallet(source, root, navWallet) {
     spendingPassword: STATIC_WALLET_PASSWORD,
     network: 'mainnet',
     log: false,
+    minPoolSize: RECOVERY_MIN_POOL_SIZE,
   });
 
   state.wallet = wallet;

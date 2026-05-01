@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { getAppDataRoot, getLayout } from './app-data.js';
-import { STATIC_WALLET_PASSWORD } from './constants.js';
+import { STATIC_WALLET_PASSWORD, RECOVERY_MIN_POOL_SIZE } from './constants.js';
 
 let navcoinJsPromise;
 let navcoinInitPromise;
@@ -63,6 +63,7 @@ function buildWalletOptions(sourceId, source) {
     spendingPassword: STATIC_WALLET_PASSWORD,
     network: 'mainnet',
     log: false,
+    minPoolSize: RECOVERY_MIN_POOL_SIZE,
   };
 
   if (source.type === 'mnemonic') {

@@ -733,26 +733,18 @@ class WalletFile extends events.EventEmitter {
   }
 
   async GetScriptHashes() {
-    console.log('[sync] GetScriptHashes: starting');
     let stakingAddress =
       arguments.length > 0 && arguments[0] !== undefined
         ? arguments[0]
         : undefined;
     if (!this.client) return;
     let ret = [];
-    console.log('[sync] GetScriptHashes: calling GetNavAddresses...');
     let addresses = await this.db.GetNavAddresses();
-    console.log(
-      `[sync] GetScriptHashes: got ${addresses.length} addresses, processing...`,
-    );
 
     const addrTotal = addresses.length;
     const SKIP_STAKING_LOOKUP = true;
     for (let i in addresses) {
       const idx = parseInt(i) + 1;
-      if (idx % 100 === 0 || idx === 1 || idx === addrTotal) {
-        console.log(`[sync] GetScriptHashes: ${idx}/${addrTotal}`);
-      }
       if (!stakingAddress) {
         if (!this.requestedStakingKeys && !SKIP_STAKING_LOOKUP) {
           let stakingAddresses = await this.client.blockchain_staking_getKeys(
@@ -1040,7 +1032,6 @@ class WalletFile extends events.EventEmitter {
         ? arguments[0]
         : undefined;
 
-    console.log('[sync] Sync() method entered');
     if (!this.client || this.client.status === 0) {
       await this.Connect();
     }
@@ -1065,17 +1056,12 @@ class WalletFile extends events.EventEmitter {
   }
 
   async SyncTxHashes() {
-    console.log('[sync] SyncTxHashes() started');
     let staking =
       arguments.length > 0 && arguments[0] !== undefined
         ? arguments[0]
         : undefined;
     let txs = arguments.length > 1 ? arguments[1] : undefined;
-    console.log('[sync] calling GetScriptHashes...');
     let scriptHashes = await this.GetScriptHashes(staking);
-    console.log(
-      `[sync] GetScriptHashes returned ${scriptHashes.length} addresses`,
-    );
 
     if (!this.alreadyQueued && !staking) {
       let pending = await this.db.GetPendingTxs();
@@ -1095,18 +1081,11 @@ class WalletFile extends events.EventEmitter {
     }
 
     const total = scriptHashes.length;
-    console.log(
-      `[sync] starting scripthash loop for ${total} addresses (batched)`,
-    );
     const BATCH_SIZE = 10;
     for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
       const batch = scriptHashes.slice(batchStart, batchStart + BATCH_SIZE);
       const index = batchStart + 1;
       this.emit('scripthash_progress', index, total);
-      const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
-      if (batchNum % 10 === 1 || index === total) {
-        console.log(`[sync] scripthash ${index}/${total} (batch ${batchNum})`);
-      }
 
       const promises = batch.map(async (s) => {
         try {
@@ -1116,12 +1095,11 @@ class WalletFile extends events.EventEmitter {
             await this.client.blockchain_scripthash_subscribe(s);
           await this.ReceivedScriptHashStatus(s, currentStatus, txs);
         } catch (e) {
-          console.log(`[sync] scripthash error: ${e.message}`);
+          // Silent fail - don't spam logs
         }
       });
       await Promise.all(promises);
     }
-    console.log(`[sync] scripthash loop done for ${total} addresses`);
 
     if (!staking) {
       let stakingAddresses = await this.GetStakingAddresses();

@@ -13,7 +13,11 @@ import {
   writeDaemonState,
 } from './app-data.js';
 import { DAEMON_HOST, DAEMON_PORT } from './constants.js';
-import { getNavWallet, resetNavcoinJs } from './navcoin-js-adapter.js';
+import {
+  createImportedWallet,
+  getNavWallet,
+  resetNavcoinJs,
+} from './navcoin-js-adapter.js';
 import {
   importSource,
   removeSource,
@@ -126,22 +130,30 @@ async function main() {
       try {
         const body = await readJsonBody(request);
         console.log(`[daemon] importing ${body.type} source...`);
-        const source = await importSource(body, root);
+
+        // Import source metadata only (non-blocking - skip wallet creation).
+        const source = await importSource(body, root, {
+          createImportedWallet: async () => ({}),
+        });
         console.log(
-          `[daemon] imported ${source.id} (${source.walletType}), starting sync...`,
+          `[daemon] imported ${source.id} (${source.walletType}), creating wallet in background...`,
         );
 
-        // Open the newly imported wallet in background.
-        getNavWallet(root)
-          .then((navWallet) =>
+        // Create wallet in background (non-blocking).
+        createImportedWallet(source, root)
+          .then(() => {
+            console.log(`[daemon] wallet created, opening...`);
+            return getNavWallet(root);
+          })
+          .then((navWallet) => {
             openSourceWallet(source, root, navWallet).catch((err) => {
-              console.log(
-                `[daemon] failed to open wallet ${source.id}: ${err.message}`,
-              );
-            }),
-          )
+              console.log(`[daemon] failed to open wallet: ${err.message}`);
+            });
+          })
           .catch((err) => {
-            console.log(`[daemon] getNavWallet failed: ${err.message}`);
+            console.log(
+              `[daemon] background wallet creation failed: ${err.message}`,
+            );
           });
 
         sendJson(response, 200, { source });

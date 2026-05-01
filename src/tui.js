@@ -159,9 +159,28 @@ const COMMANDS = [
   'quit',
 ];
 
-function tabComplete(partial) {
-  if (!partial) return null;
-  return COMMANDS.find((c) => c.startsWith(partial)) ?? null;
+/**
+ * Return all commands that start with the given partial string,
+ * sorted longest-first so the most specific match comes first.
+ */
+function tabMatches(partial) {
+  if (!partial) return COMMANDS.slice();
+  return COMMANDS.filter((c) => c.startsWith(partial)).sort(
+    (a, b) => b.length - a.length,
+  );
+}
+
+/**
+ * Cycle through matches on repeated Tab presses.
+ * Returns the next match after `current`, or the first match if none.
+ */
+function tabComplete(partial, current) {
+  const matches = tabMatches(partial);
+  if (matches.length === 0) return null;
+  if (!current) return matches[0];
+  const idx = matches.indexOf(current);
+  // If current is already a full match, cycle to next; otherwise start at 0.
+  return matches[(idx + 1) % matches.length];
 }
 
 // ---------------------------------------------------------------------------
@@ -716,13 +735,33 @@ export async function launchTui() {
     }
   }
 
-  // Tab completion.
-  inputBox.key('tab', () => {
+  // Tab completion — intercept at screen level with ignoreLocked so blessed
+  // doesn't consume Tab for focus cycling before we see it.
+  // Track the last completed value so repeated Tab presses cycle through matches.
+  let lastCompleted = null;
+
+  screen.key(['tab'], () => {
+    if (askDepth > 0) return; // don't interfere with ask() prompts
     const current = inputBox.getValue();
-    const completed = tabComplete(current);
+    // If the current value is the result of the last completion, cycle from it;
+    // otherwise start fresh from whatever the user typed.
+    const base = current === lastCompleted ? lastCompleted : current;
+    const completed = tabComplete(
+      base,
+      current === lastCompleted ? current : null,
+    );
     if (completed) {
+      lastCompleted = completed;
       inputBox.setValue(completed);
+      inputBox.focus();
       screen.render();
+    }
+  });
+
+  // Reset cycle state when user types anything.
+  inputBox.on('keypress', (ch, key) => {
+    if (key && key.name !== 'tab') {
+      lastCompleted = null;
     }
   });
 

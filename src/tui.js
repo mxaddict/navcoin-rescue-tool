@@ -213,7 +213,9 @@ function renderHelp(C) {
     `    ${C.cyan('help')}                Show this help`,
     `    ${C.cyan('quit')}                Exit the TUI (daemon keeps running)`,
     '',
-    C.muted('  Tab auto-completes commands.  Ctrl+C to quit.'),
+    C.muted(
+      '  Tab auto-completes commands.  PgUp/PgDn or Shift+↑↓ to scroll.  Ctrl+C to quit.',
+    ),
     SEP,
   ].join('\n');
 }
@@ -549,7 +551,9 @@ export async function launchTui() {
     // Alacritty that don't fully support all capabilities blessed probes.
     terminal: 'xterm-256color',
     fullUnicode: true,
-    mouse: true,
+    // Mouse mode is intentionally disabled — enabling it intercepts the
+    // terminal's native mouse events and breaks text selection for copy/paste.
+    // Scrolling is handled via keyboard shortcuts instead.
   });
 
   // ---- Outer container — provides 1-cell padding on all sides ------------
@@ -570,7 +574,9 @@ export async function launchTui() {
     height: 1,
     content:
       C.boldMagenta(' navcoin-rescue-tool ') +
-      C.muted('| help  Tab=complete  Ctrl+C=quit'),
+      C.muted(
+        '| help  Tab=complete  PgUp/PgDn=scroll  Shift+↑↓=scroll  Ctrl+C=quit',
+      ),
     tags: false,
   });
 
@@ -593,7 +599,7 @@ export async function launchTui() {
     height: '100%-6',
     scrollable: true,
     alwaysScroll: true,
-    mouse: true,
+    keys: true,
     scrollbar: {
       ch: '▐',
       style: { fg: dark ? '#818cf8' : '#4338ca' },
@@ -885,6 +891,25 @@ export async function launchTui() {
   screen.key(['C-c'], handleCtrlC);
   inputBox.key(['C-c'], handleCtrlC);
 
+  // ---- Keyboard scroll — keeps native text selection working by avoiding
+  // mouse mode. Page/arrow keys scroll the output while input has focus.
+  inputBox.key(['pageup'], () => {
+    output.scroll(-output.height);
+    screen.render();
+  });
+  inputBox.key(['pagedown'], () => {
+    output.scroll(output.height);
+    screen.render();
+  });
+  inputBox.key(['S-up'], () => {
+    output.scroll(-1);
+    screen.render();
+  });
+  inputBox.key(['S-down'], () => {
+    output.scroll(1);
+    screen.render();
+  });
+
   // ---- Startup ----------------------------------------------------------
   log(
     C.gradient('  navcoin-rescue-tool') +
@@ -936,7 +961,7 @@ export async function launchTui() {
         header.setContent(
           C.boldMagenta(' navcoin-rescue-tool ') +
             C.teal('● synced') +
-            C.muted('  | help  Tab=complete  Ctrl+C=quit'),
+            C.muted('  | help  Tab=complete  PgUp/PgDn=scroll  Ctrl+C=quit'),
         );
       }
 

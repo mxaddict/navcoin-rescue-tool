@@ -12,6 +12,7 @@ This repository is still early-stage and is not ready for real funds yet.
 
 What works now:
 
+- TUI: run `ntr` with no arguments for a full terminal UI
 - daemon lifecycle: `ntr start`, `ntr status`, `ntr stop`
 - mnemonic and private-key import backed by `navcoin-js`
 - source removal and duplicate-source rejection
@@ -20,7 +21,7 @@ What works now:
 
 What does not work yet:
 
-- no TUI or GUI yet
+- no GUI yet
 
 ## Safety Warning
 
@@ -31,6 +32,30 @@ What does not work yet:
   wallet use.
 - All imported wallet state is encrypted with the static password
   `ObsidianSweepKey`.
+
+## TUI
+
+Run `ntr` with no arguments to launch the terminal UI:
+
+```bash
+ntr
+```
+
+The TUI auto-starts the daemon if it is not already running. Commands:
+
+| Command              | Description                                                |
+| -------------------- | ---------------------------------------------------------- |
+| `status`             | Show daemon and per-source sync, address, and balance info |
+| `import mnemonic`    | Import a mnemonic source interactively                     |
+| `import private-key` | Import one or more WIF private keys interactively          |
+| `remove`             | Remove an imported source                                  |
+| `sweep`              | Sweep all confirmed NAV to a destination address           |
+| `help`               | Show command reference                                     |
+| `quit`               | Exit the TUI                                               |
+
+- Tab auto-completes commands.
+- Press Ctrl+C twice to quit.
+- Adapts to dark and light terminal backgrounds automatically.
 
 ## CLI Usage
 
@@ -117,8 +142,7 @@ Layout:
 
 Near-term:
 
-1. TUI default `ntr` flow
-2. Electron GUI client
+1. Electron GUI client (`ntr-gui`)
 
 Longer-term:
 

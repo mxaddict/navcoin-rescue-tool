@@ -132,10 +132,26 @@ CLI invocation should be `ntr` for short, frequent use.
     destination → type `SEND MY COINS` → broadcast; aborts on any mismatch
   - 6 sweep unit tests covering prepare guards, execute path, zero-balance skip,
     broadcast error handling
+- Completed: TUI default flow.
+- Implemented:
+  - `src/tui.js` — blessed + chalk TUI launched by `ntr` with no arguments
+  - terminal background detection via OSC 11 query before blessed initialises
+  - WCAG luminance check selects dark or light Navio brand palette automatically
+  - layout: header bar, separator, scrollable output, warn row, input separator,
+    command input — all inside a 1-cell padded container
+  - tab completion for all commands
+  - double Ctrl+C to quit with pink warning on first press
+  - `status`, `import mnemonic`, `import private-key`, `remove`, `sweep`
+    commands all wired with multi-step `ask()` prompts
+  - `import private-key` accepts multiple keys, one at a time, blank to finish
+  - `remove` shows source list before asking for ID
+  - auto-starts daemon if not running, waits up to 5s
+  - 5s periodic status poll — auto-refreshes output when idle and state changes,
+    updates header with sync progress or synced indicator
+  - `xterm-256color` terminal override to suppress Alacritty terminfo errors
 - Next slice:
-  - TUI default flow (`ntr` with no arguments)
-- Deferred to later slices:
   - Electron GUI (`ntr-gui`)
+- Deferred to later slices:
   - CI release pipeline (cross-platform artifacts on version tags)
 
 ## CI And Releases

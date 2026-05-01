@@ -33,7 +33,7 @@ npm run format:check
 
 - Daemon listens on `127.0.0.1:46117`
 - Daemon owns all local state and persistence
-- CLI, planned TUI, and planned GUI share the same daemon backend via HTTP
+- CLI, TUI, and planned GUI all share the same daemon backend via HTTP
 
 Daemon API:
 
@@ -56,7 +56,22 @@ src/
   wallet-manager.js     in-memory per-source sync state, sweep logic
   source-registry.js    source CRUD, fingerprinting, dedup, sources.json
   cli.js                ntr CLI entrypoint and command handlers
+  tui.js                blessed TUI launched by ntr with no arguments
   gui.js                ntr-gui placeholder
+```
+
+## Testing the TUI
+
+The TUI cannot be tested via `npm test` as it takes over the terminal. Test manually:
+
+```bash
+node src/cli.js
+```
+
+Or if installed globally:
+
+```bash
+ntr
 ```
 
 ## Key Implementation Notes
@@ -70,6 +85,13 @@ src/
 - Auth cookie file uses `0600` permissions.
 - All test temp files go under repo-local `tmp/` (gitignored). Never use
   `os.tmpdir()` — use `makeProjectTempDir()` from `test/test-helpers.js`.
+- TUI uses `blessed` (CJS, via `createRequire`) and `chalk` (ESM, via dynamic
+  `import()`). Both must be imported this way due to the mixed module system.
+- TUI detects the terminal background via OSC 11 query before blessed
+  initialises — reads raw stdin with a 200ms timeout, falls back to dark palette
+  if unsupported. Uses WCAG relative luminance to decide dark vs light.
+- `blessed` screen must set `terminal: 'xterm-256color'` to suppress terminfo
+  parse errors on Alacritty and similar terminals.
 
 ## Contributing
 

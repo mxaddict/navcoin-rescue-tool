@@ -214,7 +214,7 @@ function renderHelp(C) {
     `    ${C.cyan('quit')}                Exit the TUI (daemon keeps running)`,
     '',
     C.muted(
-      '  Tab auto-completes.  PgUp/PgDn or Shift+↑↓ to scroll.  Ctrl+C to quit.',
+      '  Tab auto-completes.  PgUp/PgDn or ↑↓ to scroll.  Ctrl+C to quit.',
     ),
     SEP,
   ].join('\n');
@@ -552,7 +552,7 @@ export async function launchTui() {
     terminal: 'xterm-256color',
     fullUnicode: true,
     // Mouse mode disabled — preserves native terminal text selection.
-    // Scrolling is via PgUp/PgDn and Shift+↑↓.
+    // Scrolling is via PgUp/PgDn and ↑↓ arrow keys.
   });
 
   // ---- Outer container — provides 1-cell padding on all sides ------------
@@ -897,11 +897,11 @@ export async function launchTui() {
     output.scroll(output.height);
     screen.render();
   });
-  inputBox.key(['S-up'], () => {
+  inputBox.key(['up'], () => {
     output.scroll(-1);
     screen.render();
   });
-  inputBox.key(['S-down'], () => {
+  inputBox.key(['down'], () => {
     output.scroll(1);
     screen.render();
   });

@@ -696,11 +696,15 @@ export async function launchTui() {
     });
   });
 
-  // Ctrl+C to quit.
-  screen.key(['C-c'], () => {
+  // Ctrl+C to quit — must be on both screen and inputBox because blessed
+  // textbox with inputOnFocus captures raw keypresses before screen sees them.
+  function doQuit() {
     screen.destroy();
     process.exit(0);
-  });
+  }
+
+  screen.key(['C-c'], doQuit);
+  inputBox.key(['C-c'], doQuit);
 
   // ---- Startup ----------------------------------------------------------
   log(

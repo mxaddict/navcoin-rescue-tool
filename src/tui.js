@@ -549,6 +549,7 @@ export async function launchTui() {
     // Alacritty that don't fully support all capabilities blessed probes.
     terminal: 'xterm-256color',
     fullUnicode: true,
+    mouse: true,
   });
 
   // ---- Outer container — provides 1-cell padding on all sides ------------
@@ -592,6 +593,7 @@ export async function launchTui() {
     height: '100%-6',
     scrollable: true,
     alwaysScroll: true,
+    mouse: true,
     scrollbar: {
       ch: '▐',
       style: { fg: dark ? '#818cf8' : '#4338ca' },

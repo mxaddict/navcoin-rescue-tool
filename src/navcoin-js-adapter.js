@@ -150,21 +150,24 @@ export async function deleteWalletForSource(sourceId, root = getAppDataRoot()) {
   // Remove the wallet sqlite file.
   await fs.rm(storage.dataFile, { force: true });
 
-  // Remove the indexeddb system registry — it tracks known DBs and will
-  // cause "DB did not load" if it still references a deleted wallet file.
-  // It is recreated automatically on next navcoin-js init.
+  // Remove the indexeddb system registry — it tracks known DBs and causes
+  // "DB did not load" if it still references a deleted wallet file.
+  // Also reset the module-level promises so the next initNavcoinJs call
+  // re-runs setGlobalVars and rebuilds the shim state from the fresh files.
   await fs.rm(path.join(layout.walletsDir, '__sysdb__.sqlite'), {
     force: true,
   });
+
+  resetNavcoinJs();
 
   return storage;
 }
 
 /**
- * Reset the navcoin-js initialisation state so the next wallet operation
- * triggers a fresh wallet.Init() and rebuilds the indexeddb registry.
- * Call this after deleting wallet files to avoid stale registry errors.
+ * Reset the navcoin-js and indexeddb shim state so the next wallet operation
+ * reinitialises from scratch. Call after deleting wallet files.
  */
 export function resetNavcoinJs() {
   navcoinInitPromise = null;
+  navcoinJsPromise = null; // force re-import and re-init of shim on next use
 }

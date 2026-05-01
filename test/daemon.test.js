@@ -39,6 +39,14 @@ async function waitForReady(child) {
   });
 }
 
+function waitForExit(child) {
+  // If already exited, resolve immediately.
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => child.once('exit', resolve));
+}
+
 async function portInUse() {
   try {
     await fetch('http://127.0.0.1:46117/status');
@@ -84,12 +92,13 @@ test('daemon status requires auth cookie and supports stop', async (t) => {
     assert.equal(status.daemon.status, 'running');
 
     await stopDaemon(root);
-    await new Promise((resolve) => child.on('exit', resolve));
+    await waitForExit(child);
 
     const finalState = await readStatus(root);
     assert.equal(finalState.daemon.status, 'stopped');
   } finally {
     child.kill('SIGTERM');
+    await waitForExit(child);
     await fs.rm(root, { recursive: true, force: true });
   }
 });
@@ -159,8 +168,39 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
     const finalState = await readStatus(root);
     assert.deepEqual(finalState.sources.sources, []);
 
-    // Private-key import via daemon (runs navcoin-js in subprocess).
-    const privateKeyImported = await importDaemonSource(
+    await stopDaemon(root);
+    await waitForExit(child);
+  } finally {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('daemon private-key import works', async (t) => {
+  if (await portInUse()) {
+    t.skip('port 46117 already in use');
+    return;
+  }
+
+  const root = await makeProjectTempDir('daemon');
+  const projectRoot = getProjectRoot();
+
+  await bootstrapAppData(root);
+
+  const child = spawn(process.execPath, ['src/daemon.js'], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      NTR_APP_DATA: root,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  try {
+    await waitForReady(child);
+
+    const imported = await importDaemonSource(
       {
         type: 'private-key',
         keys: ['PCbhgKMp6ym9MgtMQ3XYxqnMrG3yFwAuQgTmZznbLxWExwxXH2pM'],
@@ -168,14 +208,15 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
       root,
     );
 
-    assert.equal(privateKeyImported.source.status, 'ready');
-    assert.equal(privateKeyImported.source.type, 'private-key');
-    assert.equal(privateKeyImported.source.wallet.backend, 'navcoin-js');
+    assert.equal(imported.source.status, 'ready');
+    assert.equal(imported.source.type, 'private-key');
+    assert.equal(imported.source.wallet.backend, 'navcoin-js');
 
     await stopDaemon(root);
-    await new Promise((resolve) => child.on('exit', resolve));
+    await waitForExit(child);
   } finally {
     child.kill('SIGTERM');
+    await waitForExit(child);
     await fs.rm(root, { recursive: true, force: true });
   }
 });

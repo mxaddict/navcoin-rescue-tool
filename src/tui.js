@@ -416,6 +416,11 @@ export async function launchTui() {
   const layout = getLayout(root);
   await bootstrapAppData(root);
 
+  // Navio dark background — forced on all widgets so the TUI looks identical
+  // on both dark and light terminal themes.
+  const BG = '#111827';
+  const FG = '#f9fafb'; // gray-50 — near-white, readable on dark bg
+
   const screen = blessed.screen({
     smartCSR: true,
     title: 'navcoin-rescue-tool',
@@ -423,6 +428,7 @@ export async function launchTui() {
     // Alacritty that don't fully support all capabilities blessed probes.
     terminal: 'xterm-256color',
     fullUnicode: true,
+    style: { bg: BG, fg: FG },
   });
 
   // ---- Header bar -------------------------------------------------------
@@ -435,6 +441,7 @@ export async function launchTui() {
       C.boldMagenta(' navcoin-rescue-tool ') +
       C.muted('| help  Tab=complete  Ctrl+C=quit'),
     tags: false,
+    style: { bg: BG, fg: FG },
   });
 
   // ---- Separator below header -------------------------------------------
@@ -445,6 +452,7 @@ export async function launchTui() {
     height: 1,
     content: C.muted('─'.repeat(200)), // blessed clips to terminal width
     tags: false,
+    style: { bg: BG, fg: FG },
   });
 
   // ---- Main output box --------------------------------------------------
@@ -458,10 +466,11 @@ export async function launchTui() {
     alwaysScroll: true,
     scrollbar: {
       ch: '▐',
-      style: { fg: '#6366f1' },
+      style: { fg: '#6366f1', bg: BG },
     },
     tags: false,
     wrap: true,
+    style: { bg: BG, fg: FG },
   });
 
   // ---- Separator above input --------------------------------------------
@@ -472,6 +481,7 @@ export async function launchTui() {
     height: 1,
     content: C.muted('─'.repeat(200)),
     tags: false,
+    style: { bg: BG, fg: FG },
   });
 
   // ---- Input box --------------------------------------------------------
@@ -482,8 +492,8 @@ export async function launchTui() {
     height: 1,
     inputOnFocus: true,
     style: {
-      fg: 'white',
-      bg: 'black',
+      fg: FG,
+      bg: BG,
     },
   });
 

@@ -39,6 +39,16 @@ test('importSource stores wallet-backed source metadata', async () => {
 test('importSource does not persist failed wallet creation', async () => {
   const root = await makeProjectTempDir('source');
 
+  // navcoin-js and Dexie log internal errors to console unconditionally when
+  // a wallet fails to open. Silence all console output for this test since
+  // the failure is intentional and already asserted via rejects().
+  const originalConsoleLog = console.log;
+  const originalConsoleWarn = console.warn;
+  const originalConsoleError = console.error;
+  console.log = () => {};
+  console.warn = () => {};
+  console.error = () => {};
+
   try {
     await bootstrapAppData(root);
 
@@ -59,6 +69,9 @@ test('importSource does not persist failed wallet creation', async () => {
     const stored = await readSources(root);
     assert.deepEqual(stored.sources, []);
   } finally {
+    console.log = originalConsoleLog;
+    console.warn = originalConsoleWarn;
+    console.error = originalConsoleError;
     await fs.rm(root, { recursive: true, force: true });
   }
 });

@@ -61,13 +61,27 @@ async function main() {
   getNavWallet(root)
     .then(async (navWallet) => {
       const stored = await readSources(root);
+      console.log(`[daemon] opening ${stored.sources.length} source(s)...`);
       for (const source of stored.sources) {
-        openSourceWallet(source, root, navWallet).catch(() => {});
+        console.log(`[daemon] opening source: ${source.id} (${source.type})`);
+        openSourceWallet(source, root, navWallet).catch((err) => {
+          console.log(
+            `[daemon] failed to open wallet ${source.id}: ${err.message}`,
+          );
+        });
       }
     })
     .catch(() => {});
 
   const logStream = fs.createWriteStream(layout.daemonLogFile, { flags: 'a' });
+  function log(msg) {
+    const timestamp = new Date().toISOString();
+    logStream.write(`${timestamp} ${msg}\n`);
+    console.log(`[daemon] ${msg}`);
+  }
+
+  console.log(`[daemon] log file: ${layout.daemonLogFile}`);
+
   const server = http.createServer(async (request, response) => {
     if (request.headers.authorization !== authCookie) {
       sendJson(response, 401, { error: 'Unauthorized' });
@@ -84,9 +98,13 @@ async function main() {
           ...source,
           syncStatus: live?.syncStatus ?? source.syncStatus,
           syncProgress: live?.syncProgress ?? 0,
+          totalAddresses: live?.totalAddresses ?? 0,
           connected: live?.connected ?? false,
           server: live?.server ?? null,
           addresses: live?.addresses ?? [],
+          derivedCount: live?.derivedCount ?? 0,
+          changeCount: live?.changeCount ?? 0,
+          usedCount: live?.usedCount ?? 0,
           balance: live?.balance ?? {
             nav: { confirmed: 0, pending: 0 },
             staked: { confirmed: 0, pending: 0 },
@@ -106,17 +124,29 @@ async function main() {
 
     if (request.method === 'POST' && request.url === '/import') {
       try {
-        const source = await importSource(await readJsonBody(request), root);
+        const body = await readJsonBody(request);
+        console.log(`[daemon] importing ${body.type} source...`);
+        const source = await importSource(body, root);
+        console.log(
+          `[daemon] imported ${source.id} (${source.walletType}), starting sync...`,
+        );
 
         // Open the newly imported wallet in background.
         getNavWallet(root)
           .then((navWallet) =>
-            openSourceWallet(source, root, navWallet).catch(() => {}),
+            openSourceWallet(source, root, navWallet).catch((err) => {
+              console.log(
+                `[daemon] failed to open wallet ${source.id}: ${err.message}`,
+              );
+            }),
           )
-          .catch(() => {});
+          .catch((err) => {
+            console.log(`[daemon] getNavWallet failed: ${err.message}`);
+          });
 
         sendJson(response, 200, { source });
       } catch (error) {
+        console.log(`[daemon] import failed: ${error.message}`);
         sendJson(response, 400, { error: error.message });
       }
       return;

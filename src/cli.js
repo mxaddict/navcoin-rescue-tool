@@ -173,8 +173,16 @@ async function handleStatus() {
           process.stdout.write(`    ${addr.address}\n`);
         }
       } else if (source.addresses.length > 0) {
+        const derived =
+          source.derivedCount ??
+          source.addresses.filter((a) => !a.isChange).length;
+        const change =
+          source.changeCount ??
+          source.addresses.filter((a) => a.isChange).length;
+        const used =
+          source.usedCount ?? source.addresses.filter((a) => a.used).length;
         process.stdout.write(
-          `  Addresses (${source.addresses.length} derived, none used yet)\n`,
+          `  Addresses (${derived} derived, ${change} change, ${used} used)\n`,
         );
       }
     }

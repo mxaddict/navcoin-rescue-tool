@@ -305,16 +305,26 @@ function renderStatus(C, data) {
     totalStaked += src.balance.staked.confirmed;
 
     const usedAddrs = src.addresses.filter((a) => a.used);
+    const derived =
+      src.derivedCount ?? src.addresses.filter((a) => !a.isChange).length;
+    const change =
+      src.changeCount ?? src.addresses.filter((a) => a.isChange).length;
+    const used = src.usedCount ?? usedAddrs.length;
     if (usedAddrs.length > 0) {
       lines.push(
-        `  ${C.bold('Addresses')} (${usedAddrs.length} used of ${src.addresses.length}):`,
+        `  ${C.bold('Addresses')} (${derived} derived, ${change} change, ${used} used):`,
       );
       for (const addr of usedAddrs) {
         lines.push(`    ${C.magenta(addr.address)}`);
       }
     } else if (src.addresses.length > 0) {
+      const derived =
+        src.derivedCount ?? src.addresses.filter((a) => !a.isChange).length;
+      const change =
+        src.changeCount ?? src.addresses.filter((a) => a.isChange).length;
+      const used = src.usedCount ?? src.addresses.filter((a) => a.used).length;
       lines.push(
-        `  ${C.bold('Addresses')} (${src.addresses.length} derived, none used yet)`,
+        `  ${C.bold('Addresses')} (${derived} derived, ${change} change, ${used} used)`,
       );
     }
   }

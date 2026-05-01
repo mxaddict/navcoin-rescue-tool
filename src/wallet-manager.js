@@ -35,10 +35,14 @@ function makeInitialState(sourceId) {
     wallet: null,
     syncStatus: 'opening',
     syncProgress: 0,
+    totalAddresses: 0,
     connected: false,
     server: null,
     connectingAt: null,
     addresses: [],
+    derivedCount: 0,
+    changeCount: 0,
+    usedCount: 0,
     balance: {
       nav: { confirmed: 0, pending: 0 },
       staked: { confirmed: 0, pending: 0 },
@@ -204,16 +208,14 @@ export async function openSourceWallet(source, root, navWallet) {
   state.wallet = wallet;
 
   wallet.on('connected', (server) => {
-    clearTimeout(state.reconnectTimer);
-    state.reconnectTimer = null;
     state.connected = true;
-    state.server = server;
     state.syncStatus = 'connected';
-    state.connectingAt = null;
+    console.log(`[wallet] ${source.id} connected to ${server}`);
   });
 
   wallet.on('disconnected', () => {
     state.connected = false;
+    console.log(`[wallet] ${source.id} disconnected`);
     state.server = null;
     // Only reschedule reconnect if we were previously connected or syncing —
     // not if we're already in an error or no-servers state.
@@ -230,6 +232,12 @@ export async function openSourceWallet(source, root, navWallet) {
 
   wallet.on('sync_started', () => {
     state.syncStatus = 'syncing';
+    console.log(`[wallet] ${source.id} sync started`);
+  });
+
+  wallet.on('bootstrap_started', () => {
+    state.syncStatus = 'syncing';
+    console.log(`[wallet] ${source.id} bootstrap started`);
   });
 
   wallet.on('sync_status', (progress) => {
@@ -237,10 +245,26 @@ export async function openSourceWallet(source, root, navWallet) {
     state.syncStatus = 'syncing';
   });
 
+  wallet.on('scripthash_progress', (index, total) => {
+    state.syncProgress = Math.round((index / total) * 100);
+    state.syncStatus = 'syncing';
+    state.totalAddresses = total;
+    if (index % 50 === 0 || index === total) {
+      console.log(
+        `[wallet] ${source.id} scripthash progress: ${index}/${total}`,
+      );
+    }
+  });
+
   wallet.on('sync_finished', async () => {
     state.syncStatus = 'synced';
     state.syncProgress = 100;
+    console.log(`[wallet] ${source.id} sync finished`);
     await refreshAddressesAndBalance(source.id, wallet);
+  });
+
+  wallet.on('bootstrap_finished', () => {
+    console.log(`[wallet] ${source.id} bootstrap finished`);
   });
 
   wallet.on('new_tx', async () => {
@@ -293,7 +317,22 @@ export async function openSourceWallet(source, root, navWallet) {
 
     state.syncStatus = 'connecting';
     state.connectingAt = Date.now();
+    console.log(`[wallet] ${source.id} calling Connect()...`);
     await wallet.Connect();
+    console.log(`[wallet] ${source.id} Connect() done, calling Sync()...`);
+
+    // Trigger sync after connecting.
+    console.log(`[wallet] ${source.id} about to call wallet.Sync()...`);
+    wallet
+      .Sync()
+      .then(() => {
+        console.log(`[wallet] ${source.id} Sync() completed`);
+      })
+      .catch((err) => {
+        console.log(`[wallet] ${source.id} sync error: ${err.message}`);
+        console.log(err.stack);
+      });
+    console.log(`[wallet] ${source.id} Sync() called (non-blocking)`);
   } catch (error) {
     state.syncStatus = 'error';
     state.error = error.message;
@@ -308,13 +347,15 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
 
   try {
     const rawAddresses = await wallet.NavReceivingAddresses(true);
-    state.addresses = rawAddresses
-      .filter((a) => !a.change)
-      .map((a) => ({
-        address: a.address,
-        path: a.path,
-        used: a.used === 1,
-      }));
+    state.addresses = rawAddresses.map((a) => ({
+      address: a.address,
+      path: a.path,
+      used: a.used === 1,
+      isChange: a.change,
+    }));
+    state.derivedCount = rawAddresses.filter((a) => !a.change).length;
+    state.changeCount = rawAddresses.filter((a) => a.change).length;
+    state.usedCount = rawAddresses.filter((a) => a.used === 1).length;
   } catch {
     // Non-fatal: leave previous address list intact.
   }

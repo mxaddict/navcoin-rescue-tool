@@ -146,6 +146,17 @@ export async function createImportedWallet(source, root = getAppDataRoot()) {
 
 export async function deleteWalletForSource(sourceId, root = getAppDataRoot()) {
   const storage = getWalletStorageDetails(sourceId, root);
+  const layout = getLayout(root);
+
+  // Remove the wallet sqlite file.
   await fs.rm(storage.dataFile, { force: true });
+
+  // Also remove the indexeddb system registry — it tracks known DBs and will
+  // cause "DB did not load" if it still references a deleted wallet file.
+  // It is recreated automatically on next navcoin-js init.
+  await fs.rm(path.join(layout.walletsDir, '__sysdb__.sqlite'), {
+    force: true,
+  });
+
   return storage;
 }

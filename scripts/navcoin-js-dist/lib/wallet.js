@@ -1067,23 +1067,57 @@ class WalletFile extends events.EventEmitter {
     this.emit('scripthash_progress', 0, total);
 
     const BATCH_SIZE = 10;
-    let totalUtxos = [];
 
+    // Phase 1: check balances (lightweight RPC) to find funded addresses.
+    let fundedHashes = [];
     for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
       const batch = scriptHashes.slice(batchStart, batchStart + BATCH_SIZE);
-      const index = batchStart + 1;
-      this.emit('scripthash_progress', index, total);
+      this.emit('scripthash_progress', batchStart + 1, total);
 
-      const promises = batch.map(async (s) => {
-        try {
-          const utxos = await this.client.blockchain_scripthash_listunspent(s);
-          return utxos.map((u) => ({ ...u, scriptHash: s }));
-        } catch {
-          return [];
-        }
-      });
+      const results = await Promise.all(
+        batch.map(async (s) => {
+          try {
+            const bal = await this.client.blockchain_scripthash_get_balance(s);
+            return {
+              s,
+              funded: (bal.confirmed || 0) + (bal.unconfirmed || 0) > 0,
+            };
+          } catch {
+            return { s, funded: false };
+          }
+        }),
+      );
 
-      const results = await Promise.all(promises);
+      for (const r of results) {
+        if (r.funded) fundedHashes.push(r.s);
+      }
+    }
+
+    // Phase 2: fetch UTXOs only for funded addresses.
+    let totalUtxos = [];
+    const fundedTotal = fundedHashes.length;
+    this.emit('scripthash_progress', 0, fundedTotal || 1);
+
+    for (
+      let batchStart = 0;
+      batchStart < fundedTotal;
+      batchStart += BATCH_SIZE
+    ) {
+      const batch = fundedHashes.slice(batchStart, batchStart + BATCH_SIZE);
+      this.emit('scripthash_progress', batchStart + 1, fundedTotal);
+
+      const results = await Promise.all(
+        batch.map(async (s) => {
+          try {
+            const utxos =
+              await this.client.blockchain_scripthash_listunspent(s);
+            return utxos.map((u) => ({ ...u, scriptHash: s }));
+          } catch {
+            return [];
+          }
+        }),
+      );
+
       for (const utxos of results) {
         totalUtxos.push(...utxos);
       }

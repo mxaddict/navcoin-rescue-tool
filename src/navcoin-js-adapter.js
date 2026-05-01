@@ -69,7 +69,7 @@ export function getWalletStorageDetails(sourceId, root = getAppDataRoot()) {
   };
 }
 
-export async function createImportedWallet(source, root = getAppDataRoot()) {
+export async function createImportedWallet(source, root = getAppDataRoot(), onProgress = null) {
   const storage = getWalletStorageDetails(source.id, root);
   const dataFileExists = await fs
     .access(storage.dataFile)
@@ -93,7 +93,7 @@ export async function createImportedWallet(source, root = getAppDataRoot()) {
       process.execPath,
       [path.join(__dirname, 'wallet-worker.js')],
       {
-        stdio: ['pipe', 'pipe', 'inherit'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         timeout: 300_000, // 5 minute hard timeout
       },
     );
@@ -101,6 +101,14 @@ export async function createImportedWallet(source, root = getAppDataRoot()) {
     let stdout = '';
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
+    });
+
+    // Capture stderr for progress updates
+    child.stderr.on('data', (chunk) => {
+      const msg = chunk.toString().trim();
+      if (msg.startsWith('[worker]') && onProgress) {
+        onProgress(msg.replace('[worker] ', ''));
+      }
     });
 
     child.on('close', (code) => {

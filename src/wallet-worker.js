@@ -52,6 +52,7 @@ async function main() {
     const navcoinJs = await import('navcoin-js');
     const wallet = navcoinJs.wallet ?? navcoinJs.default?.wallet;
     await wallet.Init();
+    console.error('[worker] initialized');
 
     const dbName = `${source.id}.db`;
     const sqliteFile = path.join(walletsDir, `D_${dbName}.sqlite`);
@@ -74,10 +75,12 @@ async function main() {
 
     const w = new wallet.WalletFile(options);
 
+    console.error('[worker] deriving addresses...');
     await w.Load({
       useP2p: false,
       minPoolSize: getWalletMinPoolSize(source, minPoolSize),
     });
+    console.error('[worker] addresses derived');
     await prunePrivateKeyPool(w, source);
 
     if (source.type === 'private-key') {

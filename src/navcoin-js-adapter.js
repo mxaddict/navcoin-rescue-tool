@@ -70,6 +70,19 @@ export function getWalletStorageDetails(sourceId, root = getAppDataRoot()) {
 }
 
 export async function createImportedWallet(source, root = getAppDataRoot()) {
+  const storage = getWalletStorageDetails(source.id, root);
+  const dataFileExists = await fs
+    .access(storage.dataFile)
+    .then(() => true)
+    .catch(() => false);
+
+  if (dataFileExists) {
+    console.log(
+      `[wallet] wallet already exists for ${source.id}, skipping creation`,
+    );
+    return { ok: true, storage };
+  }
+
   const layout = getLayout(root);
   await fs.mkdir(layout.walletsDir, { recursive: true });
 

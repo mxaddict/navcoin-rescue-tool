@@ -36,11 +36,26 @@ const replacements = [
     'function sleep(n) {\n  msleep(n * 1000);\n}',
     'async function sleep(n) {\n  await msleep(n * 1000);\n}',
   ],
-  ['sleep(5);\n        await this.Connect(true);', 'await sleep(5);\n        await this.Connect(true);'],
-  ['sleep(1);\n        await this.Connect(false);', 'await sleep(1);\n        await this.Connect(false);'],
-  ['if (e === "server busy - request timed out") {\n      sleep(5);', 'if (e === "server busy - request timed out") {\n      await sleep(5);'],
-  ['await this.ManageElectrumError(e);\n        sleep(1);', 'await this.ManageElectrumError(e);\n        await sleep(1);'],
-  ['await this.ManageElectrumError(e);\n        sleep(3);', 'await this.ManageElectrumError(e);\n        await sleep(3);'],
+  [
+    'sleep(5);\n        await this.Connect(true);',
+    'await sleep(5);\n        await this.Connect(true);',
+  ],
+  [
+    'sleep(1);\n        await this.Connect(false);',
+    'await sleep(1);\n        await this.Connect(false);',
+  ],
+  [
+    'if (e === "server busy - request timed out") {\n      sleep(5);',
+    'if (e === "server busy - request timed out") {\n      await sleep(5);',
+  ],
+  [
+    'await this.ManageElectrumError(e);\n        sleep(1);',
+    'await this.ManageElectrumError(e);\n        await sleep(1);',
+  ],
+  [
+    'await this.ManageElectrumError(e);\n        sleep(3);',
+    'await this.ManageElectrumError(e);\n        await sleep(3);',
+  ],
 ];
 
 let changed = false;
@@ -53,7 +68,9 @@ for (const [broken, fixed] of replacements) {
 }
 
 if (!changed) {
-  console.log('patch-navcoin-js: already patched or upstream dist already fixed');
+  console.log(
+    'patch-navcoin-js: already patched or upstream dist already fixed',
+  );
   process.exit(0);
 }
 

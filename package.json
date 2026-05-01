@@ -9,7 +9,7 @@
     "ntr-daemon": "./src/daemon.js"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "NTR_DAEMON_PORT=46199 node --test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "postinstall": "node scripts/patch-navcoin-js.js"

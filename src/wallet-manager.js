@@ -312,7 +312,7 @@ export async function openSourceWallet(source, root, navWallet) {
     await wallet.Connect();
 
     // Trigger UTXO fetch instead of full sync - much faster for sweep tool.
-    wallet.SyncUtxos();
+    wallet.SyncUtxos().catch(() => {});
   } catch (error) {
     state.syncStatus = 'error';
     state.error = error.message;

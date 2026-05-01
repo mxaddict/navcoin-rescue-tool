@@ -2,7 +2,7 @@ export const APP_NAME = 'navcoin-rescue-tool';
 export const CLI_NAME = 'ntr';
 export const GUI_NAME = 'ntr-gui';
 export const DAEMON_HOST = '127.0.0.1';
-export const DAEMON_PORT = 46117;
+export const DAEMON_PORT = Number(process.env.NTR_DAEMON_PORT) || 46117;
 export const STATIC_WALLET_PASSWORD = 'ObsidianSweepKey';
 
 // Recovery tool uses a large address pool so we don't miss funds on wallets

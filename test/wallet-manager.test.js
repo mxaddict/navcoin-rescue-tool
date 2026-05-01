@@ -76,6 +76,9 @@ class MockWalletFile extends EventEmitter {
 
   Disconnect() {}
   CloseDb() {}
+  SyncUtxos() {
+    return Promise.resolve();
+  }
 }
 
 function makeMockNavWallet() {
@@ -173,6 +176,9 @@ test('wallet manager rotates electrum node on reconnect attempts', async () => {
 
     Disconnect() {}
     CloseDb() {}
+    SyncUtxos() {
+      return Promise.resolve();
+    }
   }
 
   try {
@@ -272,6 +278,9 @@ test('wallet manager prefers healthy electrum nodes before connect', async () =>
 
     Disconnect() {}
     CloseDb() {}
+    SyncUtxos() {
+      return Promise.resolve();
+    }
   }
 
   try {
@@ -376,6 +385,9 @@ test('wallet manager hides dummy pool addresses for private-key sources', async 
 
     Disconnect() {}
     CloseDb() {}
+    SyncUtxos() {
+      return Promise.resolve();
+    }
   }
 
   try {

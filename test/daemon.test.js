@@ -139,15 +139,12 @@ test('daemon import persists sources and rejects duplicates', async (t) => {
 
     assert.equal(imported.source.status, 'ready');
     assert.equal(imported.source.syncStatus, 'wallet-created');
-    assert.equal(imported.source.wallet.backend, 'navcoin-js');
+    assert.equal(imported.source.walletType, 'navcoin-js-v1');
 
     const status = await getDaemonStatus(root);
     assert.equal(status.sourceCount, 1);
     assert.equal(status.sources[0].id, imported.source.id);
-    assert.equal(
-      status.sources[0].wallet.databaseName,
-      `${imported.source.id}.db`,
-    );
+    assert.equal(status.sources[0].walletType, 'navcoin-js-v1');
 
     await assert.rejects(
       importDaemonSource(
@@ -211,7 +208,6 @@ test('daemon private-key import works', async (t) => {
 
     assert.equal(imported.source.status, 'ready');
     assert.equal(imported.source.type, 'private-key');
-    assert.equal(imported.source.wallet.backend, 'navcoin-js');
 
     await stopDaemon(root);
     await waitForExit(child);

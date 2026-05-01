@@ -88,6 +88,9 @@ class MockWalletFile extends EventEmitter {
 
   Disconnect() {}
   CloseDb() {}
+  SyncUtxos() {
+    return Promise.resolve();
+  }
 }
 
 function makeNavWallet(opts = {}) {

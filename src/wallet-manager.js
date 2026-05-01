@@ -49,6 +49,7 @@ function makeInitialState(sourceId) {
     },
     error: null,
     reconnectTimer: null,
+    watchdog: null,
   };
 }
 
@@ -207,9 +208,10 @@ export async function openSourceWallet(source, root, navWallet) {
 
   state.wallet = wallet;
 
-  wallet.on('connected', () => {
+  wallet.on('connected', (server) => {
     state.connected = true;
     state.syncStatus = 'connected';
+    state.server = server;
   });
 
   wallet.on('disconnected', () => {
@@ -277,9 +279,9 @@ export async function openSourceWallet(source, root, navWallet) {
   });
 
   // Watchdog: if stuck in 'connecting' for too long, try reconnecting.
-  const watchdog = setInterval(() => {
+  state.watchdog = setInterval(() => {
     if (!walletState.has(source.id)) {
-      clearInterval(watchdog);
+      clearInterval(state.watchdog);
       return;
     }
 
@@ -361,6 +363,9 @@ export async function closeSourceWallet(sourceId) {
 
   clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
+
+  clearInterval(state.watchdog);
+  state.watchdog = null;
 
   if (!state.wallet) {
     walletState.delete(sourceId);

@@ -186,9 +186,16 @@ function parseOptions(argv) {
 }
 
 async function handleImport(argv) {
-  const [sourceType, ...rest] = argv;
-  const options = parseOptions(rest);
+  let [sourceType, ...rest] = argv;
   const root = getAppDataRoot();
+
+  // If no subtype given, ask interactively.
+  if (!sourceType) {
+    sourceType = await prompt('Import type (mnemonic/private-key): ');
+    sourceType = sourceType.trim();
+  }
+
+  const options = parseOptions(rest);
 
   try {
     let result;
@@ -219,7 +226,7 @@ async function handleImport(argv) {
       );
     } else {
       throw new Error(
-        `Unsupported import type: ${sourceType}. Use mnemonic or private-key.`,
+        `Unknown import type: ${sourceType || '(none)'}. Use mnemonic or private-key.`,
       );
     }
 

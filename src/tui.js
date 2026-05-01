@@ -150,6 +150,7 @@ function buildPalette(dark) {
 // ---------------------------------------------------------------------------
 const COMMANDS = [
   'status',
+  'import',
   'import mnemonic',
   'import private-key',
   'remove',
@@ -675,12 +676,34 @@ export async function launchTui() {
       case 'status':
         await cmdStatus(C, root, log);
         break;
+      case 'import':
       case 'import mnemonic':
-        await cmdImportMnemonic(C, root, log, ask);
+      case 'import private-key': {
+        let importType =
+          cmd === 'import mnemonic'
+            ? 'mnemonic'
+            : cmd === 'import private-key'
+              ? 'private-key'
+              : null;
+
+        if (!importType) {
+          const choice = await ask('Import type (mnemonic/private-key):');
+          if (choice === 'mnemonic' || choice === 'private-key') {
+            importType = choice;
+          } else {
+            log(C.pink(`  Unknown import type: ${choice}`));
+            log(C.muted('  Use mnemonic or private-key.'));
+            break;
+          }
+        }
+
+        if (importType === 'mnemonic') {
+          await cmdImportMnemonic(C, root, log, ask);
+        } else {
+          await cmdImportPrivateKey(C, root, log, ask);
+        }
         break;
-      case 'import private-key':
-        await cmdImportPrivateKey(C, root, log, ask);
-        break;
+      }
       case 'remove':
         await cmdRemove(C, root, log, ask);
         break;

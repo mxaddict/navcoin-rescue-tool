@@ -232,28 +232,21 @@ export async function openSourceWallet(source, root, navWallet) {
 
   wallet.on('sync_started', () => {
     state.syncStatus = 'syncing';
-    console.log(`[wallet] ${source.id} sync started`);
   });
 
   wallet.on('bootstrap_started', () => {
     state.syncStatus = 'syncing';
-    console.log(`[wallet] ${source.id} bootstrap started`);
   });
 
   wallet.on('sync_status', (progress) => {
     state.syncProgress = progress;
-    state.syncStatus = 'syncing';
+    state.syncStatus = 'syncing-txs';
   });
 
   wallet.on('scripthash_progress', (index, total) => {
     state.syncProgress = Math.round((index / total) * 100);
-    state.syncStatus = 'syncing';
+    state.syncStatus = 'syncing-addresses';
     state.totalAddresses = total;
-    if (index % 50 === 0 || index === total) {
-      console.log(
-        `[wallet] ${source.id} scripthash progress: ${index}/${total}`,
-      );
-    }
   });
 
   wallet.on('sync_finished', async () => {

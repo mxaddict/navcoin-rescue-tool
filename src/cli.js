@@ -142,10 +142,16 @@ async function handleStatus() {
       const typeLabel = source.walletType
         ? `${source.type}:${source.walletType}`
         : source.type;
-      const syncLabel =
-        source.syncStatus === 'syncing'
-          ? `syncing(${source.syncProgress}%)`
-          : source.syncStatus;
+      const syncingPhases = ['syncing', 'syncing-addresses', 'syncing-txs'];
+      const phase =
+        source.syncStatus === 'syncing-addresses'
+          ? 'addr'
+          : source.syncStatus === 'syncing-txs'
+            ? 'txs'
+            : '';
+      const syncLabel = syncingPhases.includes(source.syncStatus)
+        ? `syncing(${source.syncProgress}%${phase ? ',' + phase : ''})`
+        : source.syncStatus;
       const serverLabel = source.server ? ` server=${source.server}` : '';
 
       process.stdout.write(`\nSource: ${source.id} [${typeLabel}]\n`);

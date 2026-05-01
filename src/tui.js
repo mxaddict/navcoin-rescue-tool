@@ -278,8 +278,19 @@ function renderStatus(C, data) {
             : C.muted;
 
     let syncLabel = src.syncStatus;
-    if (src.syncStatus === 'syncing') {
-      syncLabel = `syncing (${src.syncProgress}%)`;
+    if (
+      src.syncStatus === 'syncing' ||
+      src.syncStatus === 'syncing-addresses' ||
+      src.syncStatus === 'syncing-txs'
+    ) {
+      const phase =
+        src.syncStatus === 'syncing-addresses'
+          ? 'addr'
+          : src.syncStatus === 'syncing-txs'
+            ? 'txs'
+            : '';
+      const phaseLabel = phase ? `, ${phase}` : '';
+      syncLabel = `syncing (${src.syncProgress}%${phaseLabel})`;
     } else if (src.syncStatus === 'connecting' && src.connectingAt) {
       const secs = Math.floor((Date.now() - src.connectingAt) / 1000);
       syncLabel = `connecting (${secs}s)`;

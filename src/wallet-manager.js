@@ -83,7 +83,6 @@ export async function openSourceWallet(source, root, navWallet) {
     spendingPassword: STATIC_WALLET_PASSWORD,
     network: 'mainnet',
     log: false,
-    minPoolSize: RECOVERY_MIN_POOL_SIZE,
   });
 
   state.wallet = wallet;
@@ -164,7 +163,7 @@ export async function openSourceWallet(source, root, navWallet) {
   }, 5_000);
 
   try {
-    await wallet.Load({ useP2p: false });
+    await wallet.Load({ useP2p: false, minPoolSize: RECOVERY_MIN_POOL_SIZE });
 
     // Seed initial address and balance snapshot before connecting.
     await refreshAddressesAndBalance(source.id, wallet);

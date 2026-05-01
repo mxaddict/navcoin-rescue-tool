@@ -63,7 +63,6 @@ function buildWalletOptions(sourceId, source) {
     spendingPassword: STATIC_WALLET_PASSWORD,
     network: 'mainnet',
     log: false,
-    minPoolSize: RECOVERY_MIN_POOL_SIZE,
   };
 
   if (source.type === 'mnemonic') {
@@ -103,7 +102,7 @@ export async function createImportedWallet(source, root = getAppDataRoot()) {
   );
 
   try {
-    await wallet.Load({ useP2p: false });
+    await wallet.Load({ useP2p: false, minPoolSize: RECOVERY_MIN_POOL_SIZE });
 
     if (source.type === 'private-key') {
       for (const key of source.normalizedDetails.split('\n')) {

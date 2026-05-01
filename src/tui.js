@@ -532,6 +532,16 @@ export async function launchTui() {
     fullUnicode: true,
   });
 
+  // ---- Outer container — provides 1-cell padding on all sides ------------
+  const PAD = 1;
+  const container = blessed.box({
+    top: PAD,
+    left: PAD,
+    width: `100%-${PAD * 2}`,
+    height: `100%-${PAD * 2}`,
+  });
+  screen.append(container);
+
   // ---- Header bar -------------------------------------------------------
   const header = blessed.box({
     top: 0,
@@ -600,12 +610,12 @@ export async function launchTui() {
     inputOnFocus: true,
   });
 
-  screen.append(header);
-  screen.append(headerSep);
-  screen.append(output);
-  screen.append(warnBox);
-  screen.append(inputSep);
-  screen.append(inputBox);
+  container.append(header);
+  container.append(headerSep);
+  container.append(output);
+  container.append(warnBox);
+  container.append(inputSep);
+  container.append(inputBox);
 
   // ---- Helpers ----------------------------------------------------------
   function log(text) {

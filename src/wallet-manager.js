@@ -207,15 +207,13 @@ export async function openSourceWallet(source, root, navWallet) {
 
   state.wallet = wallet;
 
-  wallet.on('connected', (server) => {
+  wallet.on('connected', () => {
     state.connected = true;
     state.syncStatus = 'connected';
-    console.log(`[wallet] ${source.id} connected to ${server}`);
   });
 
   wallet.on('disconnected', () => {
     state.connected = false;
-    console.log(`[wallet] ${source.id} disconnected`);
     state.server = null;
     // Only reschedule reconnect if we were previously connected or syncing —
     // not if we're already in an error or no-servers state.
@@ -252,7 +250,6 @@ export async function openSourceWallet(source, root, navWallet) {
   wallet.on('sync_finished', async () => {
     state.syncStatus = 'synced';
     state.syncProgress = 100;
-    console.log(`[wallet] ${source.id} sync finished`);
     await refreshAddressesAndBalance(source.id, wallet);
   });
 
@@ -313,9 +310,7 @@ export async function openSourceWallet(source, root, navWallet) {
     await wallet.Connect();
 
     // Trigger UTXO fetch instead of full sync - much faster for sweep tool.
-    wallet.SyncUtxos().catch((err) => {
-      console.log(`[wallet] ${source.id} sync error: ${err.message}`);
-    });
+    wallet.SyncUtxos();
   } catch (error) {
     state.syncStatus = 'error';
     state.error = error.message;

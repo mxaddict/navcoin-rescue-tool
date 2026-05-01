@@ -11,6 +11,38 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
+process.on('uncaughtException', (error) => {
+  try {
+    process.stdout.write(
+      JSON.stringify({ ok: false, error: `uncaught: ${error.message}` }),
+    );
+  } catch {}
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (error) => {
+  try {
+    process.stdout.write(
+      JSON.stringify({
+        ok: false,
+        error: `unhandled: ${error?.message ?? String(error)}`,
+      }),
+    );
+  } catch {}
+  process.exit(1);
+});
+
+['SIGTERM', 'SIGINT'].forEach((sig) => {
+  process.on(sig, () => {
+    try {
+      process.stdout.write(
+        JSON.stringify({ ok: false, error: `killed by ${sig}` }),
+      );
+    } catch {}
+    process.exit(1);
+  });
+});
+
 const require = createRequire(import.meta.url);
 
 const PRIVATE_KEY_CONTAINER_MNEMONIC =
@@ -33,6 +65,18 @@ async function prunePrivateKeyPool(wallet, source) {
 }
 
 async function main() {
+  // Hard timeout — spawn() ignores its timeout option, so enforce internally.
+  const WORKER_TIMEOUT_MS = 300_000; // 5 minutes
+  const timer = setTimeout(() => {
+    try {
+      process.stdout.write(
+        JSON.stringify({ ok: false, error: 'wallet worker timed out' }),
+      );
+    } catch {}
+    process.exit(1);
+  }, WORKER_TIMEOUT_MS);
+  timer.unref();
+
   // Read stdin.
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);

@@ -81,9 +81,6 @@ export async function createImportedWallet(
     .catch(() => false);
 
   if (dataFileExists) {
-    console.log(
-      `[wallet] wallet already exists for ${source.id}, skipping creation`,
-    );
     return { ok: true, storage };
   }
 
@@ -98,7 +95,6 @@ export async function createImportedWallet(
       [path.join(__dirname, 'wallet-worker.js')],
       {
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 300_000, // 5 minute hard timeout
       },
     );
 
@@ -107,22 +103,25 @@ export async function createImportedWallet(
       stdout += chunk.toString();
     });
 
-    // Capture stderr for progress updates
+    let stderr = '';
     child.stderr.on('data', (chunk) => {
       const msg = chunk.toString().trim();
+      stderr += msg + '\n';
       if (msg.startsWith('[worker]') && onProgress) {
         onProgress(msg.replace('[worker] ', ''));
       }
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       try {
         const parsed = JSON.parse(stdout);
         resolve(parsed);
       } catch {
+        const reason = signal ? `killed by ${signal}` : `exit code ${code}`;
+        const detail = stderr.trim();
         reject(
           new Error(
-            `Wallet worker exited with code ${code} and no parseable output`,
+            `Wallet worker ${reason}${detail ? `: ${detail}` : ' and no parseable output'}`,
           ),
         );
       }

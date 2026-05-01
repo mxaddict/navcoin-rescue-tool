@@ -416,10 +416,29 @@ export async function launchTui() {
   const layout = getLayout(root);
   await bootstrapAppData(root);
 
-  // Navio dark background — forced on all widgets so the TUI looks identical
-  // on both dark and light terminal themes.
+  // Navio dark background — set on the terminal itself via OSC escape so the
+  // entire window is painted, not just the blessed widget cells.
   const BG = '#111827';
   const FG = '#f9fafb'; // gray-50 — near-white, readable on dark bg
+
+  // OSC 11 sets the terminal background colour; OSC 111 resets it to default.
+  // Written directly to stdout so it takes effect before blessed initialises.
+  function setTerminalBg(hex) {
+    // Convert #rrggbb → rrrrggggbbbb (X11 16-bit per channel format).
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const rr = (r * 257).toString(16).padStart(4, '0');
+    const gg = (g * 257).toString(16).padStart(4, '0');
+    const bb = (b * 257).toString(16).padStart(4, '0');
+    process.stdout.write(`\x1b]11;rgb:${rr}/${gg}/${bb}\x07`);
+  }
+
+  function resetTerminalBg() {
+    process.stdout.write('\x1b]111;\x07');
+  }
+
+  setTerminalBg(BG);
 
   const screen = blessed.screen({
     smartCSR: true,
@@ -698,6 +717,7 @@ export async function launchTui() {
 
   screen.on('destroy', () => {
     clearInterval(refreshTimer);
+    resetTerminalBg();
   });
 
   inputBox.focus();

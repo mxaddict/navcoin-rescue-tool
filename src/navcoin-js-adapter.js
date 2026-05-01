@@ -1,8 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { getAppDataRoot, getLayout } from './app-data.js';
 import { STATIC_WALLET_PASSWORD, RECOVERY_MIN_POOL_SIZE } from './constants.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let navcoinJsPromise;
 let navcoinInitPromise;
@@ -50,33 +54,6 @@ async function initNavcoinJs(walletsDir) {
   return wallet;
 }
 
-// A fixed anchor mnemonic used only as the HD wallet container for private-key
-// imports. The actual imported keys are added on top; this mnemonic itself
-// never derives usable recovery material for the user.
-const PRIVATE_KEY_CONTAINER_MNEMONIC =
-  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-
-function buildWalletOptions(sourceId, source) {
-  const options = {
-    file: getWalletDatabaseName(sourceId),
-    password: STATIC_WALLET_PASSWORD,
-    spendingPassword: STATIC_WALLET_PASSWORD,
-    network: 'mainnet',
-    log: false,
-  };
-
-  if (source.type === 'mnemonic') {
-    options.mnemonic = source.normalizedDetails.replaceAll('\n', ' ');
-    options.type = source.walletType;
-  } else {
-    // Private-key wallets need a valid mnemonic to initialise the DB schema.
-    options.mnemonic = PRIVATE_KEY_CONTAINER_MNEMONIC;
-    options.type = 'navcoin-js-v1';
-  }
-
-  return options;
-}
-
 export async function getNavWallet(root = getAppDataRoot()) {
   const layout = getLayout(root);
   return initNavcoinJs(layout.walletsDir);
@@ -96,26 +73,53 @@ export async function createImportedWallet(source, root = getAppDataRoot()) {
   const layout = getLayout(root);
   await fs.mkdir(layout.walletsDir, { recursive: true });
 
-  const navWallet = await initNavcoinJs(layout.walletsDir);
-  const wallet = new navWallet.WalletFile(
-    buildWalletOptions(source.id, source),
-  );
+  // Run wallet creation in a child process so the daemon event loop stays
+  // responsive during the (potentially long) address pool derivation.
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [path.join(__dirname, 'wallet-worker.js')],
+      {
+        stdio: ['pipe', 'pipe', 'inherit'],
+        timeout: 300_000, // 5 minute hard timeout
+      },
+    );
 
-  try {
-    await wallet.Load({ useP2p: false, minPoolSize: RECOVERY_MIN_POOL_SIZE });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
 
-    if (source.type === 'private-key') {
-      for (const key of source.normalizedDetails.split('\n')) {
-        await wallet.ImportPrivateKey(key, STATIC_WALLET_PASSWORD);
+    child.on('close', (code) => {
+      try {
+        const parsed = JSON.parse(stdout);
+        resolve(parsed);
+      } catch {
+        reject(
+          new Error(
+            `Wallet worker exited with code ${code} and no parseable output`,
+          ),
+        );
       }
-    }
+    });
 
-    return getWalletStorageDetails(source.id, root);
-  } catch (error) {
-    await deleteWalletForSource(source.id, root);
+    child.on('error', reject);
 
-    // Provide a more actionable error message for common failure modes.
-    const raw = error.message ?? String(error);
+    child.stdin.write(
+      JSON.stringify({
+        source,
+        walletsDir: layout.walletsDir,
+        password: STATIC_WALLET_PASSWORD,
+        minPoolSize: RECOVERY_MIN_POOL_SIZE,
+      }),
+    );
+    child.stdin.end();
+  });
+
+  if (!result.ok) {
+    await deleteWalletForSource(source.id, root).catch(() => {});
+
+    const raw = result.error ?? 'unknown error';
     let message;
 
     if (
@@ -132,15 +136,9 @@ export async function createImportedWallet(source, root = getAppDataRoot()) {
     }
 
     throw new Error(message);
-  } finally {
-    if (typeof wallet.Disconnect === 'function') {
-      wallet.Disconnect();
-    }
-
-    if (typeof wallet.CloseDb === 'function') {
-      wallet.CloseDb();
-    }
   }
+
+  return result.storage;
 }
 
 export async function deleteWalletForSource(sourceId, root = getAppDataRoot()) {

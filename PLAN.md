@@ -13,6 +13,7 @@ CLI invocation should be `ntr` for short, frequent use.
 
 - Repository/package name: `navcoin-rescue-tool`
 - Executable command: `ntr`
+- GUI executable command: `ntr-gui`
 
 ## Goals
 
@@ -22,6 +23,17 @@ CLI invocation should be `ntr` for short, frequent use.
   address.
 - Keep the workflow simple, explicit, and safe for one-time recovery use.
 - Support a daemon mode that keeps imported wallets in sync with the network.
+- Provide a simple GUI for non-CLI users without duplicating wallet logic.
+- Support Linux, macOS, and Windows.
+
+## Platform Support
+
+- MVP target platforms:
+  - Ubuntu 22.04 or newer
+  - macOS 12 or newer
+  - Windows 10 or newer
+- CLI, TUI, daemon, and GUI behavior should be planned so core workflows work on
+  all three platforms.
 
 ## Expected Inputs
 
@@ -32,12 +44,15 @@ CLI invocation should be `ntr` for short, frequent use.
   - `navcoin-core`
   - `navpay`
 - Private keys that can be imported into `navcoin-js`
-- `wallet.dat` only through a separate extraction step, since `navcoin-js` does
-  not appear to load Core `wallet.dat` files directly
+
+## MVP Scope
+
+- MVP should only support recovery formats already supported by `navcoin-js`.
+- That means mnemonic import for supported wallet types and private-key import.
+- `wallet.dat` support is explicitly deferred until after MVP.
 
 ## Initial Non-Goals
 
-- Full GUI in the first version
 - In-place modification of old wallet files
 - Broad wallet format support beyond known NavCoin legacy flows
 - xNAV, token, NFT, and dotNav recovery in the first recovery pass unless
@@ -51,25 +66,46 @@ CLI invocation should be `ntr` for short, frequent use.
 4. Add persistent wallet profile storage and naming.
 5. Add daemon mode to keep imported wallets synced in the background.
 6. Add private-key import recovery flow.
-7. Define `wallet.dat` strategy:
-   - either external extractor step
-   - or direct integration with a separate parser if one is viable
-8. Add balance discovery and address reporting.
-9. Add sweep transaction creation and broadcast.
-10. Add safety checks:
+7. Add balance discovery and address reporting.
+8. Add sweep transaction creation and broadcast.
+9. Add safety checks:
 
 - destination validation
 - explicit two-step confirmation before broadcast
 
-11. Test against known legacy wallet samples and edge cases.
+10. Add shared local daemon API for TUI and GUI clients.
+11. Add simple GUI client for non-CLI users.
+12. Add CI pipelines for cross-platform builds and artifacts.
+13. Test against known legacy wallet samples and edge cases.
+
+## CI And Releases
+
+- Use GitHub Actions for CI.
+- CI should run automated tests on every relevant push and pull request.
+- CI should build cross-platform artifacts for supported targets.
+- CI should upload build artifacts for normal pipeline runs so they can be
+  downloaded from the workflow.
+- CI should use concurrency controls so a newer run cancels any older
+  in-progress run for the same branch or version tag.
+- If a git tag is pushed, CI should:
+  - trigger on version tags matching `v*`
+  - run the test suite first
+  - build release artifacts after tests pass
+  - create or update a GitHub release named from that tag
+  - upload archive artifacts for macOS, Windows, and Linux to that release
+- Release publication must only happen after the tagged build passes tests.
+
+Example:
+
+- Pushing tag `v0.0.1` should trigger CI.
+- If CI passes, it should create a `v0.0.1` GitHub release.
+- That release should contain archive artifacts for macOS, Windows, and Linux.
 
 ## Open Questions
 
 - Which exact legacy wallet types do we need to support first?
 - Do we need read-only balance inspection before requiring any spending
   password?
-- Should `wallet.dat` handling be built in, or should users extract keys with a
-  companion command/tool?
 - Do we sweep only NAV first, or also support xNAV later?
 - Should daemon mode track one wallet per process or all imported wallets in one
   process?
@@ -86,7 +122,157 @@ Start with the smallest useful persistent path:
 4. status command with full source, sync, address, and balance reporting
 5. sweep NAV to a destination address with strict confirmation
 
-After that, add private-key recovery, then solve `wallet.dat` ingestion.
+After that, expand import coverage where needed, then solve `wallet.dat`
+ingestion later.
+
+## Shared Architecture
+
+- Wallet logic should live in one core service layer backed by the daemon.
+- `ntr`, the `ntr` TUI, and `ntr-gui` should all use the same daemon-managed
+  state and command paths.
+- The daemon should own:
+  - imported sources
+  - sync state
+  - address discovery
+  - balances
+  - sweep creation
+  - broadcast
+  - persistence
+- UI layers should only:
+  - render state
+  - collect user input
+  - invoke daemon commands
+  - display confirmations, progress, and errors
+
+## Persistence Direction
+
+- Use `navcoin-js` persistence internals for wallet state instead of replacing
+  them.
+- For Node-based operation, this means using the `navcoin-js` database backend
+  it already uses for persistent wallet data.
+- Store each imported source in its own `navcoin-js` wallet database.
+- The daemon should aggregate state across those per-source wallets.
+- Keep `ntr`-specific persistence separate and limited to daemon/app metadata.
+
+### Wallet State Stored By `navcoin-js`
+
+- imported mnemonic or private-key material
+- derived addresses and keys
+- sync cache and script-history state
+- wallet transaction history
+- UTXOs and spend state
+- wallet settings and counters
+
+### Daemon/App Metadata Stored By `ntr`
+
+- source registry
+- source ids and labels
+- mapping from source ids to wallet database names
+- daemon runtime metadata
+- daemon auth cookie metadata
+- local API or lock metadata if needed
+- UI preferences if added later
+- On-disk daemon/app metadata should use a simple JSON format.
+
+### On-Disk Layout
+
+- Use a simple app-data directory layout like:
+
+```text
+<navcoin-rescue-tool app data>/
+  daemon.json
+  auth.cookie
+  sources.json
+  wallets/
+    <source-id>.db
+  logs/
+    daemon.log
+```
+
+- `daemon.json` should store daemon runtime and discovery metadata.
+- `auth.cookie` should store the daemon-generated local API auth cookie.
+- `sources.json` should store the source registry and source-to-wallet mapping.
+- `wallets/` should store one `navcoin-js` wallet database per source.
+- `logs/` should store daemon logs.
+
+### Source Model
+
+- One imported source should map to one `navcoin-js` wallet database.
+- The daemon should not merge all imports into one shared `navcoin-js` wallet.
+- Aggregation should happen at the daemon/service layer instead.
+- This keeps source removal, source reporting, and source-level sync status
+  cleaner and safer.
+- Source ids should be fingerprint-based so importing the same source again can
+  be detected as a duplicate.
+- Use the fingerprint-derived source id for source tracking, duplicate
+  detection, and wallet database naming.
+- Source fingerprints should be derived by hashing normalized source details.
+- For mnemonic or private-key imports, the fingerprint should be based on the
+  normalized imported details, not transient UI or file metadata.
+- For future `wallet.dat` support, fingerprinting should hash the extracted
+  wallet details, not the raw wallet file bytes.
+
+### Corruption And Partial-Failure Handling
+
+- If one imported source wallet becomes unreadable or corrupted, the daemon
+  should continue operating with the remaining healthy sources.
+- `status` should clearly show the broken source and its error state.
+- `remove` should still allow removing a broken source.
+- `import` should still be allowed while another source is broken.
+- `sweep` must be blocked if any imported source is broken, unreadable, or not
+  fully available.
+
+### Wallet Encryption Policy
+
+- `navcoin-js` wallet persistence should use one static password for all
+  imported sources in this tool.
+- This tool is recovery/sweep focused, so the static password is meant to keep
+  implementation simple and consistent across imported sources.
+- Static wallet password for MVP: `ObsidianSweepKey`
+
+### Local Storage Warning
+
+- After every successful import, show a warning that the imported wallet is now
+  stored locally.
+- Default local storage location should use the platform app-data directory:
+  - Linux: `~/.local/share/navcoin-rescue-tool/`
+  - macOS: `~/Library/Application Support/navcoin-rescue-tool/`
+  - Windows: `%APPDATA%\navcoin-rescue-tool\`
+- The warning should explicitly show:
+  - the local storage path for that imported source
+  - the static wallet password in use
+- Import warning text should make it clear that the user should treat local disk
+  access as sensitive until the sweep is complete and local wallet data is
+  removed.
+
+## Local API Direction
+
+- Add a local-only IPC/API between the daemon and user interfaces.
+- Prefer a localhost-only HTTP API for simplicity and shared use across CLI,
+  TUI, and GUI.
+- Do not depend on Unix-only IPC assumptions so the same model works on Windows.
+- Use JSON request and response payloads.
+- Keep the API REST-ish, with resource-style endpoints.
+- Exact request and response schemas can be finalized during implementation.
+- Bind the local API to `127.0.0.1` only so it is not reachable from the
+  network.
+- Use fixed daemon port `46117`.
+- On daemon start, generate a local auth cookie and write it to `auth.cookie` in
+  the app data directory.
+- `ntr`, the TUI, and `ntr-gui` should read that cookie file and use it when
+  calling the daemon API.
+- The daemon should require the auth cookie for local API access.
+- Daemon discovery should use a simple HTTP request to the local daemon
+  endpoint.
+- The daemon should expose a status endpoint that clients can call to confirm it
+  is running and get current daemon status.
+- Initial API shape should cover:
+  - `GET /status`
+  - `POST /import`
+  - `POST /remove`
+  - `POST /sweep/prepare`
+  - `POST /sweep/confirm`
+  - `POST /daemon/stop`
 
 ## Initial CLI Shape
 
@@ -117,6 +303,8 @@ Notes:
 - If no daemon is running, `ntr` should start it automatically and then connect
   the TUI to it.
 - `ntr start` runs the long-lived daemon.
+- Daemon start/stop/status behavior must work consistently on Linux, macOS, and
+  Windows.
 - The tool is mainnet-only for now because NavCoin testnet is not currently
   reliable enough to support the intended workflow.
 - `ntr import`, `ntr remove`, `ntr status`, and `ntr sweep` require the daemon
@@ -134,9 +322,118 @@ Notes:
   - current connected server and last sync information
 - `ntr sweep <address>` should always require interactive confirmation.
 
+## GUI Shape
+
+```bash
+ntr-gui
+```
+
+Notes:
+
+- `ntr-gui` should be a thin client over the same daemon/API used by `ntr`.
+- Build `ntr-gui` with Electron.
+- `ntr-gui` should auto-start the daemon if it is not already running, then
+  connect to it.
+- Plan packaging and launch behavior for Linux, macOS, and Windows.
+- The GUI should preserve the same recovery and safety model as the CLI and TUI.
+- Do not implement separate wallet logic in the GUI.
+- The GUI should use normal desktop controls like buttons, forms, and tables,
+  not a terminal-emulation view.
+- The GUI should match the TUI workflow and safety rules, but not copy the TUI
+  visual presentation.
+
+### Packaging Direction
+
+- Produce cross-platform builds for:
+  - Linux
+  - macOS
+  - Windows
+- Target architectures for release artifacts:
+  - `x86_64`
+  - `arm64`
+- Package `ntr-gui` with Electron build tooling for those targets.
+- Release outputs should be simple archives, not installers.
+- Release archives should be standalone and contain everything needed to run the
+  app on the target platform.
+- End users should not need Node.js installed to run the packaged app.
+- Release archives should bundle the required runtime and production
+  dependencies needed to run `ntr-gui`, `ntr`, and the daemon.
+- Ensure `ntr` and daemon launch paths work correctly when installed from GUI
+  bundles and from CLI-oriented distributions.
+- macOS release archives should include a README with instructions for removing
+  quarantine attributes if macOS blocks the app after download.
+
+### Artifact Naming
+
+- Use this artifact naming pattern:
+  - `navcoin-rescue-tool-${version}-${platform}-${arch}.${ext}`
+- Examples:
+  - `navcoin-rescue-tool-v0.0.1-linux-x86_64.tar.gz`
+  - `navcoin-rescue-tool-v0.0.1-linux-arm64.tar.gz`
+  - `navcoin-rescue-tool-v0.0.1-macos-x86_64.zip`
+  - `navcoin-rescue-tool-v0.0.1-macos-arm64.zip`
+  - `navcoin-rescue-tool-v0.0.1-windows-x86_64.zip`
+  - `navcoin-rescue-tool-v0.0.1-windows-arm64.zip`
+- Use platform names:
+  - `linux`
+  - `macos`
+  - `windows`
+- Use architecture names:
+  - `x86_64`
+  - `arm64`
+- Publish one checksum file per artifact instead of one combined checksum file.
+- Checksum file naming should mirror the artifact name, for example:
+  - `navcoin-rescue-tool-v0.0.1-linux-x86_64.tar.gz.sha256`
+
+### GUI Layout
+
+- Keep the GUI simple and close in spirit to the TUI.
+- Suggested layout:
+  - left sidebar for main actions/views
+  - main panel for rendered content
+  - bottom status bar for daemon and sync state
+
+### GUI Views
+
+- `Status`
+  - overall totals
+  - daemon status
+  - connected server
+  - network head and sync progress
+  - imported sources list
+  - addresses and balances table
+- `Import`
+  - source type selector
+  - mnemonic/private key input
+  - wallet type selector for mnemonic import
+  - import action and result output
+- `Remove`
+  - source list
+  - remove preview
+  - confirmation action
+- `Sweep`
+  - destination entry
+  - exact destination re-entry
+  - final sweep preview
+  - required final phrase confirmation
+
+### GUI Safety Rules
+
+- The GUI must preserve the exact same sweep confirmation guarantees as the CLI.
+- A GUI sweep should still require:
+  - exact destination re-entry
+  - explicit `SEND MY COINS` confirmation
+- The GUI should disable final sweep submission until all confirmations are
+  satisfied.
+
 ## Sweep Confirmation
 
 - Step 1: user runs `ntr sweep <address>`.
+- Sweep should only be allowed when all imported sources are fully synced to the
+  current known network head.
+- Sweep behavior should be simple: attempt to send the full movable balance.
+- The only balance left behind should be dust or funds that cannot be moved
+  because they are insufficient to cover fees.
 - Step 2: tool requires the user to enter the exact same destination address on
   standard input.
 - Step 3: tool shows final sweep overview:

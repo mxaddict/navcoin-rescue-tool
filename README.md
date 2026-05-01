@@ -33,6 +33,32 @@ What does not work yet:
 - All imported wallet state is encrypted with the static password
   `ObsidianSweepKey`.
 
+## After Sweeping — Purge Your Wallet Data
+
+**Once your sweep is complete, run `purge` immediately.**
+
+Imported wallet data remains on disk until explicitly deleted. This includes
+derived private keys and address history. Leaving it on disk after a successful
+sweep is a security risk.
+
+```bash
+ntr purge
+```
+
+Or use the `purge` command in the TUI.
+
+This deletes all imported wallet databases from disk and resets the source
+registry. It does not affect the daemon configuration or auth state — you can
+still run `ntr start` afterwards.
+
+**If you do not purge:**
+
+- Your recovery material remains locally accessible in encrypted form under
+  `ObsidianSweepKey`
+- Anyone with access to your disk and the static password can read the wallet
+  data
+- The wallet files persist across daemon restarts until explicitly removed
+
 ## TUI
 
 Run `ntr` with no arguments to launch the terminal UI:
@@ -50,8 +76,10 @@ The TUI auto-starts the daemon if it is not already running. Commands:
 | `import private-key` | Import one or more WIF private keys interactively          |
 | `remove`             | Remove an imported source                                  |
 | `sweep`              | Sweep all confirmed NAV to a destination address           |
+| `purge`              | Delete all imported wallet data from disk                  |
+| `stop`               | Stop the daemon and exit the TUI                           |
 | `help`               | Show command reference                                     |
-| `quit`               | Exit the TUI                                               |
+| `quit`               | Exit the TUI (daemon keeps running)                        |
 
 - Tab auto-completes commands.
 - Press Ctrl+C twice to quit.
@@ -82,7 +110,6 @@ Import a mnemonic source:
 ```bash
 ntr import mnemonic \
   --wallet-type navcoin-js-v1 \
-  --label "Main wallet" \
   --phrase "word1 word2 ... word12"
 ```
 
@@ -97,7 +124,7 @@ Supported mnemonic wallet types:
 Import private-key source:
 
 ```bash
-ntr import private-key --label "Loose keys" --key <wif> [--key <wif>]
+ntr import private-key --key <wif> [--key <wif>]
 ```
 
 Remove an imported source:
@@ -117,6 +144,12 @@ The sweep flow requires:
 1. All sources to be fully synced
 2. Re-entry of the exact destination address
 3. Typing `SEND MY COINS` to confirm broadcast
+
+Purge all imported wallet data after sweeping:
+
+```bash
+ntr purge
+```
 
 ## App Data
 

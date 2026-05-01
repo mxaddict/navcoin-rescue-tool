@@ -327,6 +327,8 @@ function renderStatus(C, data) {
 // ---------------------------------------------------------------------------
 // Daemon auto-start
 // ---------------------------------------------------------------------------
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
 async function isPortInUse() {
   try {
     await fetch(`http://${DAEMON_HOST}:${DAEMON_PORT}/status`);
@@ -393,7 +395,7 @@ async function cmdStatus(C, root, log) {
   }
 }
 
-async function cmdImportMnemonic(C, root, log, ask) {
+async function cmdImportMnemonic(C, root, log, ask, startSpinner, stopSpinner) {
   const walletType = await ask(
     `Wallet type (${SUPPORTED_MNEMONIC_WALLET_TYPES.join('/')}):`,
     SUPPORTED_MNEMONIC_WALLET_TYPES,
@@ -410,21 +412,35 @@ async function cmdImportMnemonic(C, root, log, ask) {
     return;
   }
 
-  log(C.muted('  Importing...'));
+  log(
+    C.muted(
+      `  Importing... (deriving address pool, this may take 30-60 seconds)`,
+    ),
+  );
+  const spinner = startSpinner('Importing... deriving address pool');
   try {
     const result = await importDaemonSource(
       { type: 'mnemonic', walletType, phrase },
       root,
     );
+    stopSpinner(spinner);
     log(C.teal(`  Imported: ${result.source.id}`));
     log(`  Wallet type: ${result.source.walletType}`);
     log(C.muted('  Syncing in the background — check `status` for progress.'));
   } catch (error) {
+    stopSpinner(spinner);
     log(C.pink(`  Import failed: ${error.message}`));
   }
 }
 
-async function cmdImportPrivateKey(C, root, log, ask) {
+async function cmdImportPrivateKey(
+  C,
+  root,
+  log,
+  ask,
+  startSpinner,
+  stopSpinner,
+) {
   const keys = [];
   log(
     C.muted('  Enter WIF private keys one at a time. Leave blank to finish.'),
@@ -440,16 +456,23 @@ async function cmdImportPrivateKey(C, root, log, ask) {
     return;
   }
 
-  log(C.muted(`  Importing ${keys.length} key(s)...`));
+  log(
+    C.muted(
+      `  Importing ${keys.length} key(s)... (deriving address pool, this may take 30-60 seconds)`,
+    ),
+  );
+  const spinner = startSpinner('Importing... deriving address pool');
   try {
     const result = await importDaemonSource(
       { type: 'private-key', keys },
       root,
     );
+    stopSpinner(spinner);
     log(C.teal(`  Imported: ${result.source.id}`));
     log(`  Keys: ${keys.length}`);
     log(C.muted('  Syncing in the background — check `status` for progress.'));
   } catch (error) {
+    stopSpinner(spinner);
     log(C.pink(`  Import failed: ${error.message}`));
   }
 }
@@ -686,6 +709,24 @@ export async function launchTui() {
     screen.render();
   }
 
+  function startSpinner(label = 'Working...') {
+    let i = 0;
+    const timer = setInterval(() => {
+      warnBox.setContent(
+        C.blue(`  ${SPINNER_FRAMES[i % SPINNER_FRAMES.length]} ${label}`),
+      );
+      screen.render();
+      i++;
+    }, 100);
+    return timer;
+  }
+
+  function stopSpinner(timer) {
+    clearInterval(timer);
+    warnBox.setContent('');
+    screen.render();
+  }
+
   // Exclusive ask mode — uses a depth counter so nested asks work correctly.
   let askDepth = 0;
 
@@ -819,9 +860,16 @@ export async function launchTui() {
         }
 
         if (importType === 'mnemonic') {
-          await cmdImportMnemonic(C, root, log, ask);
+          await cmdImportMnemonic(C, root, log, ask, startSpinner, stopSpinner);
         } else {
-          await cmdImportPrivateKey(C, root, log, ask);
+          await cmdImportPrivateKey(
+            C,
+            root,
+            log,
+            ask,
+            startSpinner,
+            stopSpinner,
+          );
         }
         break;
       }

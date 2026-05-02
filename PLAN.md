@@ -42,15 +42,11 @@ discovers recoverable funds, and sweeps to a new destination. CLI command is
 ## Pending Work
 
 1. **Tauri GUI** (`ntr-gui`) — primary next slice.
-2. **Atomic / per-source-result sweep** — `executeSweep` is non-atomic across
-   sources and across NAV/xNAV legs. A failed broadcast mid-flight leaves
-   earlier broadcasts already on chain. Surface per-source results so partial
-   success is visible; consider an "all-or-nothing" build-then-broadcast.
-3. **CI release pipeline** — cross-platform artifact builds on version tags.
-4. **Local-storage warning on import** — show platform path + static password +
+2. **CI release pipeline** — cross-platform artifact builds on version tags.
+3. **Local-storage warning on import** — show platform path + static password +
    sensitivity disclaimer after every successful import (not yet wired up).
-5. **Test coverage gaps** — see Testing Strategy below.
-6. **Code-signing decision** — macOS notarization and Windows Authenticode are
+4. **Test coverage gaps** — see Testing Strategy below.
+5. **Code-signing decision** — macOS notarization and Windows Authenticode are
    currently unsigned. Plan a budget/decision before public release.
 
 ## Recently Completed

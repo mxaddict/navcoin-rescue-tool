@@ -96,6 +96,9 @@ jobs:
       - name: Install root dependencies (with dev for build tools)
         run: npm install
 
+      - name: Install GUI frontend dependencies
+        run: npm --prefix gui install
+
       - name: Build GUI bundle
         run: npm run gui:build
 

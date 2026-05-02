@@ -37,19 +37,12 @@ function makeInitialState(sourceId) {
     wallet: null,
     syncStatus: 'opening',
     syncProgress: 0,
-    syncPhaseProgress: 0,
-    syncStageIndex: 0,
-    syncStageTotal: 1,
     syncCurrent: 0,
     syncTotal: 0,
-    totalAddresses: 0,
     connected: false,
     server: null,
     connectingAt: null,
     addresses: [],
-    derivedCount: 0,
-    changeCount: 0,
-    usedCount: 0,
     balance: {
       nav: { confirmed: 0, pending: 0 },
       xnav: { confirmed: 0, pending: 0 },
@@ -58,9 +51,7 @@ function makeInitialState(sourceId) {
     error: null,
     reconnectTimer: null,
     watchdog: null,
-    activeSyncPhase: 'utxo',
     closing: false,
-    useUtxoOnlySync: true,
     connectPromise: null,
   };
 }
@@ -74,9 +65,6 @@ export function getAllSourceStates() {
     sourceId: s.sourceId,
     syncStatus: s.syncStatus,
     syncProgress: s.syncProgress,
-    syncPhaseProgress: s.syncPhaseProgress,
-    syncStageIndex: s.syncStageIndex,
-    syncStageTotal: s.syncStageTotal,
     syncCurrent: s.syncCurrent,
     syncTotal: s.syncTotal,
     connected: s.connected,
@@ -93,23 +81,10 @@ function getSourceMinPoolSize(source) {
   return source.type === 'private-key' ? 0 : 10;
 }
 
-function setHistorySyncStatus(state, phaseProgress = state.syncPhaseProgress) {
-  state.activeSyncPhase = 'history';
-  state.syncStatus = 'syncing-history';
-  state.syncStageIndex = 1;
-  state.syncStageTotal = 2;
-  state.syncPhaseProgress = phaseProgress;
-  state.syncProgress = Math.max(5, Math.round(phaseProgress / 2));
-}
-
-function setUtxoSyncStatus(state, phaseProgress = state.syncPhaseProgress) {
-  state.activeSyncPhase = 'utxo';
+function setUtxoSyncStatus(state, phaseProgress) {
   if (!['syncing-change', 'syncing-stake'].includes(state.syncStatus)) {
     state.syncStatus = 'syncing-utxo';
   }
-  state.syncStageIndex = 1;
-  state.syncStageTotal = 1;
-  state.syncPhaseProgress = phaseProgress;
   state.syncProgress = Math.max(5, phaseProgress);
 }
 
@@ -286,38 +261,16 @@ export async function openSourceWallet(source, root, navWallet) {
       }
     });
 
-    wallet.on('sync_started', () => {
-      if (!state.useUtxoOnlySync && state.activeSyncPhase !== 'utxo') {
-        setHistorySyncStatus(state, 0);
-      }
-    });
-
     wallet.on('bootstrap_started', () => {
-      if (state.useUtxoOnlySync || state.activeSyncPhase === 'utxo') {
-        setUtxoSyncStatus(state, 0);
-        state.syncCurrent = 0;
-        state.syncTotal = 0;
-      } else {
-        setHistorySyncStatus(state, state.syncPhaseProgress);
-      }
-    });
-
-    wallet.on('sync_status', (progress) => {
-      if (!state.useUtxoOnlySync) {
-        setHistorySyncStatus(state, progress);
-      }
+      setUtxoSyncStatus(state, 0);
+      state.syncCurrent = 0;
+      state.syncTotal = 0;
     });
 
     wallet.on('scripthash_progress', (index, total) => {
       setUtxoSyncStatus(state, Math.round((index / total) * 100));
       state.syncCurrent = index;
       state.syncTotal = total;
-      state.totalAddresses = total;
-    });
-
-    wallet.on('derive_progress', (receiveCount, changeCount) => {
-      state.derivedCount = receiveCount;
-      state.changeCount = changeCount;
     });
 
     wallet.on('balance_changed', async () => {
@@ -352,22 +305,10 @@ export async function openSourceWallet(source, root, navWallet) {
     });
 
     wallet.on('sync_finished', async () => {
-      if (!state.useUtxoOnlySync && state.activeSyncPhase === 'history') {
-        setUtxoSyncStatus(state, 0);
-        return;
-      }
-
       state.syncStatus = 'synced';
       state.syncProgress = 100;
-      state.syncPhaseProgress = 100;
-      state.syncStageIndex = 1;
-      state.syncStageTotal = 1;
       state.syncCurrent = state.syncTotal;
       await refreshAddressesAndBalance(source.id, wallet);
-    });
-
-    wallet.on('bootstrap_finished', () => {
-      // Sync address subscription phase complete
     });
 
     wallet.on('new_tx', async () => {
@@ -425,11 +366,9 @@ export async function openSourceWallet(source, root, navWallet) {
 
       state.syncStatus = 'connecting';
       state.connectingAt = Date.now();
-      state.activeSyncPhase = 'utxo';
       state.connectPromise = wallet.Connect();
       await state.connectPromise;
 
-      state.activeSyncPhase = 'utxo';
       rescueScan(wallet, {
         skipDerive: source.type === 'private-key',
       }).catch((err) => {
@@ -468,9 +407,6 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
       used: a.used === 1,
       isChange: a.change,
     }));
-    state.derivedCount = rawAddresses.filter((a) => !a.change).length;
-    state.changeCount = rawAddresses.filter((a) => a.change).length;
-    state.usedCount = rawAddresses.filter((a) => a.used === 1).length;
   } catch {
     // Non-fatal: leave previous address list intact.
   }

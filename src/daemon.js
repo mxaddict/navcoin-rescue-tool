@@ -28,7 +28,6 @@ import {
   openSourceWallet,
   closeSourceWallet,
   closeAllWallets,
-  getAllSourceStates,
   getSourceState,
   prepareSweep,
   executeSweep,
@@ -140,7 +139,6 @@ async function main() {
 
     if (request.method === 'GET' && request.url === '/status') {
       const status = await readStatus(root);
-      const syncStates = getAllSourceStates();
 
       const sources = status.sources.sources.map((source) => {
         const live = getSourceState(source.id);
@@ -148,20 +146,14 @@ async function main() {
           ...source,
           syncStatus: live?.syncStatus ?? source.syncStatus,
           syncProgress: live?.syncProgress ?? 0,
-          syncPhaseProgress: live?.syncPhaseProgress ?? 0,
-          syncStageIndex: live?.syncStageIndex ?? 0,
-          syncStageTotal: live?.syncStageTotal ?? 2,
           syncCurrent: live?.syncCurrent ?? 0,
           syncTotal: live?.syncTotal ?? 0,
-          totalAddresses: live?.totalAddresses ?? 0,
           connected: live?.connected ?? false,
           server: live?.server ?? null,
           addresses: live?.addresses ?? [],
-          derivedCount: live?.derivedCount ?? 0,
-          changeCount: live?.changeCount ?? 0,
-          usedCount: live?.usedCount ?? 0,
           balance: live?.balance ?? {
             nav: { confirmed: 0, pending: 0 },
+            xnav: { confirmed: 0, pending: 0 },
             staked: { confirmed: 0, pending: 0 },
           },
           liveError: live?.error ?? null,

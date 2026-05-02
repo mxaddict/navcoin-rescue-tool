@@ -200,18 +200,15 @@ function makeSep(C) {
 }
 
 function formatSyncLabel(src) {
-  if (src.syncStatus === 'syncing-utxo') {
+  if (
+    src.syncStatus === 'syncing-utxo' ||
+    src.syncStatus === 'syncing-change'
+  ) {
     const current = src.syncCurrent || 0;
-    const total = src.syncTotal || src.totalAddresses || 0;
-    if (total > 0) return `utxo (${current}/${total} addr)`;
-    return 'utxo';
-  }
-
-  if (src.syncStatus === 'syncing-change') {
-    const current = src.syncCurrent || 0;
-    const total = src.syncTotal || src.totalAddresses || 0;
-    if (total > 0) return `change (${current}/${total} addr)`;
-    return 'change';
+    const total = src.syncTotal || 0;
+    const label = src.syncStatus === 'syncing-change' ? 'change' : 'utxo';
+    if (total > 0) return `${label} (${current}/${total} addr)`;
+    return label;
   }
 
   if (src.syncStatus === 'syncing-stake') {
@@ -219,23 +216,6 @@ function formatSyncLabel(src) {
     const total = src.syncTotal || 0;
     if (total > 0) return `stake (${current}/${total} script)`;
     return 'stake';
-  }
-
-  if (
-    src.syncStatus === 'syncing-history' ||
-    src.syncStatus === 'syncing' ||
-    src.syncStatus === 'syncing-addresses' ||
-    src.syncStatus === 'syncing-txs'
-  ) {
-    const phase =
-      src.syncStatus === 'syncing-history'
-        ? 'history'
-        : src.syncStatus === 'syncing-addresses'
-          ? 'addr'
-          : src.syncStatus === 'syncing-txs'
-            ? 'txs'
-            : 'syncing';
-    return `${phase} (${src.syncProgress}%)`;
   }
 
   if (src.syncStatus === 'connecting' && src.connectingAt) {
@@ -315,11 +295,7 @@ function renderStatus(C, data) {
     const syncColor =
       src.syncStatus === 'synced'
         ? C.teal
-        : src.syncStatus === 'syncing-history' ||
-            src.syncStatus === 'syncing' ||
-            src.syncStatus === 'syncing-addresses' ||
-            src.syncStatus === 'syncing-txs' ||
-            src.syncStatus === 'syncing-utxo' ||
+        : src.syncStatus === 'syncing-utxo' ||
             src.syncStatus === 'syncing-change' ||
             src.syncStatus === 'syncing-stake' ||
             src.syncStatus === 'connecting' ||
@@ -342,18 +318,10 @@ function renderStatus(C, data) {
     const navSat = src.balance.nav.confirmed;
     const xnavSat = src.balance.xnav?.confirmed ?? 0;
     const totalSat = navSat + xnavSat;
-    const derived =
-      src.derivedCount ?? src.addresses.filter((a) => !a.isChange).length;
-    const change =
-      src.changeCount ?? src.addresses.filter((a) => a.isChange).length;
-    const used = src.usedCount ?? src.addresses.filter((a) => a.used).length;
     lines.push(
       `  ${C.bold('Balance:')} ${C.cyan(navStr(navSat))} NAV  +  ` +
         `${C.indigo(navStr(xnavSat))} xNAV  =  ` +
         `${C.bold(navStr(totalSat))} total`,
-    );
-    lines.push(
-      `  ${C.bold('Addresses:')} ${derived} derived, ${change} change, ${used} used`,
     );
 
     totalNav += navSat;
@@ -1159,10 +1127,6 @@ export async function launchTui() {
         'opening',
         'connecting',
         'connected',
-        'syncing-history',
-        'syncing',
-        'syncing-addresses',
-        'syncing-txs',
         'syncing-utxo',
         'syncing-change',
         'syncing-stake',
@@ -1178,15 +1142,9 @@ export async function launchTui() {
 
       if (anyInProgress) {
         const syncing = data.sources.filter((s) =>
-          [
-            'syncing-history',
-            'syncing',
-            'syncing-addresses',
-            'syncing-txs',
-            'syncing-utxo',
-            'syncing-change',
-            'syncing-stake',
-          ].includes(s.syncStatus),
+          ['syncing-utxo', 'syncing-change', 'syncing-stake'].includes(
+            s.syncStatus,
+          ),
         );
         const connecting = data.sources.filter((s) =>
           ['opening', 'connecting', 'connected'].includes(s.syncStatus),

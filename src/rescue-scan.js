@@ -59,31 +59,26 @@ async function derivePool(wallet, password, cfg) {
   try {
     let receiveIdx = (await wallet.db.GetCounter('Nav')) ?? 0;
     let changeIdx = (await wallet.db.GetCounter('NavChange')) ?? 0;
-    wallet.emit('derive_progress', receiveIdx, changeIdx);
 
     while (receiveIdx < cfg.maxReceive) {
       await wallet.NavCreateAddress(password, RECEIVE_BRANCH);
       receiveIdx++;
       if (receiveIdx % cfg.deriveProgressInterval === 0) {
         wallet.emit('scripthash_progress', receiveIdx, target);
-        wallet.emit('derive_progress', receiveIdx, changeIdx);
         await yieldEventLoop();
       }
     }
     wallet.emit('scripthash_progress', receiveIdx, target);
-    wallet.emit('derive_progress', receiveIdx, changeIdx);
 
     while (changeIdx < cfg.maxChange) {
       await wallet.NavCreateAddress(password, CHANGE_BRANCH);
       changeIdx++;
       if (changeIdx % cfg.deriveProgressInterval === 0) {
         wallet.emit('scripthash_progress', receiveIdx + changeIdx, target);
-        wallet.emit('derive_progress', receiveIdx, changeIdx);
         await yieldEventLoop();
       }
     }
     wallet.emit('scripthash_progress', receiveIdx + changeIdx, target);
-    wallet.emit('derive_progress', receiveIdx, changeIdx);
 
     if (cfg.xNavPoolSize > 0) {
       await wallet.xNavFillKeyPool(password, cfg.xNavPoolSize);

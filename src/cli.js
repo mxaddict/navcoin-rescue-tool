@@ -142,29 +142,11 @@ async function handleStatus() {
       const typeLabel = source.walletType
         ? `${source.type}:${source.walletType}`
         : source.type;
-      const syncingPhases = [
-        'syncing-history',
-        'syncing',
-        'syncing-addresses',
-        'syncing-txs',
-        'syncing-utxo',
-        'syncing-change',
-        'syncing-stake',
-      ];
+      const syncingPhases = ['syncing-utxo', 'syncing-change', 'syncing-stake'];
       const syncLabel = syncingPhases.includes(source.syncStatus)
-        ? source.syncStatus === 'syncing-utxo'
-          ? `utxo(${source.syncCurrent ?? 0}/${source.syncTotal || source.totalAddresses || 0} addr)`
-          : source.syncStatus === 'syncing-change'
-            ? `change(${source.syncCurrent ?? 0}/${source.syncTotal || source.totalAddresses || 0} addr)`
-            : source.syncStatus === 'syncing-stake'
-              ? `stake(${source.syncCurrent ?? 0}/${source.syncTotal || 0} script)`
-              : source.syncStatus === 'syncing-history'
-                ? `history(${source.syncProgress}%)`
-                : source.syncStatus === 'syncing-addresses'
-                  ? `addr(${source.syncProgress}%)`
-                  : source.syncStatus === 'syncing-txs'
-                    ? `txs(${source.syncProgress}%)`
-                    : `syncing(${source.syncProgress}%)`
+        ? source.syncStatus === 'syncing-stake'
+          ? `stake(${source.syncCurrent ?? 0}/${source.syncTotal || 0} script)`
+          : `${source.syncStatus.replace('syncing-', '')}(${source.syncCurrent ?? 0}/${source.syncTotal ?? 0} addr)`
         : source.syncStatus;
       const serverLabel = source.server ? ` server=${source.server}` : '';
 
@@ -185,20 +167,6 @@ async function handleStatus() {
       process.stdout.write(
         `  Balance: ${navStr} NAV + ${xnavStr} xNAV = ${totalStr} total\n`,
       );
-
-      if (source.addresses.length > 0) {
-        const derived =
-          source.derivedCount ??
-          source.addresses.filter((a) => !a.isChange).length;
-        const change =
-          source.changeCount ??
-          source.addresses.filter((a) => a.isChange).length;
-        const used =
-          source.usedCount ?? source.addresses.filter((a) => a.used).length;
-        process.stdout.write(
-          `  Addresses (${derived} derived, ${change} change, ${used} used)\n`,
-        );
-      }
     }
   } catch {
     process.stderr.write(

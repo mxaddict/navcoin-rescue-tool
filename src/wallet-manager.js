@@ -538,16 +538,26 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
   if (!state) return;
 
   try {
-    const rawAddresses = await wallet.NavReceivingAddresses(true);
+    const navAddrs = await wallet.NavReceivingAddresses(true);
+    const xnavAddrs = await wallet.xNavReceivingAddresses(true);
 
-    // Aggregate UTXO amounts by spendingPk so we can attach a per-address
-    // balance. Covers both plain P2PKH (NAV) and cold-stake outputs we
-    // hold the spending key for.
+    // Aggregate UTXO amounts by spendingPk for transparent NAV / cold-stake
+    // outputs and by hashId for xNAV outputs (which use blsct keys, not
+    // a per-address pubkey).
     const balanceByPk = new Map();
+    const balanceByHashId = new Map();
     try {
       const utxos = await wallet.db.GetUtxos(true);
       for (const u of utxos) {
         if (u.spentIn) continue;
+        if (u.type & OUT_XNAV) {
+          if (!u.hashId) continue;
+          balanceByHashId.set(
+            u.hashId,
+            (balanceByHashId.get(u.hashId) ?? 0) + (u.amount ?? 0),
+          );
+          continue;
+        }
         if (!u.spendingPk) continue;
         balanceByPk.set(
           u.spendingPk,
@@ -555,16 +565,27 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
         );
       }
     } catch {
-      // Non-fatal: balance map stays empty, addresses report 0.
+      // Non-fatal: balance maps stay empty, addresses report 0.
     }
 
-    state.addresses = rawAddresses.map((a) => ({
-      address: a.address,
-      path: a.path,
-      used: a.used === 1,
-      isChange: a.change,
-      balance: balanceByPk.get(a.hash) ?? 0,
-    }));
+    state.addresses = [
+      ...navAddrs.map((a) => ({
+        address: a.address,
+        path: a.path,
+        used: a.used === 1,
+        isChange: a.change,
+        isXNav: false,
+        balance: balanceByPk.get(a.hash) ?? 0,
+      })),
+      ...xnavAddrs.map((a) => ({
+        address: a.address,
+        path: a.path,
+        used: false,
+        isChange: false,
+        isXNav: true,
+        balance: balanceByHashId.get(a.hash) ?? 0,
+      })),
+    ];
   } catch {
     // Non-fatal: leave previous address list intact.
   }

@@ -376,10 +376,14 @@ function renderShow(C, data) {
     }
 
     lines.push(`  ${C.bold('Addresses with balance')} (${funded.length}):`);
+    // Amount-first layout so a long xNAV address at the end can wrap
+    // without breaking column alignment of the numbers.
     const width = Math.max(...funded.map((a) => navStr(a.balance).length));
     for (const addr of funded) {
       const bal = navStr(addr.balance).padStart(width);
-      lines.push(`    ${C.magenta(addr.address)}  ${C.cyan(bal)} NAV`);
+      const unit = addr.isXNav ? 'xNAV' : 'NAV ';
+      const color = addr.isXNav ? C.indigo : C.cyan;
+      lines.push(`    ${color(bal)} ${unit}  ${C.magenta(addr.address)}`);
     }
   }
 

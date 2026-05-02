@@ -280,8 +280,15 @@
             <ul class="addr-list">
               {#each funded as a}
                 <li>
+                  <span class="kind small {a.isXNav ? 'indigo' : 'cyan'}">
+                    {a.isXNav ? 'xNAV' : 'NAV'}
+                  </span>
                   <span class="mono small addr">{a.address}</span>
-                  <span class="num cyan mono small">{fmt(a.balance)}</span>
+                  <span
+                    class="num mono small {a.isXNav ? 'indigo' : 'cyan'}"
+                  >
+                    {fmt(a.balance)}
+                  </span>
                 </li>
               {/each}
             </ul>
@@ -568,6 +575,15 @@
     align-items: baseline;
     gap: 12px;
     padding: 2px 0;
+  }
+
+  .addr-list .kind {
+    text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+    width: 36px;
   }
 
   .addr-list .addr {

@@ -217,22 +217,54 @@ function parsePathIndex(path) {
   return Number.isFinite(n) ? n : 0;
 }
 
-async function scanStaking(wallet, cfg) {
-  wallet.emit('utxo_phase', 'stake');
+// Walk every derived NAV addr and call blockchain_staking_getKeys to
+// find every staking partner the user ever cold-staked through. This is
+// what wallet.GetScriptHashes() (no arg) does internally, but without
+// any progress reporting — for 10k+ addr wallets that's a long silent
+// pause. Doing it ourselves so we can emit progress.
+async function discoverStakingPartners(wallet, cfg) {
+  if (wallet.requestedStakingKeys) return;
 
-  // Trigger staking-partner discovery. Calling GetScriptHashes() with no
-  // staking-address argument walks every derived NAV addr and queries
-  // blockchain_staking_getKeys per addr, calling AddStakingAddress for
-  // every partner the user ever cold-staked through. Without this we
-  // only know the default NavCash pool and miss cold-stake outputs that
-  // were delegated to other pools.
-  try {
-    await wallet.GetScriptHashes();
-  } catch (err) {
-    console.error(
-      `[rescue-scan] staking partner discovery failed: ${err.message}`,
-    );
+  const addrs = await wallet.db.GetNavAddresses();
+  if (addrs.length === 0) {
+    wallet.requestedStakingKeys = true;
+    return;
   }
+
+  wallet.emit('utxo_phase', 'stake-discover');
+  wallet.emit('scripthash_progress', 0, addrs.length);
+
+  let scanned = 0;
+  await mapConcurrent(addrs, cfg.concurrency, async (addr) => {
+    try {
+      const stakingAddresses = await wallet.client.blockchain_staking_getKeys(
+        Buffer.from(addr.hash, 'hex').reverse().toString('hex'),
+      );
+      for (const entry of stakingAddresses ?? []) {
+        try {
+          await wallet.AddStakingAddress(entry[0], entry[1], false);
+        } catch {
+          // Duplicate / malformed entry — skip.
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[rescue-scan] staking_getKeys failed for ${addr.address}: ${err.message}`,
+      );
+    }
+    scanned++;
+    if (scanned % cfg.progressInterval === 0 || scanned === addrs.length) {
+      wallet.emit('scripthash_progress', scanned, addrs.length);
+    }
+  });
+
+  wallet.requestedStakingKeys = true;
+}
+
+async function scanStaking(wallet, cfg) {
+  await discoverStakingPartners(wallet, cfg);
+
+  wallet.emit('utxo_phase', 'stake');
 
   const stakingAddrs = await wallet.GetStakingAddresses();
   const items = [];
@@ -276,7 +308,9 @@ async function scanStaking(wallet, cfg) {
 async function scanXNav(wallet, cfg) {
   if (!wallet.mvk) return;
 
-  wallet.emit('utxo_phase', 'xnav');
+  // Anchor-history fetch can take seconds on a busy network. Mark the
+  // phase up-front so the status display shows we're not idle.
+  wallet.emit('utxo_phase', 'xnav-history');
 
   const opTrueBuf = Script.fromHex('51').toBuffer();
   const anchor = Buffer.from(sha256(opTrueBuf).reverse()).toString('hex');
@@ -296,6 +330,9 @@ async function scanXNav(wallet, cfg) {
 
   const entries = Array.isArray(history) ? history : history?.history || [];
   if (entries.length === 0) return;
+
+  wallet.emit('utxo_phase', 'xnav');
+  wallet.emit('scripthash_progress', 0, entries.length);
 
   // Phase 1: txKeys cache pre-filter. Bootstrap pre-populates this; misses
   // fall back to blockchain_transaction_getKeys (smaller than full tx).

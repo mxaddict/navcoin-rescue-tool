@@ -33,7 +33,9 @@ export const FILE_LAYOUT = {
 export const SYNC_PHASES = {
   receive: { label: 'scanning receive', unit: 'addr' },
   change: { label: 'scanning change', unit: 'addr' },
+  'stake-discover': { label: 'discovering stake partners', unit: 'addr' },
   stake: { label: 'scanning stake', unit: 'script' },
+  'xnav-history': { label: 'fetching xNAV history', unit: '' },
   xnav: { label: 'scanning xNAV', unit: 'tx' },
   'xnav-claim': { label: 'claiming xNAV', unit: 'tx' },
 };
@@ -42,7 +44,8 @@ export function formatSyncPhase(phase, current, total) {
   const meta = SYNC_PHASES[phase];
   if (!meta) return phase ?? 'syncing';
   if (total > 0) {
-    return `${meta.label} (${current ?? 0}/${total} ${meta.unit})`;
+    const unit = meta.unit ? ` ${meta.unit}` : '';
+    return `${meta.label} (${current ?? 0}/${total}${unit})`;
   }
   return meta.label;
 }

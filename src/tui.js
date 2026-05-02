@@ -244,7 +244,7 @@ function renderHelp(C) {
     `    ${C.cyan('quit')}                Exit the TUI (daemon keeps running)`,
     '',
     C.muted(
-      '  Tab auto-completes.  PgUp/PgDn or ↑↓ to scroll.  Ctrl+C to quit.',
+      '  Tab auto-completes.  ↑↓ recall history.  PgUp/PgDn to scroll.  Ctrl+C to quit.',
     ),
     SEP,
   ].join('\n');
@@ -665,7 +665,7 @@ export async function launchTui() {
     terminal: 'xterm-256color',
     fullUnicode: true,
     // Mouse mode disabled — preserves native terminal text selection.
-    // Scrolling is via PgUp/PgDn and ↑↓ arrow keys.
+    // Scrolling is via PgUp/PgDn; ↑↓ recall command history.
   });
 
   // ---- Outer container — provides 1-cell padding on all sides ------------
@@ -686,7 +686,9 @@ export async function launchTui() {
     height: 1,
     content:
       C.boldMagenta(' navcoin-rescue-tool ') +
-      C.muted('| help  Tab=complete  PgUp/PgDn=scroll  Ctrl+C=quit'),
+      C.muted(
+        '| help  Tab=complete  ↑↓=history  PgUp/PgDn=scroll  Ctrl+C=quit',
+      ),
     tags: false,
   });
 
@@ -1196,12 +1198,16 @@ export async function launchTui() {
         header.setContent(
           C.boldMagenta(' navcoin-rescue-tool ') +
             C.teal('● synced') +
-            C.muted('  | help  Tab=complete  PgUp/PgDn=scroll  Ctrl+C=quit'),
+            C.muted(
+              '  | help  Tab=complete  ↑↓=history  PgUp/PgDn=scroll  Ctrl+C=quit',
+            ),
         );
       } else {
         header.setContent(
           C.boldMagenta(' navcoin-rescue-tool ') +
-            C.muted('| help  Tab=complete  PgUp/PgDn=scroll  Ctrl+C=quit'),
+            C.muted(
+              '| help  Tab=complete  ↑↓=history  PgUp/PgDn=scroll  Ctrl+C=quit',
+            ),
         );
       }
 

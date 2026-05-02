@@ -87,10 +87,17 @@ async function walkBranch(wallet, password, branch, cfg) {
   try {
     while (true) {
       // Derive ahead so we always have walkBatchSize unscanned addrs ready.
+      // HD derivation (especially navcoin-core's all-hardened path) is
+      // CPU-bound — emit progress during the loop so the bar moves while
+      // we derive.
       const needed = scannedIdx + cfg.walkBatchSize;
       while (derivedIdx < needed) {
         await wallet.NavCreateAddress(password, branch);
         derivedIdx++;
+        if (derivedIdx % cfg.progressInterval === 0) {
+          wallet.emit('scripthash_progress', scannedIdx, derivedIdx);
+          await yieldEventLoop();
+        }
       }
 
       const branchAddrs = await getBranchAddrs(wallet, branch);

@@ -219,6 +219,20 @@ function parsePathIndex(path) {
 async function scanStaking(wallet, cfg) {
   wallet.emit('utxo_phase', 'stake');
 
+  // Trigger staking-partner discovery. Calling GetScriptHashes() with no
+  // staking-address argument walks every derived NAV addr and queries
+  // blockchain_staking_getKeys per addr, calling AddStakingAddress for
+  // every partner the user ever cold-staked through. Without this we
+  // only know the default NavCash pool and miss cold-stake outputs that
+  // were delegated to other pools.
+  try {
+    await wallet.GetScriptHashes();
+  } catch (err) {
+    console.error(
+      `[rescue-scan] staking partner discovery failed: ${err.message}`,
+    );
+  }
+
   const stakingAddrs = await wallet.GetStakingAddresses();
   const items = [];
   for (const stakingAddr of stakingAddrs) {

@@ -127,7 +127,7 @@
       />
       <p class="hint">A new wallet address you control. Verify carefully.</p>
     </div>
-    <div class="form-actions">
+    <div class="actions">
       <button onclick={goToVerify} disabled={busy || !destination.trim()}>
         Continue
       </button>
@@ -156,7 +156,7 @@
         }}
       />
     </div>
-    <div class="form-actions">
+    <div class="actions">
       <button class="ghost" onclick={back} disabled={busy}>Back</button>
       <button
         onclick={goToReview}
@@ -218,7 +218,7 @@
       />
     </div>
 
-    <div class="form-actions">
+    <div class="actions">
       <button class="ghost" onclick={back} disabled={busy}>Back</button>
       <button
         class="danger"
@@ -377,12 +377,6 @@
 
   .indigo {
     color: var(--indigo);
-  }
-
-  .form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
   }
 
   button.danger {

@@ -60,9 +60,9 @@
   }
 
   .sidebar {
-    background: var(--panel);
+    background: linear-gradient(135deg, var(--magenta), var(--blue));
     padding: 10px 14px;
-    border-bottom: 1px solid #1f2937;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.25);
   }
 
   .bar-inner {
@@ -90,10 +90,7 @@
   .brand-suffix {
     font-size: 14px;
     font-weight: 600;
-    background: linear-gradient(135deg, var(--fuchsia), var(--cyan));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: white;
   }
 
   nav {
@@ -105,16 +102,21 @@
 
   .nav-btn {
     background: transparent;
-    color: var(--muted);
+    color: rgba(255, 255, 255, 0.75);
     text-align: center;
     padding: 6px 12px;
     border-radius: 6px;
     font-weight: 500;
   }
 
+  .nav-btn:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
   .nav-btn.active {
-    background: var(--deep);
-    color: var(--text);
+    background: rgba(0, 0, 0, 0.25);
+    color: white;
   }
 
   .main {

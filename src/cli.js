@@ -177,11 +177,13 @@ async function handleStatus() {
         process.stdout.write(`  Error:  ${source.liveError}\n`);
       }
 
-      const navConfirmed = (source.balance.nav.confirmed / 1e8).toFixed(8);
-      const navPending = (source.balance.nav.pending / 1e8).toFixed(8);
-      const staked = (source.balance.staked.confirmed / 1e8).toFixed(8);
+      const navSat = source.balance.nav.confirmed;
+      const xnavSat = source.balance.xnav?.confirmed ?? 0;
+      const navStr = (navSat / 1e8).toFixed(8);
+      const xnavStr = (xnavSat / 1e8).toFixed(8);
+      const totalStr = ((navSat + xnavSat) / 1e8).toFixed(8);
       process.stdout.write(
-        `  Balance: ${navConfirmed} NAV confirmed  ${navPending} NAV pending  ${staked} NAV staked\n`,
+        `  Balance: ${navStr} NAV + ${xnavStr} xNAV = ${totalStr} total\n`,
       );
 
       if (source.addresses.length > 0) {

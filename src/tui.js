@@ -301,7 +301,7 @@ function renderStatus(C, data) {
   }
 
   let totalNav = 0;
-  let totalStaked = 0;
+  let totalXNav = 0;
 
   for (const src of data.sources) {
     lines.push(SEP);
@@ -339,35 +339,32 @@ function renderStatus(C, data) {
       lines.push(`  ${C.pink('Error:')}   ${src.liveError}`);
     }
 
-    const navConf = navStr(src.balance.nav.confirmed);
-    const navPend = navStr(src.balance.nav.pending);
-    const staked = navStr(src.balance.staked.confirmed);
+    const navSat = src.balance.nav.confirmed;
+    const xnavSat = src.balance.xnav?.confirmed ?? 0;
+    const totalSat = navSat + xnavSat;
     const derived =
       src.derivedCount ?? src.addresses.filter((a) => !a.isChange).length;
     const change =
       src.changeCount ?? src.addresses.filter((a) => a.isChange).length;
     const used = src.usedCount ?? src.addresses.filter((a) => a.used).length;
     lines.push(
-      `  ${C.bold('Balance:')} ${C.cyan(navConf)} NAV  ` +
-        `${C.muted(navPend + ' pending')}  ` +
-        `${C.indigo(staked)} staked`,
+      `  ${C.bold('Balance:')} ${C.cyan(navStr(navSat))} NAV  +  ` +
+        `${C.indigo(navStr(xnavSat))} xNAV  =  ` +
+        `${C.bold(navStr(totalSat))} total`,
     );
     lines.push(
       `  ${C.bold('Addresses:')} ${derived} derived, ${change} change, ${used} used`,
     );
 
-    totalNav += src.balance.nav.confirmed;
-    totalStaked += src.balance.staked.confirmed;
+    totalNav += navSat;
+    totalXNav += xnavSat;
   }
 
   lines.push(SEP);
   lines.push(C.gradient('  Totals'));
-  lines.push(
-    `  ${C.bold('NAV:')}    ${C.cyan(navStr(totalNav))} NAV confirmed`,
-  );
-  lines.push(
-    `  ${C.bold('Staked:')} ${C.indigo(navStr(totalStaked))} NAV staked`,
-  );
+  lines.push(`  ${C.bold('NAV:')}    ${C.cyan(navStr(totalNav))}`);
+  lines.push(`  ${C.bold('xNAV:')}   ${C.indigo(navStr(totalXNav))}`);
+  lines.push(`  ${C.bold('Total:')}  ${C.bold(navStr(totalNav + totalXNav))}`);
   lines.push(SEP);
 
   return lines.join('\n');

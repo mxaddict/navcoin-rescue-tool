@@ -52,6 +52,7 @@ function makeInitialState(sourceId) {
     usedCount: 0,
     balance: {
       nav: { confirmed: 0, pending: 0 },
+      xnav: { confirmed: 0, pending: 0 },
       staked: { confirmed: 0, pending: 0 },
     },
     error: null,
@@ -327,6 +328,10 @@ export async function openSourceWallet(source, root, navWallet) {
             confirmed: bal.nav?.confirmed ?? 0,
             pending: bal.nav?.pending ?? 0,
           },
+          xnav: {
+            confirmed: bal.xnav?.confirmed ?? 0,
+            pending: bal.xnav?.pending ?? 0,
+          },
           staked: {
             confirmed: bal.staked?.confirmed ?? 0,
             pending: bal.staked?.pending ?? 0,
@@ -476,6 +481,10 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
       nav: {
         confirmed: bal.nav?.confirmed ?? 0,
         pending: bal.nav?.pending ?? 0,
+      },
+      xnav: {
+        confirmed: bal.xnav?.confirmed ?? 0,
+        pending: bal.xnav?.pending ?? 0,
       },
       staked: {
         confirmed: bal.staked?.confirmed ?? 0,

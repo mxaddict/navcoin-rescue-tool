@@ -22,10 +22,25 @@ discovers recoverable funds, and sweeps to a new destination. CLI command is
 ## Platform Support
 
 - MVP target platforms:
-  - Ubuntu 22.04 or newer
-  - macOS 12 or newer
-  - Windows 10 or newer
+  - Ubuntu 22.04 or newer (`x86_64`, `arm64`)
+  - macOS 12 or newer (`arm64` only)
+  - Windows 10 or newer (`x86_64`)
 - CLI, TUI, daemon, and GUI behavior should work on all three.
+
+### Known Platform Limitations
+
+- **Windows ARM64 is not supported.** A transitive native dependency
+  (`bcrypto`'s vendored `torsion` C sources via `navcoin-js`) fails to compile
+  on Windows ARM64 — `immintrin.h` raises `C1189` in `mpi.c` because torsion
+  forces x86 SIMD intrinsic paths even when `_M_ARM64` is defined. The
+  `windows-11-arm` runner is excluded from CI and release builds. Re-enable
+  once upstream `bcrypto` ships an ARM64-friendly build path or prebuilt
+  binaries.
+- **macOS Intel (`x86_64`) is not supported.** Apple Silicon is the going-
+  forward target: Intel Macs no longer receive new macOS releases, GitHub is
+  winding down `macos-13` runners, and our expected user base is on Apple
+  Silicon. Apple Silicon builds are not Rosetta-compatible. Re-add an Intel
+  build target only if real users surface a need.
 
 ## Expected Inputs
 
@@ -187,7 +202,9 @@ Notes:
 
 ### Packaging Direction
 
-- Cross-platform builds for Linux, macOS, Windows × `x86_64`, `arm64`.
+- Cross-platform builds for Linux × `x86_64`/`arm64`, macOS × `arm64`,
+  Windows × `x86_64`. macOS `x86_64` and Windows `arm64` excluded — see
+  Known Platform Limitations.
 - Package with Tauri build tooling (`tauri build`).
 - Release outputs are simple archives, not installers.
 - Archives must be standalone — end users should not need Node.js installed.
@@ -203,10 +220,8 @@ Notes:
 - Examples:
   - `navcoin-rescue-tool-v0.0.1-linux-x86_64.tar.gz`
   - `navcoin-rescue-tool-v0.0.1-linux-arm64.tar.gz`
-  - `navcoin-rescue-tool-v0.0.1-macos-x86_64.zip`
   - `navcoin-rescue-tool-v0.0.1-macos-arm64.zip`
   - `navcoin-rescue-tool-v0.0.1-windows-x86_64.zip`
-  - `navcoin-rescue-tool-v0.0.1-windows-arm64.zip`
 - Platform names: `linux`, `macos`, `windows`. Arch names: `x86_64`, `arm64`.
 - One `.sha256` checksum file per artifact (not one combined file).
 - Archive layout places `ntr`, `ntr-gui`, and `README` at the top level of the

@@ -1,0 +1,311 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.0.1). Tag must already exist.'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_RUNTIME_VERSION: '22.11.0'
+
+jobs:
+  test:
+    uses: ./.github/workflows/_test.yml
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+            node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz
+            ext: tar.gz
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-arm64.tar.xz
+            ext: tar.gz
+          # macOS Intel (x86_64) build skipped: Intel Macs are end-of-life,
+          # GitHub is winding down macos-13 runners, and our user base is
+          # Apple Silicon. Re-add if demand emerges.
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+            node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-darwin-arm64.tar.gz
+            ext: zip
+          - os: windows-latest
+            platform: windows
+            arch: x86_64
+            node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip
+            ext: zip
+          # windows arm64 build skipped: bcrypto torsion deps fail to compile
+          # on Windows ARM64 (immintrin.h C1189). Re-add when upstream fixes.
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "ref=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            ref="${GITHUB_REF#refs/tags/}"
+            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+            echo "version=$ref" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.tag.outputs.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Linux GUI build deps
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Install root prod dependencies
+        run: npm install --omit=dev
+
+      - name: Build GUI bundle
+        run: npm run gui:build
+
+      - name: Stage archive layout
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.tag.outputs.version }}"
+          platform="${{ matrix.platform }}"
+          arch="${{ matrix.arch }}"
+          name="navcoin-rescue-tool-${version}-${platform}-${arch}"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+          stage="staging/$name"
+          rm -rf "$stage"
+          mkdir -p "$stage/app/src" "$stage/runtime"
+
+          cp -R src/* "$stage/app/src/"
+          cp package.json "$stage/app/package.json"
+          cp README.md "$stage/README.md"
+
+          # Production node_modules
+          cp -R node_modules "$stage/app/node_modules"
+
+      - name: Stage Tauri GUI binary (unix)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="staging/${{ steps.stage.outputs.name }}"
+          # Tauri output dir is the workspace target dir
+          if [ -f src-tauri/target/release/ntr-gui ]; then
+            cp src-tauri/target/release/ntr-gui "$stage/ntr-gui"
+            chmod +x "$stage/ntr-gui"
+          else
+            echo "ntr-gui binary not found" >&2
+            ls -la src-tauri/target/release/ || true
+            exit 1
+          fi
+
+      - name: Stage Tauri GUI binary (windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="staging/${{ steps.stage.outputs.name }}"
+          cp src-tauri/target/release/ntr-gui.exe "$stage/ntr-gui.exe"
+
+      - name: Stage Node runtime (unix)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="staging/${{ steps.stage.outputs.name }}"
+          curl -fsSL "${{ matrix.node_url }}" -o node.tar
+          mkdir -p node_extract
+          if [[ "${{ matrix.node_url }}" == *.tar.xz ]]; then
+            tar -xJf node.tar -C node_extract --strip-components=1
+          else
+            tar -xzf node.tar -C node_extract --strip-components=1
+          fi
+          mkdir -p "$stage/runtime/bin"
+          cp node_extract/bin/node "$stage/runtime/bin/node"
+          chmod +x "$stage/runtime/bin/node"
+
+      - name: Stage Node runtime (windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = "staging/${{ steps.stage.outputs.name }}"
+          Invoke-WebRequest -Uri "${{ matrix.node_url }}" -OutFile node.zip
+          Expand-Archive -Path node.zip -DestinationPath node_extract
+          $nodeDir = Get-ChildItem node_extract | Select-Object -First 1
+          New-Item -ItemType Directory -Path "$stage/runtime" -Force | Out-Null
+          Copy-Item "$($nodeDir.FullName)/node.exe" "$stage/runtime/node.exe"
+
+      - name: Add CLI wrappers (unix)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="staging/${{ steps.stage.outputs.name }}"
+          for name in ntr ntr-daemon; do
+            script="src/${name#ntr-}.js"
+            [ "$name" = "ntr" ] && script="src/cli.js"
+            cat > "$stage/$name" <<EOF
+          #!/bin/sh
+          DIR=\$(cd "\$(dirname "\$0")" && pwd)
+          exec "\$DIR/runtime/bin/node" "\$DIR/app/$script" "\$@"
+          EOF
+            chmod +x "$stage/$name"
+          done
+
+      - name: Add CLI wrappers (windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="staging/${{ steps.stage.outputs.name }}"
+          # ntr.cmd
+          cat > "$stage/ntr.cmd" <<'EOF'
+          @echo off
+          "%~dp0runtime\node.exe" "%~dp0app\src\cli.js" %*
+          EOF
+          # ntr-daemon.cmd
+          cat > "$stage/ntr-daemon.cmd" <<'EOF'
+          @echo off
+          "%~dp0runtime\node.exe" "%~dp0app\src\daemon.js" %*
+          EOF
+
+      - name: Add macOS quarantine README
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          stage="staging/${{ steps.stage.outputs.name }}"
+          cat > "$stage/README-macOS.txt" <<'EOF'
+          macOS Quarantine Notice
+          =======================
+
+          The binaries in this archive are not code-signed. macOS will refuse to
+          run them until quarantine is removed.
+
+          After extracting, run:
+
+            xattr -dr com.apple.quarantine "$(pwd)"
+
+          Then launch ntr-gui or run ./ntr from the extracted directory.
+          EOF
+
+      - name: Pack archive (tar.gz)
+        if: matrix.ext == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="${{ steps.stage.outputs.name }}"
+          tar -C staging -czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+
+      - name: Pack archive (zip - unix)
+        if: matrix.ext == 'zip' && matrix.platform != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="${{ steps.stage.outputs.name }}"
+          (cd staging && zip -r -q "../$name.zip" "$name")
+          shasum -a 256 "$name.zip" > "$name.zip.sha256"
+
+      - name: Pack archive (zip - windows)
+        if: matrix.ext == 'zip' && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = "${{ steps.stage.outputs.name }}"
+          Compress-Archive -Path "staging/$name" -DestinationPath "$name.zip"
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.name }}
+          path: |
+            ${{ steps.stage.outputs.name }}.${{ matrix.ext }}
+            ${{ steps.stage.outputs.name }}.${{ matrix.ext }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-files
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec mv {} release-files/ \;
+          ls -la release-files
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.tag.outputs.version }}"
+          if gh release view "$version" >/dev/null 2>&1; then
+            gh release upload "$version" release-files/* --clobber
+          else
+            gh release create "$version" \
+              --title "$version" \
+              --generate-notes \
+              release-files/*
+          fi

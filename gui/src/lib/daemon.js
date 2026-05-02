@@ -56,6 +56,13 @@ export async function purgeDaemon() {
   return await daemonRequest('/purge', { method: 'POST' });
 }
 
+export async function removeSource(sourceId) {
+  return await daemonRequest('/remove', {
+    method: 'POST',
+    body: JSON.stringify({ sourceId }),
+  });
+}
+
 export async function rescanDaemon() {
   return await daemonRequest('/rescan', { method: 'POST' });
 }

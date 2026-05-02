@@ -1,6 +1,10 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { fetchDaemonStatus, rescanDaemon } from '../lib/daemon.js';
+  import {
+    fetchDaemonStatus,
+    rescanDaemon,
+    removeSource,
+  } from '../lib/daemon.js';
   import { syncLabel } from '../lib/sync.js';
 
   let status = $state(null);
@@ -11,6 +15,12 @@
   let rescanBusy = $state(false);
   let rescanError = $state(null);
   let rescanStarted = $state(null);
+
+  // ID of the source currently in the remove-confirm state. null when
+  // no card is showing the Yes / No prompt.
+  let confirmRemoveId = $state(null);
+  let removeBusy = $state(false);
+  let removeError = $state(null);
 
   // States that mean a scan is in flight; while any source is in one,
   // the rescan button is disabled to match wallet-manager skip rules.
@@ -28,6 +38,20 @@
       status = null;
     } finally {
       loading = false;
+    }
+  }
+
+  async function doRemove(id) {
+    removeBusy = true;
+    removeError = null;
+    try {
+      await removeSource(id);
+      confirmRemoveId = null;
+      await refresh();
+    } catch (err) {
+      removeError = err.message ?? String(err);
+    } finally {
+      removeBusy = false;
     }
   }
 
@@ -151,7 +175,40 @@
           <span class="card-title">Source</span>
           <span class="chip">{typeLabel(s)}</span>
           <span class="mono dim">{s.id}</span>
+          <span class="card-actions">
+            {#if confirmRemoveId === s.id}
+              <span class="confirm-text">Remove this source?</span>
+              <button
+                class="ghost-pink"
+                onclick={() => doRemove(s.id)}
+                disabled={removeBusy}
+              >
+                {removeBusy ? 'Removing…' : 'Yes'}
+              </button>
+              <button
+                class="ghost"
+                onclick={() => (confirmRemoveId = null)}
+                disabled={removeBusy}
+              >
+                No
+              </button>
+            {:else}
+              <button
+                class="ghost"
+                onclick={() => {
+                  confirmRemoveId = s.id;
+                  removeError = null;
+                }}
+              >
+                Remove
+              </button>
+            {/if}
+          </span>
         </header>
+
+        {#if removeError && confirmRemoveId === s.id}
+          <p class="error-inline">Remove failed: {removeError}</p>
+        {/if}
 
         <dl class="rows">
           <div class="row">
@@ -257,6 +314,52 @@
     flex-wrap: wrap;
     gap: 10px;
     margin-bottom: 10px;
+  }
+
+  .card-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .confirm-text {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  button.ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid #374151;
+    padding: 4px 12px;
+    font-size: 12px;
+    min-width: 0;
+  }
+
+  button.ghost:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--muted);
+  }
+
+  button.ghost-pink {
+    background: transparent;
+    color: var(--pink);
+    border: 1px solid var(--pink);
+    padding: 4px 12px;
+    font-size: 12px;
+    min-width: 0;
+  }
+
+  button.ghost-pink:hover:not(:disabled) {
+    background: var(--pink);
+    color: white;
+  }
+
+  .error-inline {
+    margin: 0 0 10px;
+    color: var(--pink);
+    font-size: 12px;
   }
 
   .card-title {

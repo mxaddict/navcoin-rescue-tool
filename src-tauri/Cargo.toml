@@ -1,6 +1,6 @@
 [package]
 name = "ntr-gui"
-version = "0.0.0"
+version = "0.1.0"
 description = "Tauri GUI for navcoin-rescue-tool"
 edition = "2021"
 rust-version = "1.77"

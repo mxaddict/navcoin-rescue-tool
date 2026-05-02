@@ -82,11 +82,15 @@
   }
 
   .logo {
-    height: 22px;
-    width: auto;
+    height: 24px;
+    /* Browser-computed width from viewBox can be flaky in WebKitGTK
+       when the SVG has no intrinsic size; the explicit ratio guarantees
+       the right edge of the logo isn't clipped against the chip's
+       right padding. */
+    width: calc(24px * (817 / 664));
     display: block;
     background: var(--deep);
-    padding: 6px 8px;
+    padding: 8px 10px;
     border-radius: 8px;
     box-sizing: content-box;
   }

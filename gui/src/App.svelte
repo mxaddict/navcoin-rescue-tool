@@ -2,12 +2,14 @@
   import Status from './views/Status.svelte';
   import Import from './views/Import.svelte';
   import Purge from './views/Purge.svelte';
+  import Logs from './views/Logs.svelte';
   import navioLogo from './assets/navio-icon.svg';
 
   const VIEWS = [
     { id: 'status', label: 'Status' },
     { id: 'import', label: 'Import' },
     { id: 'purge', label: 'Purge' },
+    { id: 'logs', label: 'Logs' },
   ];
 
   let view = $state('status');
@@ -43,6 +45,8 @@
         <Import />
       {:else if view === 'purge'}
         <Purge />
+      {:else if view === 'logs'}
+        <Logs />
       {/if}
     </div>
   </main>

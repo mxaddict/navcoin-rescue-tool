@@ -53,6 +53,40 @@ fn daemon_listening(port: u16) -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
 }
 
+// Read the tail of the daemon log so the GUI can render a live tail
+// view. Caps at 256KB to avoid sending megabytes over the bridge on
+// long-running daemons.
+const LOG_TAIL_BYTES: u64 = 256 * 1024;
+
+#[tauri::command]
+fn read_log_tail() -> Result<String, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let path = app_data_dir().join("logs").join("daemon.log");
+    let mut file = match std::fs::File::open(&path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(e) => return Err(format!("open {}: {}", path.display(), e)),
+    };
+    let len = file
+        .metadata()
+        .map_err(|e| format!("stat {}: {}", path.display(), e))?
+        .len();
+    let start = len.saturating_sub(LOG_TAIL_BYTES);
+    file.seek(SeekFrom::Start(start))
+        .map_err(|e| format!("seek {}: {}", path.display(), e))?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf)
+        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    // If we sliced into the middle of a UTF-8 codepoint or line, drop
+    // the partial first line.
+    if start > 0 {
+        if let Some(idx) = buf.find('\n') {
+            buf = buf[idx + 1..].to_string();
+        }
+    }
+    Ok(buf)
+}
+
 #[tauri::command]
 fn daemon_auth() -> Result<DaemonAuth, String> {
     let cookie_path = app_data_dir().join("auth.cookie");
@@ -117,7 +151,11 @@ fn ensure_daemon() -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![daemon_auth, ensure_daemon])
+        .invoke_handler(tauri::generate_handler![
+            daemon_auth,
+            ensure_daemon,
+            read_log_tail
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

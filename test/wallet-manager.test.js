@@ -7,6 +7,7 @@ import { bootstrapAppData } from '../src/app-data.js';
 import {
   openSourceWallet,
   closeSourceWallet,
+  closeAllWallets,
   getAllSourceStates,
   getSourceState,
   resetElectrumNodeSelectionCache,
@@ -37,6 +38,11 @@ class MockWalletFile extends EventEmitter {
     this._opts = opts;
     this._loaded = false;
     this.loadOptions = null;
+    this.db = {
+      GetUtxos: async () => {
+        throw new Error('mock: no UTXO db');
+      },
+    };
   }
 
   async Load(options) {
@@ -59,6 +65,10 @@ class MockWalletFile extends EventEmitter {
       { address: 'NTestAddr1', path: "m/44'/130'/0'/0/0", used: 0 },
       { address: 'NTestAddr2', path: "m/44'/130'/0'/0/1", used: 1 },
     ];
+  }
+
+  async xNavReceivingAddresses() {
+    return [];
   }
 
   async GetBalance() {
@@ -126,6 +136,7 @@ test('wallet manager tracks sync state and exposes addresses/balance', async () 
     await closeSourceWallet(source.id);
     assert.equal(getSourceState(source.id), null);
   } finally {
+    await closeAllWallets();
     global.WebSocket = OriginalWebSocket;
     resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
@@ -144,6 +155,11 @@ test('wallet manager rotates electrum node on reconnect attempts', async () => {
       this.electrumNodes = [];
       this.electrumNodeIndex = 0;
       this.connectIndices = [];
+      this.db = {
+        GetUtxos: async () => {
+          throw new Error('mock: no UTXO db');
+        },
+      };
     }
 
     async Load() {}
@@ -161,6 +177,10 @@ test('wallet manager rotates electrum node on reconnect attempts', async () => {
     }
 
     async NavReceivingAddresses() {
+      return [];
+    }
+
+    async xNavReceivingAddresses() {
       return [];
     }
 
@@ -210,6 +230,7 @@ test('wallet manager rotates electrum node on reconnect attempts', async () => {
 
     await closeSourceWallet(source.id);
   } finally {
+    await closeAllWallets();
     global.WebSocket = OriginalWebSocket;
     global.setTimeout = originalSetTimeout;
     global.clearTimeout = originalClearTimeout;
@@ -249,6 +270,11 @@ test('wallet manager prefers healthy electrum nodes before connect', async () =>
       this.electrumNodes = [{ host: 'default', port: 1, proto: 'wss' }];
       this.electrumNodeIndex = 0;
       this.connectedTo = null;
+      this.db = {
+        GetUtxos: async () => {
+          throw new Error('mock: no UTXO db');
+        },
+      };
     }
 
     async Load() {}
@@ -271,6 +297,10 @@ test('wallet manager prefers healthy electrum nodes before connect', async () =>
     }
 
     async NavReceivingAddresses() {
+      return [];
+    }
+
+    async xNavReceivingAddresses() {
       return [];
     }
 
@@ -305,6 +335,7 @@ test('wallet manager prefers healthy electrum nodes before connect', async () =>
 
     await closeSourceWallet(source.id);
   } finally {
+    await closeAllWallets();
     global.WebSocket = OriginalWebSocket;
     resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
@@ -322,6 +353,9 @@ test('wallet manager hides dummy pool addresses for private-key sources', async 
       this.electrumNodeIndex = 0;
       this.keys = [];
       this.db = {
+        GetUtxos: async () => {
+          throw new Error('mock: no UTXO db');
+        },
         db: {
           keys: {
             where: (field) => {
@@ -381,6 +415,10 @@ test('wallet manager hides dummy pool addresses for private-key sources', async 
       return this.keys;
     }
 
+    async xNavReceivingAddresses() {
+      return [];
+    }
+
     async GetBalance() {
       return {
         nav: { confirmed: 0, pending: 0 },
@@ -412,6 +450,7 @@ test('wallet manager hides dummy pool addresses for private-key sources', async 
 
     await closeSourceWallet(source.id);
   } finally {
+    await closeAllWallets();
     global.WebSocket = OriginalWebSocket;
     resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });

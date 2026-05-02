@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
-import test from 'node:test';
+import test, { before } from 'node:test';
 
 import {
   bootstrapAppData,
@@ -19,6 +19,25 @@ import { getProjectRoot, makeProjectTempDir } from './test-helpers.js';
 
 const TEST_PORT = 46199;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
+
+// Kill anything still holding the test daemon port from a previous run
+// (interrupted test, leaked process, stale CI worker). Without this, the
+// first spawnDaemon hits EADDRINUSE and the whole file fails.
+before(() => {
+  const pids = spawnSync('lsof', ['-ti', `tcp:${TEST_PORT}`], {
+    encoding: 'utf8',
+  })
+    .stdout.trim()
+    .split('\n')
+    .filter(Boolean);
+  for (const pid of pids) {
+    try {
+      process.kill(Number(pid), 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
+});
 
 async function waitForReady(child) {
   return new Promise((resolve, reject) => {

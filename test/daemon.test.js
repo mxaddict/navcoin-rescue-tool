@@ -452,7 +452,7 @@ test('daemon rejects invalid imports without persisting broken state', async () 
 });
 
 test(
-  'daemon imports known mnemonic and discovers NAV balance from stub',
+  'daemon imports known mnemonic and discovers NAV+xNAV balance from stub',
   { timeout: 180_000 },
   async () => {
     // Load the pre-built fixture so we know exact expected values.
@@ -508,13 +508,14 @@ test(
       const SYNC_TIMEOUT_MS = 90_000;
       const POLL_INTERVAL_MS = 500;
       const expectedNav = fixture.expectedNavConfirmed;
+      const expectedXNav = fixture.expectedXNavConfirmed;
       const start = Date.now();
       let status;
 
       while (true) {
         if (Date.now() - start > SYNC_TIMEOUT_MS) {
           throw new Error(
-            `Wallet did not reach syncStatus='synced' with expected balance within ${SYNC_TIMEOUT_MS}ms. ` +
+            `Wallet did not reach syncStatus='synced' with expected NAV+xNAV balance within ${SYNC_TIMEOUT_MS}ms. ` +
               `Last status: ${JSON.stringify(status?.sources?.[0])}`,
           );
         }
@@ -524,7 +525,8 @@ test(
 
         if (
           src?.syncStatus === 'synced' &&
-          src?.balance?.nav?.confirmed === expectedNav
+          src?.balance?.nav?.confirmed === expectedNav &&
+          src?.balance?.xnav?.confirmed === expectedXNav
         )
           break;
 
@@ -539,6 +541,13 @@ test(
         src.balance.nav.confirmed,
         expectedNav,
         `Expected nav.confirmed=${expectedNav} but got ${src.balance.nav.confirmed}`,
+      );
+
+      // Assert the xNAV confirmed balance matches fixture expectation.
+      assert.equal(
+        src.balance.xnav.confirmed,
+        expectedXNav,
+        `Expected xnav.confirmed=${expectedXNav} but got ${src.balance.xnav.confirmed}`,
       );
 
       // At least one address should carry a non-zero balance.

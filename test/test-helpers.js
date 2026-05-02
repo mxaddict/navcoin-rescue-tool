@@ -121,10 +121,17 @@ function buildElectrumReply(msg, fixture) {
       return { block_height: 4999900, pos: 0, merkle: [] };
     }
 
-    case 'blockchain.transaction.get_keys':
-      // Return a valid-but-empty txKeys object. The wallet crashes if it
-      // receives null here because it unconditionally does txKeys.txidkeys = hash.
+    case 'blockchain.transaction.get_keys': {
+      const txid = params[0];
+      // If the fixture has per-tx output keys for this txid, return them so
+      // hasOwnedXNavOutput can identify owned CT outputs.  For all other txids
+      // return a safe empty object (the wallet crashes if it receives null
+      // because it does txKeys.txidkeys = hash unconditionally).
+      if (fixture?.txKeys?.[txid]) {
+        return fixture.txKeys[txid];
+      }
       return { vin: [], vout: [] };
+    }
 
     case 'blockchain.stakervote.subscribe':
       return null;

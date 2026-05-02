@@ -261,18 +261,19 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Lay out source balance lines as a fixed grid so the NAV and xNAV
-     numbers align vertically across Confirmed / Pending / Total rows.
-     Column widths sized to the longest realistic value (NavCoin total
-     supply ~106M = 12 chars). */
+  /* Source balance lines: flex packed to the left so there's no
+     stretched whitespace between NAV and xNAV. Numbers get a fixed
+     min-width with right alignment so decimals stack vertically
+     across Confirmed / Pending / Total rows. */
   .amounts {
-    display: grid;
-    grid-template-columns: 130px auto auto 130px auto;
+    display: flex;
     align-items: baseline;
-    column-gap: 8px;
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
   .amounts .num {
+    min-width: 130px;
     text-align: right;
   }
 
@@ -283,7 +284,7 @@
 
   .amounts .plus {
     color: var(--muted);
-    text-align: center;
+    margin: 0 4px;
   }
 
   /* Totals card has only one number per row plus an optional dim

@@ -59,7 +59,7 @@
     <tbody>
       {#each status.sources as s}
         <tr>
-          <td>{s.sourceId}</td>
+          <td class="mono">{s.id}</td>
           <td>{s.syncStatus}</td>
           <td class="num">{fmtNav(s.balance?.nav?.confirmed)}</td>
           <td class="num">{fmtNav(s.balance?.xnav?.confirmed)}</td>
@@ -105,5 +105,10 @@
   .num {
     text-align: right;
     font-variant-numeric: tabular-nums;
+  }
+
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
   }
 </style>

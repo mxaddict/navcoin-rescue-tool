@@ -65,6 +65,25 @@ textarea {
   font-size: inherit;
 }
 
+/* Strip the platform-native chrome so the closed <select> matches the
+   palette. The options popup is still rendered by the OS — WebKitGTK,
+   WKWebView and WebView2 don't expose styling hooks for it. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='%239ca3af'><path d='M6 8L0 0h12z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px;
+}
+
+select option {
+  background: var(--deep);
+  color: var(--text);
+}
+
 input:focus,
 select:focus,
 textarea:focus {

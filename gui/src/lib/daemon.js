@@ -3,12 +3,12 @@
 // daemon address rather than reading the cookie file directly.
 import { invoke } from '@tauri-apps/api/core';
 
-let cachedAuth = null;
-
+// Always re-read the auth cookie on each call. The daemon rewrites
+// auth.cookie on every start (e.g. after a purge-triggered shutdown
+// + auto-respawn), so caching the value risks stale auth across that
+// transition. The cookie read is a local file open; cheap enough.
 async function getAuth() {
-  if (cachedAuth) return cachedAuth;
-  cachedAuth = await invoke('daemon_auth');
-  return cachedAuth;
+  return await invoke('daemon_auth');
 }
 
 async function ensureDaemon() {
@@ -50,4 +50,8 @@ export async function importSource(payload) {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export async function purgeDaemon() {
+  return await daemonRequest('/purge', { method: 'POST' });
 }

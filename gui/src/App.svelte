@@ -1,10 +1,12 @@
 <script>
   import Status from './views/Status.svelte';
   import Import from './views/Import.svelte';
+  import Purge from './views/Purge.svelte';
 
   const VIEWS = [
     { id: 'status', label: 'Status' },
     { id: 'import', label: 'Import' },
+    { id: 'purge', label: 'Purge' },
   ];
 
   let view = $state('status');
@@ -31,6 +33,8 @@
       <Status />
     {:else if view === 'import'}
       <Import />
+    {:else if view === 'purge'}
+      <Purge />
     {/if}
   </main>
 </div>

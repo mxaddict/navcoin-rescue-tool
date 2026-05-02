@@ -91,7 +91,13 @@ fn read_log_tail() -> Result<String, String> {
 fn daemon_auth() -> Result<DaemonAuth, String> {
     let cookie_path = app_data_dir().join("auth.cookie");
     let cookie = fs::read_to_string(&cookie_path)
-        .map_err(|e| format!("auth.cookie read failed at {}: {}", cookie_path.display(), e))?
+        .map_err(|e| {
+            format!(
+                "auth.cookie read failed at {}: {}",
+                cookie_path.display(),
+                e
+            )
+        })?
         .trim()
         .to_string();
     Ok(DaemonAuth {
@@ -145,7 +151,39 @@ fn ensure_daemon() -> Result<(), String> {
             return Ok(());
         }
     }
-    Err(format!("daemon did not come up on port {port} within timeout"))
+    Err(format!(
+        "daemon did not come up on port {port} within timeout"
+    ))
+}
+
+// Wayland tiling compositors don't draw titlebars — GTK CSD looks
+// foreign there. Strip decorations when running under a known tiler.
+// X11 tilers (i3, bspwm, etc.) already control decorations via the WM,
+// so GTK respects that without an override.
+//
+// Override: NTR_DECORATIONS=0 (force strip) or 1 (force keep).
+fn should_strip_decorations() -> bool {
+    if let Ok(v) = std::env::var("NTR_DECORATIONS") {
+        return v.trim() == "0";
+    }
+    // Per-compositor sockets: most reliable, set by the compositor itself.
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+        || std::env::var_os("SWAYSOCK").is_some()
+        || std::env::var_os("NIRI_SOCKET").is_some()
+    {
+        return true;
+    }
+    // Fallback: XDG_CURRENT_DESKTOP for tilers that don't expose a socket
+    // env (e.g. river). Matches case-insensitively.
+    if let Ok(desktop) = std::env::var("XDG_CURRENT_DESKTOP") {
+        let lower = desktop.to_ascii_lowercase();
+        for tiler in ["hyprland", "sway", "niri", "river", "wayfire"] {
+            if lower.split(':').any(|part| part == tiler) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -156,6 +194,14 @@ pub fn run() {
             ensure_daemon,
             read_log_tail
         ])
+        .setup(|app| {
+            if should_strip_decorations() {
+                if let Some(w) = tauri::Manager::get_webview_window(app, "main") {
+                    let _ = w.set_decorations(false);
+                }
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

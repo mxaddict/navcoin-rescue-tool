@@ -66,9 +66,14 @@ fn daemon_auth() -> Result<DaemonAuth, String> {
     })
 }
 
-// Start the daemon if it's not already listening on its port. Spawns
-// `ntr start` and waits up to ~15s for the port to come up. The daemon
-// detaches and writes its own auth.cookie on boot.
+// Start the daemon if it's not already listening on its port and wait
+// up to ~15s for the port to come up. The daemon detaches and writes
+// its own auth.cookie on boot.
+//
+// Tries `ntr start` on PATH first (for users who installed the package
+// globally). If that fails (typical for in-tree dev), falls back to
+// `node <repo>/src/cli.js start`, where <repo> is resolved at compile
+// time via CARGO_MANIFEST_DIR.
 #[tauri::command]
 fn ensure_daemon() -> Result<(), String> {
     let port = daemon_port();
@@ -76,10 +81,29 @@ fn ensure_daemon() -> Result<(), String> {
         return Ok(());
     }
 
-    Command::new("ntr")
-        .arg("start")
-        .spawn()
-        .map_err(|e| format!("failed to spawn `ntr start`: {e}"))?;
+    let path_err = match Command::new("ntr").arg("start").spawn() {
+        Ok(_) => None,
+        Err(e) => Some(format!("ntr on PATH: {e}")),
+    };
+
+    if let Some(first_err) = path_err {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let cli_path = PathBuf::from(manifest_dir)
+            .parent()
+            .ok_or_else(|| "CARGO_MANIFEST_DIR has no parent".to_string())?
+            .join("src/cli.js");
+
+        Command::new("node")
+            .arg(&cli_path)
+            .arg("start")
+            .spawn()
+            .map_err(|e| {
+                format!(
+                    "failed to spawn daemon ({first_err}; node {}: {e})",
+                    cli_path.display()
+                )
+            })?;
+    }
 
     for _ in 0..DAEMON_BOOT_ATTEMPTS {
         std::thread::sleep(Duration::from_millis(DAEMON_BOOT_WAIT_MS));

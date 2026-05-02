@@ -188,6 +188,56 @@ test('daemon private-key import works', async () => {
   }
 });
 
+test('daemon restart restores imported sources from disk', async () => {
+  const root = await makeProjectTempDir('daemon-restart-persist');
+  const projectRoot = getProjectRoot();
+
+  await bootstrapAppData(root);
+
+  let child = spawnDaemon(projectRoot, root);
+
+  try {
+    // 1. Import a private-key source.
+    await waitForReady(child);
+    const imported = await importDaemonSource(
+      {
+        type: 'private-key',
+        keys: ['PCbhgKMp6ym9MgtMQ3XYxqnMrG3yFwAuQgTmZznbLxWExwxXH2pM'],
+      },
+      root,
+    );
+    assert.equal(imported.source.type, 'private-key');
+    const sourceId = imported.source.id;
+
+    // 2. Stop the daemon cleanly.
+    await stopDaemon(root);
+    await waitForExit(child);
+
+    // 3. Verify sources.json persisted the source on disk.
+    const rawJson = await fs.readFile(`${root}/sources.json`, 'utf8');
+    const sourcesOnDisk = JSON.parse(rawJson);
+    assert.equal(sourcesOnDisk.sources.length, 1);
+    assert.equal(sourcesOnDisk.sources[0].id, sourceId);
+
+    // 4. Respawn daemon on the same root.
+    child = spawnDaemon(projectRoot, root);
+    await waitForReady(child);
+
+    // 5. Assert state restored from disk.
+    const status = await getDaemonStatus(root);
+    assert.equal(status.sourceCount, 1);
+    assert.equal(status.sources[0].id, sourceId);
+    assert.equal(status.sources[0].type, 'private-key');
+
+    await stopDaemon(root);
+    await waitForExit(child);
+  } finally {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('daemon survives purge then re-import of same private key', async () => {
   const root = await makeProjectTempDir('daemon-purge-reimport');
   const projectRoot = getProjectRoot();

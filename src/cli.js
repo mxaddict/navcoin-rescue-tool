@@ -201,9 +201,11 @@ async function handleShow() {
       }
 
       process.stdout.write(`  Addresses with balance (${funded.length}):\n`);
+      const balances = funded.map((a) => (a.balance / 1e8).toFixed(8));
+      const width = Math.max(...balances.map((b) => b.length));
       for (const addr of funded) {
-        const bal = (addr.balance / 1e8).toFixed(8);
-        process.stdout.write(`    ${bal} NAV  ${addr.address}\n`);
+        const bal = (addr.balance / 1e8).toFixed(8).padStart(width);
+        process.stdout.write(`    ${addr.address}  ${bal} NAV\n`);
       }
     }
   } catch {

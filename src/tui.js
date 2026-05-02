@@ -353,10 +353,10 @@ function renderShow(C, data) {
     }
 
     lines.push(`  ${C.bold('Addresses with balance')} (${funded.length}):`);
+    const width = Math.max(...funded.map((a) => navStr(a.balance).length));
     for (const addr of funded) {
-      lines.push(
-        `    ${C.cyan(navStr(addr.balance))} NAV  ${C.magenta(addr.address)}`,
-      );
+      const bal = navStr(addr.balance).padStart(width);
+      lines.push(`    ${C.magenta(addr.address)}  ${C.cyan(bal)} NAV`);
     }
   }
 

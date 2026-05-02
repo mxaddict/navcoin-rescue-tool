@@ -28,6 +28,7 @@ import {
   DAEMON_HOST,
   DAEMON_PORT,
   formatSyncPhase,
+  getStorageWarningLines,
   STATIC_WALLET_PASSWORD,
   SUPPORTED_MNEMONIC_WALLET_TYPES,
 } from './constants.js';
@@ -304,6 +305,12 @@ async function handleImport(argv) {
     }
     process.stdout.write(`Status: ${result.source.status}\n`);
     process.stdout.write(`Sync: ${result.source.syncStatus}\n`);
+
+    const layout = getLayout(root);
+    process.stdout.write('\n');
+    for (const line of getStorageWarningLines(layout.walletsDir)) {
+      process.stdout.write(`${line}\n`);
+    }
   } catch (error) {
     if (isDaemonUnreachable(error)) {
       process.stderr.write(

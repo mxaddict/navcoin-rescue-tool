@@ -19,6 +19,7 @@ import {
   DAEMON_HOST,
   DAEMON_PORT,
   formatSyncPhase,
+  getStorageWarningLines,
   SUPPORTED_MNEMONIC_WALLET_TYPES,
 } from './constants.js';
 
@@ -499,9 +500,18 @@ async function cmdImportMnemonic(C, root, log, ask, startSpinner, stopSpinner) {
     log(C.teal(`  Imported: ${result.source.id}`));
     log(`  Wallet type: ${result.source.walletType}`);
     log(C.muted('  Syncing in the background — check `status` for progress.'));
+    logStorageWarning(C, root, log);
   } catch (error) {
     stopSpinner(spinner);
     log(C.pink(`  Import failed: ${error.message}`));
+  }
+}
+
+function logStorageWarning(C, root, log) {
+  const { walletsDir } = getLayout(root);
+  log('');
+  for (const line of getStorageWarningLines(walletsDir)) {
+    log(C.pink(`  ${line}`));
   }
 }
 
@@ -543,6 +553,7 @@ async function cmdImportPrivateKey(
     log(C.teal(`  Imported: ${result.source.id}`));
     log(`  Keys: ${keys.length}`);
     log(C.muted('  Syncing in the background — check `status` for progress.'));
+    logStorageWarning(C, root, log);
   } catch (error) {
     stopSpinner(spinner);
     log(C.pink(`  Import failed: ${error.message}`));

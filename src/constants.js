@@ -49,3 +49,17 @@ export function formatSyncPhase(phase, current, total) {
   }
   return meta.label;
 }
+
+// Lines of the post-import disclosure shown by every UI surface (CLI, TUI,
+// GUI). Keeps wording consistent and centralizes the password constant.
+export function getStorageWarningLines(walletsDir) {
+  return [
+    'Imported wallet data is stored locally.',
+    `  Path:     ${walletsDir}`,
+    `  Password: ${STATIC_WALLET_PASSWORD} (static, shared across sources)`,
+    '',
+    'Treat this directory as sensitive — anyone with disk access plus the',
+    'static password can read the wallet. Run `purge` after sweeping to',
+    'delete it.',
+  ];
+}

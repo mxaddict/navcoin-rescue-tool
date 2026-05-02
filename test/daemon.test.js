@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import test, { after, before } from 'node:test';
 
 import {
@@ -329,3 +330,111 @@ test('daemon survives purge then re-import of same private key', async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test(
+  'daemon imports known mnemonic and discovers NAV balance from stub',
+  { timeout: 180_000 },
+  async () => {
+    // Load the pre-built fixture so we know exact expected values.
+    const fixturePath = path.join(
+      import.meta.dirname,
+      'fixtures',
+      'mainnet-fake.json',
+    );
+    const fixture = JSON.parse(await fs.readFile(fixturePath, 'utf8'));
+
+    // Start a fixture-backed stub electrum server (separate from the
+    // shared generic one used by other tests).
+    const fixtureStub = await startStubElectrumServer(fixture);
+
+    const root = await makeProjectTempDir('daemon-nav-balance');
+    const pRoot = getProjectRoot();
+
+    await bootstrapAppData(root);
+
+    const child = spawn(process.execPath, ['src/daemon.js'], {
+      cwd: pRoot,
+      env: {
+        ...process.env,
+        NTR_APP_DATA: root,
+        NTR_DAEMON_PORT: String(TEST_PORT),
+        NTR_ELECTRUM_NODES: `127.0.0.1:${fixtureStub.port}:ws`,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    try {
+      await waitForReady(child);
+
+      // Import the well-known abandon mnemonic.
+      const imported = await importDaemonSource(
+        {
+          type: 'mnemonic',
+          walletType: 'navcoin-js-v1',
+          phrase:
+            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+        },
+        root,
+      );
+
+      assert.equal(imported.source.walletType, 'navcoin-js-v1');
+
+      // Poll until syncStatus === 'synced' AND the expected balance is credited.
+      // rescue-scan runs concurrently with the wallet's built-in Sync(); the
+      // wallet emits sync_finished quickly (before rescue-scan finishes), then
+      // rescue-scan emits a second sync_finished when it's done. We must wait
+      // for the balance to reflect the rescue-scan results, not just the first
+      // sync_finished.
+      const SYNC_TIMEOUT_MS = 90_000;
+      const POLL_INTERVAL_MS = 500;
+      const expectedNav = fixture.expectedNavConfirmed;
+      const start = Date.now();
+      let status;
+
+      while (true) {
+        if (Date.now() - start > SYNC_TIMEOUT_MS) {
+          throw new Error(
+            `Wallet did not reach syncStatus='synced' with expected balance within ${SYNC_TIMEOUT_MS}ms. ` +
+              `Last status: ${JSON.stringify(status?.sources?.[0])}`,
+          );
+        }
+
+        status = await getDaemonStatus(root);
+        const src = status.sources?.[0];
+
+        if (
+          src?.syncStatus === 'synced' &&
+          src?.balance?.nav?.confirmed === expectedNav
+        )
+          break;
+
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      }
+
+      const src = status.sources[0];
+      assert.equal(src.syncStatus, 'synced');
+
+      // Assert the NAV confirmed balance matches fixture expectation.
+      assert.equal(
+        src.balance.nav.confirmed,
+        expectedNav,
+        `Expected nav.confirmed=${expectedNav} but got ${src.balance.nav.confirmed}`,
+      );
+
+      // At least one address should carry a non-zero balance.
+      const fundedAddrs = src.addresses.filter((a) => a.balance > 0);
+      assert.ok(
+        fundedAddrs.length > 0,
+        'Expected at least one address with non-zero balance',
+      );
+
+      await stopDaemon(root);
+      await waitForExit(child);
+    } finally {
+      child.kill('SIGTERM');
+      await waitForExit(child);
+      await fixtureStub.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  },
+);

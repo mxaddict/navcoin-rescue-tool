@@ -16,14 +16,139 @@ export function getProjectRoot() {
 }
 
 /**
+ * Build method-aware JSON-RPC reply for a navcoin-js electrum request.
+ *
+ * @param {object} msg  - parsed JSON-RPC request {id, method, params}
+ * @param {object|null} fixture - optional fixture loaded from mainnet-fake.json
+ * @returns {object} JSON-RPC result object (result field, no error)
+ *                   or null to fall back to the generic error reply.
+ */
+function buildElectrumReply(msg, fixture) {
+  const method = msg.method;
+  const params = Array.isArray(msg.params) ? msg.params : [];
+
+  switch (method) {
+    case 'server.version':
+      return ['StubElectrum 1.0', '1.4'];
+
+    case 'server.banner':
+      return '';
+
+    case 'server.ping':
+      return null;
+
+    case 'blockchain.relayfee':
+      return 0.00001;
+
+    case 'blockchain.headers.subscribe':
+      if (fixture) {
+        return { height: fixture.header.height, hex: fixture.header.hex };
+      }
+      return { height: 5000000, hex: '00'.repeat(80) };
+
+    case 'blockchain.consensus.subscribe':
+      // Return minimal consensus params so the wallet doesn't crash.
+      return {};
+
+    case 'blockchain.dao.subscribe':
+      return [];
+
+    case 'blockchain.outpoint.subscribe':
+    case 'blockchain.outpoint.unsubscribe':
+      return null;
+
+    case 'blockchain.staking.get_keys':
+      return [];
+
+    case 'blockchain.scripthash.subscribe': {
+      const sh = params[0];
+      if (fixture && fixture.scripthashes[sh]) {
+        const entry = fixture.scripthashes[sh];
+        // Return non-null status when there is history so the wallet
+        // knows to fetch it; return null when empty (no activity).
+        return entry.history.length > 0 ? 'stub-status-known' : null;
+      }
+      return null;
+    }
+
+    case 'blockchain.scripthash.get_history': {
+      const sh = params[0];
+      if (fixture && fixture.scripthashes[sh]) {
+        return {
+          history: fixture.scripthashes[sh].history,
+          to_height: -1,
+        };
+      }
+      return { history: [], to_height: -1 };
+    }
+
+    case 'blockchain.scripthash.listunspent': {
+      const sh = params[0];
+      if (fixture && fixture.scripthashes[sh]) {
+        return fixture.scripthashes[sh].unspent;
+      }
+      return [];
+    }
+
+    case 'blockchain.transaction.get': {
+      const txid = params[0];
+      if (fixture && fixture.transactions[txid]) {
+        return fixture.transactions[txid];
+      }
+      // Unknown tx — fall through to error reply.
+      return null;
+    }
+
+    case 'blockchain.transaction.get_merkle': {
+      // Return a plausible merkle proof so wallet.GetTx can set tx.height.
+      const txid = params[0];
+      if (fixture) {
+        // Find the height from whichever scripthash entry references this txid.
+        let txHeight = fixture.header.height - 100;
+        for (const entry of Object.values(fixture.scripthashes)) {
+          const hist = entry.history.find((h) => h.tx_hash === txid);
+          if (hist) {
+            txHeight = hist.height;
+            break;
+          }
+        }
+        return {
+          block_height: txHeight,
+          pos: 0,
+          merkle: [],
+        };
+      }
+      return { block_height: 4999900, pos: 0, merkle: [] };
+    }
+
+    case 'blockchain.transaction.get_keys':
+      // Return a valid-but-empty txKeys object. The wallet crashes if it
+      // receives null here because it unconditionally does txKeys.txidkeys = hash.
+      return { vin: [], vout: [] };
+
+    case 'blockchain.stakervote.subscribe':
+      return null;
+
+    default:
+      // Unknown method — signal caller to send the generic error reply.
+      return undefined;
+  }
+}
+
+/**
  * Start a minimal WebSocket stub server that accepts any connection, performs
  * the RFC-6455 handshake, and responds to every JSON-RPC message with a
  * generic error reply.  No external dependencies — uses only Node.js built-ins.
  *
+ * When `fixture` is provided the stub becomes method-aware and serves
+ * real data (scripthash history, unspent outputs, transactions) so that
+ * navcoin-js can complete a full wallet sync against it.
+ *
+ * @param {object|null} fixture - optional fixture object (from mainnet-fake.json)
  * Returns { port, close } where close() returns a Promise that resolves when
  * the server is fully shut down.
  */
-export function startStubElectrumServer() {
+export function startStubElectrumServer(fixture = null) {
   return new Promise((resolve) => {
     const sockets = new Set();
 
@@ -109,11 +234,19 @@ export function startStubElectrumServer() {
 
           try {
             const msg = JSON.parse(payload.toString('utf8'));
-            const reply = JSON.stringify({
-              jsonrpc: '2.0',
-              id: msg.id,
-              error: { code: -32601, message: 'stub' },
-            });
+            let result = buildElectrumReply(msg, fixture);
+            let replyObj;
+            if (result === undefined) {
+              // Unknown method — generic error fallback.
+              replyObj = {
+                jsonrpc: '2.0',
+                id: msg.id,
+                error: { code: -32601, message: 'stub' },
+              };
+            } else {
+              replyObj = { jsonrpc: '2.0', id: msg.id, result };
+            }
+            const reply = JSON.stringify(replyObj);
             const replyBuf = Buffer.from(reply, 'utf8');
             // Build an unmasked server text frame.
             let header;

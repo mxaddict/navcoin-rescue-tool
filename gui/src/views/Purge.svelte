@@ -115,11 +115,6 @@
     color: var(--pink);
   }
 
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-  }
-
   button.danger {
     background: var(--pink);
   }

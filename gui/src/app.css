@@ -54,6 +54,21 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Shared action row used by every view's primary submit area: button
+   right-aligned with a consistent minimum width so the page-to-page
+   click target lines up. */
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.actions button {
+  min-width: 180px;
+}
+
 input,
 select,
 textarea {

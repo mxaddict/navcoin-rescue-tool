@@ -40,13 +40,14 @@
   staking / xNAV scan — expect minutes per source.
 </p>
 
+{#if sourceCount === 0}
+  <p class="muted">No imported sources to rescan.</p>
+{/if}
+
 <div class="actions">
   <button onclick={submit} disabled={busy || sourceCount === 0}>
     {busy ? 'Starting…' : 'Start rescan'}
   </button>
-  {#if sourceCount === 0}
-    <p class="muted">No imported sources to rescan.</p>
-  {/if}
 </div>
 
 {#if error}
@@ -94,13 +95,6 @@
       SFMono-Regular,
       Menlo,
       monospace;
-  }
-
-  .actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 16px;
   }
 
   .error {

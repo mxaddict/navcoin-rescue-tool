@@ -172,11 +172,6 @@
       monospace;
   }
 
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-  }
-
   .error {
     color: var(--pink);
   }

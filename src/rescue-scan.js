@@ -36,6 +36,12 @@ export async function rescueScan(wallet, opts = {}) {
   // the new stake outputs, double-counting the rotated value.
   const outpointsSeen = new Set();
 
+  // Reset the staking-partner discovery cache so each scan re-queries
+  // blockchain_staking_getKeys for every address. Without this, partners
+  // introduced after the first sync (a new pool joins, a new cold-stake
+  // contract is set up) are never discovered until daemon restart.
+  wallet.requestedStakingKeys = false;
+
   wallet.emit('bootstrap_started');
 
   if (cfg.skipDerive !== true && cfg.xNavPoolSize > 0) {

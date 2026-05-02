@@ -145,6 +145,17 @@ function getSourceMinPoolSize(source) {
   return source.type === 'private-key' ? 0 : 10;
 }
 
+// Sync states that mean a scan is already in progress (or about to be).
+// rescanAllSources skips any source whose state isn't a clean stable
+// terminal — initial-open scans flow through 'opening' / 'connected' /
+// 'syncing' before settling on 'synced', so we exclude all of those.
+const SCAN_BUSY_STATES = new Set([
+  'opening',
+  'connecting',
+  'connected',
+  'syncing',
+]);
+
 export async function rescanAllSources() {
   const states = [...walletState.values()];
   if (states.length === 0) {
@@ -155,9 +166,7 @@ export async function rescanAllSources() {
   for (const state of states) {
     if (state.closing || !state.wallet) continue;
     if (state.rescanInFlight) continue;
-    if (state.syncStatus === 'syncing' || state.syncStatus === 'connecting') {
-      continue;
-    }
+    if (SCAN_BUSY_STATES.has(state.syncStatus)) continue;
 
     state.rescanInFlight = true;
     started.push(state.sourceId);
@@ -176,13 +185,12 @@ async function runFreshRescan(state) {
     // over and inflate the balance. Keys, master keys, and the txKeys
     // bootstrap cache survive (ZapWalletTxes only touches statuses,
     // scriptHistories, outPoints, walletTxs, names).
-    try {
-      await state.wallet.db.ZapWalletTxes();
-    } catch (err) {
-      console.error(
-        `[wallet-manager] zap before rescan failed for ${state.sourceId}: ${err.message}`,
-      );
-    }
+    //
+    // Failure here MUST abort the rescan: ZapWalletTxes silently swallows
+    // per-table errors internally, and continuing against half-stale data
+    // grows the balance over successive rescans because new stake-reward
+    // outpoints accumulate on top of old ones that were never cleared.
+    await state.wallet.db.ZapWalletTxes();
 
     // Reset displayed balance immediately so the user sees the rescan
     // start from zero rather than showing stale numbers until the first
@@ -506,13 +514,22 @@ export async function openSourceWallet(source, root, navWallet) {
         state.syncStatus = 'synced';
         state.syncProgress = 100;
       } else {
+        // Mark in-flight so a /rescan request landing during the brief
+        // 'connected' / pre-progress window can't kick off a second
+        // concurrent scan that races with this one's outpointsSeen and
+        // reapStaleUtxos passes (was the source of growing-balance bugs).
+        state.rescanInFlight = true;
         rescueScan(wallet, {
           skipDerive: source.type === 'private-key',
-        }).catch((err) => {
-          if (state.closing) return;
-          state.syncStatus = 'error';
-          state.error = err.message;
-        });
+        })
+          .catch((err) => {
+            if (state.closing) return;
+            state.syncStatus = 'error';
+            state.error = err.message;
+          })
+          .finally(() => {
+            state.rescanInFlight = false;
+          });
       }
     } catch (error) {
       state.syncStatus = 'error';

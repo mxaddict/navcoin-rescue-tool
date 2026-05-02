@@ -69,7 +69,7 @@
   </div>
 </header>
 
-<div class="callout">
+<div class="callout warn">
   <p>
     Recovery material lives only on this machine. After a successful sweep,
     visit Purge to wipe imported wallets from disk.

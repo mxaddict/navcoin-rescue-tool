@@ -1036,6 +1036,13 @@ export async function launchTui() {
     inputBox.setValue('');
     screen.render();
 
+    const trimmed = val.trim();
+    if (trimmed && cmdHistory[cmdHistory.length - 1] !== trimmed) {
+      cmdHistory.push(trimmed);
+    }
+    historyIndex = -1;
+    historyDraft = '';
+
     dispatch(val).finally(() => {
       dispatching = false;
       inputBox.focus();
@@ -1078,12 +1085,33 @@ export async function launchTui() {
     output.scroll(output.height);
     screen.render();
   });
+
+  // ---- Command history (↑/↓ recall previous commands).
+  const cmdHistory = [];
+  let historyIndex = -1;
+  let historyDraft = '';
+
   inputBox.key(['up'], () => {
-    output.scroll(-1);
+    if (askDepth > 0 || cmdHistory.length === 0) return;
+    if (historyIndex === -1) {
+      historyDraft = inputBox.getValue();
+      historyIndex = cmdHistory.length - 1;
+    } else if (historyIndex > 0) {
+      historyIndex -= 1;
+    }
+    inputBox.setValue(cmdHistory[historyIndex]);
     screen.render();
   });
+
   inputBox.key(['down'], () => {
-    output.scroll(1);
+    if (askDepth > 0 || historyIndex === -1) return;
+    if (historyIndex < cmdHistory.length - 1) {
+      historyIndex += 1;
+      inputBox.setValue(cmdHistory[historyIndex]);
+    } else {
+      historyIndex = -1;
+      inputBox.setValue(historyDraft);
+    }
     screen.render();
   });
 

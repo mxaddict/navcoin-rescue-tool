@@ -71,9 +71,13 @@
   .main {
     padding: 20px;
     overflow: auto;
+    /* Without min-width: 0 a wide grid item (e.g. a long status table)
+       expands the grid track past the viewport, which keeps the side-by-
+       side layout visually wide even when the media query has fired. */
+    min-width: 0;
   }
 
-  @media (max-width: 720px) {
+  @media (max-width: 900px) {
     .layout {
       grid-template-columns: 1fr;
       grid-template-rows: auto 1fr;

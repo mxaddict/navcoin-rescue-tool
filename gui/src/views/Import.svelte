@@ -62,11 +62,6 @@
 
 <header class="page-header">
   <h2>Import</h2>
-  <div class="actions">
-    <button onclick={submit} disabled={busy}>
-      {busy ? 'Importing…' : 'Import'}
-    </button>
-  </div>
 </header>
 
 <div class="callout warn">
@@ -146,6 +141,12 @@
       <p class="hint">One key per line. Imports together as a single source.</p>
     </div>
   {/if}
+
+  <div class="actions">
+    <button onclick={submit} disabled={busy}>
+      {busy ? 'Importing…' : 'Import'}
+    </button>
+  </div>
 </section>
 
 {#if error}

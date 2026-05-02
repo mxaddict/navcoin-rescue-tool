@@ -27,15 +27,6 @@
 
 <header class="page-header">
   <h2>Purge</h2>
-  <div class="actions">
-    <button
-      class="danger"
-      onclick={submit}
-      disabled={busy || confirmText.trim() !== REQUIRED}
-    >
-      {busy ? 'Purging…' : 'Purge all data'}
-    </button>
-  </div>
 </header>
 
 <div class="callout error">
@@ -74,6 +65,16 @@
     />
     <p class="hint">Match the phrase exactly to enable the purge button.</p>
   </div>
+
+  <div class="actions">
+    <button
+      class="danger"
+      onclick={submit}
+      disabled={busy || confirmText.trim() !== REQUIRED}
+    >
+      {busy ? 'Purging…' : 'Purge all data'}
+    </button>
+  </div>
 </section>
 
 <style>
@@ -82,6 +83,9 @@
     border-radius: 10px;
     padding: 18px 20px;
     margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
   .field {

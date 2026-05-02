@@ -36,6 +36,7 @@ function makeInitialState(sourceId) {
     sourceId,
     wallet: null,
     syncStatus: 'opening',
+    syncPhase: null,
     syncProgress: 0,
     syncCurrent: 0,
     syncTotal: 0,
@@ -64,6 +65,7 @@ export function getAllSourceStates() {
   return [...walletState.values()].map((s) => ({
     sourceId: s.sourceId,
     syncStatus: s.syncStatus,
+    syncPhase: s.syncPhase,
     syncProgress: s.syncProgress,
     syncCurrent: s.syncCurrent,
     syncTotal: s.syncTotal,
@@ -81,10 +83,8 @@ function getSourceMinPoolSize(source) {
   return source.type === 'private-key' ? 0 : 10;
 }
 
-function setUtxoSyncStatus(state, phaseProgress) {
-  if (!['syncing-change', 'syncing-stake'].includes(state.syncStatus)) {
-    state.syncStatus = 'syncing-utxo';
-  }
+function setSyncProgress(state, phaseProgress) {
+  state.syncStatus = 'syncing';
   state.syncProgress = Math.max(5, phaseProgress);
 }
 
@@ -262,13 +262,13 @@ export async function openSourceWallet(source, root, navWallet) {
     });
 
     wallet.on('bootstrap_started', () => {
-      setUtxoSyncStatus(state, 0);
+      setSyncProgress(state, 0);
       state.syncCurrent = 0;
       state.syncTotal = 0;
     });
 
     wallet.on('scripthash_progress', (index, total) => {
-      setUtxoSyncStatus(state, Math.round((index / total) * 100));
+      setSyncProgress(state, Math.round((index / total) * 100));
       state.syncCurrent = index;
       state.syncTotal = total;
     });
@@ -296,16 +296,13 @@ export async function openSourceWallet(source, root, navWallet) {
     });
 
     wallet.on('utxo_phase', (phase) => {
-      state.syncStatus =
-        phase === 'change'
-          ? 'syncing-change'
-          : phase === 'stake'
-            ? 'syncing-stake'
-            : 'syncing-utxo';
+      state.syncStatus = 'syncing';
+      state.syncPhase = phase;
     });
 
     wallet.on('sync_finished', async () => {
       state.syncStatus = 'synced';
+      state.syncPhase = null;
       state.syncProgress = 100;
       state.syncCurrent = state.syncTotal;
       await refreshAddressesAndBalance(source.id, wallet);

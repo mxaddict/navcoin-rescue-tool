@@ -22,12 +22,13 @@ import {
   sweepPrepare,
   sweepConfirm,
 } from './daemon-client.js';
-import { SUPPORTED_MNEMONIC_WALLET_TYPES } from './constants.js';
 import {
   CLI_NAME,
   DAEMON_HOST,
   DAEMON_PORT,
+  formatSyncPhase,
   STATIC_WALLET_PASSWORD,
+  SUPPORTED_MNEMONIC_WALLET_TYPES,
 } from './constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -142,12 +143,14 @@ async function handleStatus() {
       const typeLabel = source.walletType
         ? `${source.type}:${source.walletType}`
         : source.type;
-      const syncingPhases = ['syncing-utxo', 'syncing-change', 'syncing-stake'];
-      const syncLabel = syncingPhases.includes(source.syncStatus)
-        ? source.syncStatus === 'syncing-stake'
-          ? `stake(${source.syncCurrent ?? 0}/${source.syncTotal || 0} script)`
-          : `${source.syncStatus.replace('syncing-', '')}(${source.syncCurrent ?? 0}/${source.syncTotal ?? 0} addr)`
-        : source.syncStatus;
+      const syncLabel =
+        source.syncStatus === 'syncing'
+          ? formatSyncPhase(
+              source.syncPhase,
+              source.syncCurrent,
+              source.syncTotal,
+            )
+          : source.syncStatus;
       const serverLabel = source.server ? ` server=${source.server}` : '';
 
       process.stdout.write(`\nSource: ${source.id} [${typeLabel}]\n`);

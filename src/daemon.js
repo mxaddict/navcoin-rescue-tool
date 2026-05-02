@@ -145,6 +145,7 @@ async function main() {
         return {
           ...source,
           syncStatus: live?.syncStatus ?? source.syncStatus,
+          syncPhase: live?.syncPhase ?? null,
           syncProgress: live?.syncProgress ?? 0,
           syncCurrent: live?.syncCurrent ?? 0,
           syncTotal: live?.syncTotal ?? 0,

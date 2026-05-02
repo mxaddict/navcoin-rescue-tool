@@ -17,6 +17,7 @@ import {
 import {
   DAEMON_HOST,
   DAEMON_PORT,
+  formatSyncPhase,
   SUPPORTED_MNEMONIC_WALLET_TYPES,
 } from './constants.js';
 
@@ -198,22 +199,8 @@ function makeSep(C) {
 }
 
 function formatSyncLabel(src) {
-  if (
-    src.syncStatus === 'syncing-utxo' ||
-    src.syncStatus === 'syncing-change'
-  ) {
-    const current = src.syncCurrent || 0;
-    const total = src.syncTotal || 0;
-    const label = src.syncStatus === 'syncing-change' ? 'change' : 'utxo';
-    if (total > 0) return `${label} (${current}/${total} addr)`;
-    return label;
-  }
-
-  if (src.syncStatus === 'syncing-stake') {
-    const current = src.syncCurrent || 0;
-    const total = src.syncTotal || 0;
-    if (total > 0) return `stake (${current}/${total} script)`;
-    return 'stake';
+  if (src.syncStatus === 'syncing') {
+    return formatSyncPhase(src.syncPhase, src.syncCurrent, src.syncTotal);
   }
 
   if (src.syncStatus === 'connecting' && src.connectingAt) {
@@ -293,9 +280,7 @@ function renderStatus(C, data) {
     const syncColor =
       src.syncStatus === 'synced'
         ? C.teal
-        : src.syncStatus === 'syncing-utxo' ||
-            src.syncStatus === 'syncing-change' ||
-            src.syncStatus === 'syncing-stake' ||
+        : src.syncStatus === 'syncing' ||
             src.syncStatus === 'connecting' ||
             src.syncStatus === 'connected' ||
             src.syncStatus === 'opening'
@@ -1161,9 +1146,7 @@ export async function launchTui() {
         'opening',
         'connecting',
         'connected',
-        'syncing-utxo',
-        'syncing-change',
-        'syncing-stake',
+        'syncing',
       ]);
 
       const allSettled =
@@ -1175,11 +1158,7 @@ export async function launchTui() {
       );
 
       if (anyInProgress) {
-        const syncing = data.sources.filter((s) =>
-          ['syncing-utxo', 'syncing-change', 'syncing-stake'].includes(
-            s.syncStatus,
-          ),
-        );
+        const syncing = data.sources.filter((s) => s.syncStatus === 'syncing');
         const connecting = data.sources.filter((s) =>
           ['opening', 'connecting', 'connected'].includes(s.syncStatus),
         );

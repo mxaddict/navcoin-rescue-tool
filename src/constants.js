@@ -26,3 +26,25 @@ export const FILE_LAYOUT = {
   logsDir: 'logs',
   daemonLog: 'logs/daemon.log',
 };
+
+// Display labels and units for each rescueScan phase. Drives status output
+// in the CLI and TUI so users see "deriving keys" instead of "utxo" during
+// the long key-derivation pass, etc.
+export const SYNC_PHASES = {
+  derive: { label: 'deriving keys', unit: 'keys' },
+  receive: { label: 'scanning receive', unit: 'addr' },
+  change: { label: 'scanning change', unit: 'addr' },
+  stake: { label: 'scanning stake', unit: 'script' },
+  hydrate: { label: 'fetching txs', unit: 'tx' },
+  xnav: { label: 'scanning xNAV', unit: 'tx' },
+  'xnav-claim': { label: 'claiming xNAV', unit: 'tx' },
+};
+
+export function formatSyncPhase(phase, current, total) {
+  const meta = SYNC_PHASES[phase];
+  if (!meta) return phase ?? 'syncing';
+  if (total > 0) {
+    return `${meta.label} (${current ?? 0}/${total} ${meta.unit})`;
+  }
+  return meta.label;
+}

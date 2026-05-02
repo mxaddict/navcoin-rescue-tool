@@ -1,12 +1,23 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { fetchDaemonStatus } from '../lib/daemon.js';
+  import { fetchDaemonStatus, rescanDaemon } from '../lib/daemon.js';
   import { syncLabel } from '../lib/sync.js';
 
   let status = $state(null);
   let error = $state(null);
   let loading = $state(true);
   let timer;
+
+  let rescanBusy = $state(false);
+  let rescanError = $state(null);
+  let rescanStarted = $state(null);
+
+  // States that mean a scan is in flight; while any source is in one,
+  // the rescan button is disabled to match wallet-manager skip rules.
+  const SCANNING = new Set(['syncing', 'connecting', 'opening']);
+
+  let sources = $derived(status?.sources ?? []);
+  let anyScanning = $derived(sources.some((s) => SCANNING.has(s.syncStatus)));
 
   async function refresh() {
     try {
@@ -17,6 +28,21 @@
       status = null;
     } finally {
       loading = false;
+    }
+  }
+
+  async function triggerRescan() {
+    rescanBusy = true;
+    rescanError = null;
+    rescanStarted = null;
+    try {
+      const res = await rescanDaemon();
+      rescanStarted = res?.started ?? [];
+      await refresh();
+    } catch (err) {
+      rescanError = err.message ?? String(err);
+    } finally {
+      rescanBusy = false;
     }
   }
 
@@ -68,19 +94,52 @@
 
 <header class="page-header">
   <h2>Status</h2>
+  <div class="actions">
+    <button
+      onclick={triggerRescan}
+      disabled={rescanBusy || sources.length === 0 || anyScanning}
+    >
+      {rescanBusy
+        ? 'Starting…'
+        : anyScanning
+          ? 'Scanning…'
+          : 'Start rescan'}
+    </button>
+  </div>
 </header>
+
+{#if rescanError}
+  <div class="callout error">
+    <p>Rescan failed: {rescanError}</p>
+  </div>
+{/if}
+
+{#if rescanStarted}
+  {#if rescanStarted.length === 0}
+    <div class="callout warn">
+      <p>
+        No sources were eligible — they may already be syncing or in error
+        state.
+      </p>
+    </div>
+  {:else}
+    <div class="callout success">
+      <p>Rescan started for {rescanStarted.length} source(s).</p>
+    </div>
+  {/if}
+{/if}
 
 {#if loading}
   <p class="muted">Loading…</p>
 {:else if error}
   <p class="error">Daemon unreachable: {error}</p>
-{:else if !status?.sources?.length}
+{:else if sources.length === 0}
   <p class="muted">No imported sources yet.</p>
 {:else}
-  {@const t = totals(status.sources)}
+  {@const t = totals(sources)}
 
   <div class="cards">
-    {#each status.sources as s}
+    {#each sources as s}
       {@const navConf = s.balance?.nav?.confirmed ?? 0}
       {@const navPend = s.balance?.nav?.pending ?? 0}
       {@const xnavConf = s.balance?.xnav?.confirmed ?? 0}

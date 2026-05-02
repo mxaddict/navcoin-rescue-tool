@@ -1,14 +1,12 @@
 <script>
   import Status from './views/Status.svelte';
   import Import from './views/Import.svelte';
-  import Rescan from './views/Rescan.svelte';
   import Purge from './views/Purge.svelte';
   import navioLogo from './assets/navio-icon.svg';
 
   const VIEWS = [
     { id: 'status', label: 'Status' },
     { id: 'import', label: 'Import' },
-    { id: 'rescan', label: 'Rescan' },
     { id: 'purge', label: 'Purge' },
   ];
 
@@ -43,8 +41,6 @@
         <Status />
       {:else if view === 'import'}
         <Import />
-      {:else if view === 'rescan'}
-        <Rescan />
       {:else if view === 'purge'}
         <Purge />
       {/if}

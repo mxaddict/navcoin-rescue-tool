@@ -40,13 +40,8 @@
 
 <div class="callout error">
   <p>
-    This deletes <strong>every</strong> imported wallet from disk: keys,
-    address history, balances. Use this after a successful sweep, or when
-    starting fresh.
-  </p>
-  <p>
-    This is irreversible. Recovery material (mnemonic / WIF) is your only
-    fallback.
+    Deletes <strong>every</strong> imported wallet from disk. Irreversible —
+    recovery material (mnemonic / WIF) is your only fallback.
   </p>
 </div>
 

@@ -210,8 +210,8 @@
     margin: 12px 0 0;
     padding: 12px;
     background: var(--deep);
-    border-left: 3px solid var(--pink);
-    color: var(--pink);
+    border-left: 3px solid var(--warn);
+    color: var(--warn);
     font-family:
       ui-monospace,
       SFMono-Regular,

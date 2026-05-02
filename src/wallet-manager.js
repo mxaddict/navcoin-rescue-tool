@@ -1,6 +1,7 @@
 import { getLayout } from './app-data.js';
 import { STATIC_WALLET_PASSWORD } from './constants.js';
 import { rescueScan } from './rescue-scan.js';
+import { markSourceSynced } from './source-registry.js';
 
 // Per-source wallet state held in daemon memory.
 // Not persisted - rebuilt on every daemon start.
@@ -20,9 +21,6 @@ const RECONNECT_TIMEOUT_MS = 30_000;
 // How long to wait between reconnect attempts (ms).
 const RECONNECT_INTERVAL_MS = 10_000;
 const ELECTRUM_PROBE_TIMEOUT_MS = 5_000;
-// Periodic re-scan interval after a source reaches 'synced'.
-const RESCAN_INTERVAL_MS =
-  Number(process.env.NTR_RESCAN_INTERVAL_MS) || 5 * 60 * 1000;
 
 let electrumNodeCache = null;
 let electrumNodeCacheAt = 0;
@@ -55,8 +53,8 @@ function makeInitialState(sourceId) {
     error: null,
     reconnectTimer: null,
     watchdog: null,
-    rescanTimer: null,
     rescanInFlight: false,
+    sourceType: null,
     closing: false,
     connectPromise: null,
   };
@@ -88,25 +86,34 @@ function getSourceMinPoolSize(source) {
   return source.type === 'private-key' ? 0 : 10;
 }
 
-function schedulePeriodicRescan(state, source) {
-  clearInterval(state.rescanTimer);
-  state.rescanTimer = setInterval(async () => {
-    if (state.closing || state.rescanInFlight || !state.wallet) return;
-    if (state.syncStatus !== 'synced') return;
+export async function rescanAllSources() {
+  const states = [...walletState.values()];
+  if (states.length === 0) {
+    throw new Error('No imported sources to rescan.');
+  }
+
+  const started = [];
+  for (const state of states) {
+    if (state.closing || !state.wallet) continue;
+    if (state.rescanInFlight) continue;
+    if (state.syncStatus === 'syncing' || state.syncStatus === 'connecting') {
+      continue;
+    }
 
     state.rescanInFlight = true;
-    try {
-      await rescueScan(state.wallet, {
-        skipDerive: source.type === 'private-key',
+    started.push(state.sourceId);
+    rescueScan(state.wallet, { skipDerive: state.sourceType === 'private-key' })
+      .catch((err) => {
+        if (state.closing) return;
+        state.syncStatus = 'error';
+        state.error = err.message;
+      })
+      .finally(() => {
+        state.rescanInFlight = false;
       });
-    } catch (err) {
-      if (state.closing) return;
-      state.syncStatus = 'error';
-      state.error = err.message;
-    } finally {
-      state.rescanInFlight = false;
-    }
-  }, RESCAN_INTERVAL_MS);
+  }
+
+  return { started };
 }
 
 async function waitForConnected(state, timeoutMs = 15_000) {
@@ -261,6 +268,7 @@ export async function openSourceWallet(source, root, navWallet) {
   const openPromise = (async () => {
     const layout = getLayout(root);
     const state = makeInitialState(source.id);
+    state.sourceType = source.type;
     walletState.set(source.id, state);
 
     const wallet = new navWallet.WalletFile({
@@ -342,7 +350,13 @@ export async function openSourceWallet(source, root, navWallet) {
       state.syncProgress = 100;
       state.syncCurrent = state.syncTotal;
       await refreshAddressesAndBalance(source.id, wallet);
-      schedulePeriodicRescan(state, source);
+      try {
+        await markSourceSynced(source.id, root);
+      } catch {
+        // Non-fatal — registry write failure means we'll re-scan on next
+        // daemon start instead of skipping. Same effective behavior as
+        // before this optimization.
+      }
     });
 
     wallet.on('new_tx', async () => {
@@ -410,13 +424,21 @@ export async function openSourceWallet(source, root, navWallet) {
       // requests don't race against the connect handshake.
       await waitForConnected(state);
 
-      rescueScan(wallet, {
-        skipDerive: source.type === 'private-key',
-      }).catch((err) => {
-        if (state.closing) return;
-        state.syncStatus = 'error';
-        state.error = err.message;
-      });
+      if (source.lastSyncedAt) {
+        // Source has been fully scanned before. Skip the auto re-scan on
+        // open and rely on user-triggered `rescan` for updates. State is
+        // already populated from the seed refresh above.
+        state.syncStatus = 'synced';
+        state.syncProgress = 100;
+      } else {
+        rescueScan(wallet, {
+          skipDerive: source.type === 'private-key',
+        }).catch((err) => {
+          if (state.closing) return;
+          state.syncStatus = 'error';
+          state.error = err.message;
+        });
+      }
     } catch (error) {
       state.syncStatus = 'error';
       state.error = error.message;
@@ -504,9 +526,6 @@ export async function closeSourceWallet(sourceId) {
 
   clearInterval(state.watchdog);
   state.watchdog = null;
-
-  clearInterval(state.rescanTimer);
-  state.rescanTimer = null;
 
   if (!state.wallet) {
     walletState.delete(sourceId);

@@ -11,6 +11,7 @@ import {
   removeDaemonSource,
   stopDaemon,
   purgeDaemon,
+  rescanDaemon,
   sweepPrepare,
   sweepConfirm,
 } from './daemon-client.js';
@@ -156,6 +157,7 @@ const COMMANDS = [
   'show',
   'import',
   'remove',
+  'rescan',
   'sweep',
   'purge',
   'stop',
@@ -224,6 +226,7 @@ function renderHelp(C) {
     `    ${C.cyan('import mnemonic')}     Import a mnemonic source`,
     `    ${C.cyan('import private-key')}  Import one or more private keys`,
     `    ${C.cyan('remove')}              Remove an imported source`,
+    `    ${C.cyan('rescan')}              Re-scan all sources for new activity`,
     `    ${C.cyan('sweep')}               Sweep all funds to a destination`,
     `    ${C.cyan('purge')}               Delete all imported wallet data from disk`,
     `    ${C.cyan('stop')}                Stop the daemon and exit the TUI`,
@@ -364,7 +367,7 @@ function renderShow(C, data) {
 
     const funded = (src.addresses ?? [])
       .filter((a) => (a.balance ?? 0) > 0)
-      .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0));
+      .sort((a, b) => a.address.localeCompare(b.address));
 
     if (funded.length === 0) {
       lines.push('  No addresses with balance.');
@@ -582,6 +585,27 @@ async function cmdRemove(C, root, log, ask) {
     log(C.teal(`  Removed: ${sourceId}`));
   } catch (error) {
     log(C.pink(`  Remove failed: ${error.message}`));
+  }
+}
+
+async function cmdRescan(C, root, log) {
+  try {
+    const result = await rescanDaemon(root);
+    if (!result.started || result.started.length === 0) {
+      log(
+        C.muted(
+          '  No sources started a rescan (already running, or not yet synced).',
+        ),
+      );
+      return;
+    }
+    log(C.teal(`  Rescanning ${result.started.length} source(s):`));
+    for (const id of result.started) {
+      log(C.muted(`    ${id}`));
+    }
+    log(C.muted('  Run status to watch progress.'));
+  } catch (error) {
+    log(C.pink(`  Rescan failed: ${error.message}`));
   }
 }
 
@@ -961,6 +985,9 @@ export async function launchTui() {
         break;
       case 'sweep':
         await cmdSweep(C, root, log, ask);
+        break;
+      case 'rescan':
+        await cmdRescan(C, root, log);
         break;
       default:
         log(C.pink(`  Unknown command: ${cmd}`));

@@ -60,6 +60,10 @@ export function purgeDaemon(root) {
   return daemonRequest('/purge', { method: 'POST', root });
 }
 
+export function rescanDaemon(root) {
+  return daemonRequest('/rescan', { method: 'POST', root });
+}
+
 export function sweepPrepare(root) {
   return daemonRequest('/sweep/prepare', { method: 'POST', root });
 }

@@ -32,6 +32,7 @@ import {
   prepareSweep,
   executeSweep,
   purgeAllWallets,
+  rescanAllSources,
 } from './wallet-manager.js';
 
 function sendJson(response, statusCode, payload) {
@@ -234,6 +235,16 @@ async function main() {
         response.on('finish', () => {
           void performShutdown();
         });
+      } catch (error) {
+        sendJson(response, 400, { error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/rescan') {
+      try {
+        const result = await rescanAllSources();
+        sendJson(response, 200, result);
       } catch (error) {
         sendJson(response, 400, { error: error.message });
       }

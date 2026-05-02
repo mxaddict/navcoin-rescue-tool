@@ -19,6 +19,7 @@ import {
   removeDaemonSource,
   stopDaemon,
   purgeDaemon,
+  rescanDaemon,
   sweepPrepare,
   sweepConfirm,
 } from './daemon-client.js';
@@ -55,7 +56,7 @@ process.stdout.on('error', (error) => {
 
 function printHelp() {
   process.stdout.write(
-    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} show\n  ${CLI_NAME} sweep <address>\n  ${CLI_NAME} purge\n`,
+    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} show\n  ${CLI_NAME} rescan\n  ${CLI_NAME} sweep <address>\n  ${CLI_NAME} purge\n`,
   );
 }
 
@@ -198,7 +199,7 @@ async function handleShow() {
 
       const funded = (source.addresses ?? [])
         .filter((a) => (a.balance ?? 0) > 0)
-        .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0));
+        .sort((a, b) => a.address.localeCompare(b.address));
 
       if (funded.length === 0) {
         process.stdout.write('  No addresses with balance.\n');
@@ -372,6 +373,32 @@ async function handlePurge() {
       );
     } else {
       process.stderr.write(`Purge failed: ${error.message}\n`);
+    }
+    process.exitCode = 1;
+  }
+}
+
+async function handleRescan() {
+  try {
+    const result = await rescanDaemon(getAppDataRoot());
+    if (!result.started || result.started.length === 0) {
+      process.stdout.write(
+        'No sources started a rescan (already running, or not yet synced).\n',
+      );
+      return;
+    }
+    process.stdout.write(`Rescanning ${result.started.length} source(s):\n`);
+    for (const id of result.started) {
+      process.stdout.write(`  ${id}\n`);
+    }
+    process.stdout.write('Run `ntr status` to watch progress.\n');
+  } catch (error) {
+    if (isDaemonUnreachable(error)) {
+      process.stderr.write(
+        `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
+      );
+    } else {
+      process.stderr.write(`Rescan failed: ${error.message}\n`);
     }
     process.exitCode = 1;
   }
@@ -583,6 +610,9 @@ async function main(argv) {
       return;
     case 'purge':
       await handlePurge();
+      return;
+    case 'rescan':
+      await handleRescan();
       return;
     case 'help':
     case '--help':

@@ -158,6 +158,14 @@ export async function removeSource(
   return { removedSourceId: sourceId };
 }
 
+export async function markSourceSynced(sourceId, root = getAppDataRoot()) {
+  const state = await readSources(root);
+  const source = state.sources.find((entry) => entry.id === sourceId);
+  if (!source) return;
+  source.lastSyncedAt = new Date().toISOString();
+  await writeSources(state, root);
+}
+
 export async function purgeAllSources(
   root = getAppDataRoot(),
   walletAdapter = {

@@ -181,11 +181,11 @@
     background: var(--panel);
     border-radius: 8px;
     padding: 14px 16px;
+    border-left: 3px solid var(--cyan);
   }
 
   .card.totals {
     background: var(--deep);
-    border: 1px solid #1f2937;
   }
 
   .card-header {

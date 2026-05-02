@@ -133,7 +133,19 @@ async function main() {
     // the daemon directly. Auth still gates every request — without the
     // cookie file (mode 0600 in the user's app-data dir) any caller
     // gets a 401 regardless of origin.
-    response.setHeader('Access-Control-Allow-Origin', '*');
+    //
+    // WebKitGTK (Linux Tauri webview) won't send the Authorization header
+    // on a cross-origin request unless the response advertises
+    // Access-Control-Allow-Credentials: true; that header in turn
+    // forbids a wildcard Allow-Origin, so we echo the request origin.
+    const origin = request.headers.origin;
+    if (origin) {
+      response.setHeader('Access-Control-Allow-Origin', origin);
+      response.setHeader('Access-Control-Allow-Credentials', 'true');
+      response.setHeader('Vary', 'Origin');
+    } else {
+      response.setHeader('Access-Control-Allow-Origin', '*');
+    }
     response.setHeader(
       'Access-Control-Allow-Headers',
       'Authorization, Content-Type',

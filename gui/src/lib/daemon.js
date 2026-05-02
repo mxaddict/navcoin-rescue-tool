@@ -20,6 +20,7 @@ export async function fetchDaemonStatus() {
   const { url, cookie } = await getAuth();
   const res = await fetch(`${url}/status`, {
     headers: { Authorization: cookie },
+    credentials: 'include',
   });
   if (!res.ok) {
     throw new Error(`status ${res.status}: ${await res.text()}`);

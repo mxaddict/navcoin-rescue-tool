@@ -141,7 +141,7 @@ async function scanAndHydrateAddr(wallet, address) {
 
   let history;
   try {
-    const result = await wallet.client.blockchain_scripthash_get_history(sh);
+    const result = await wallet.client.blockchain_scripthash_getHistory(sh);
     history = result?.history ?? (Array.isArray(result) ? result : []);
   } catch (err) {
     console.error(`[rescue-scan] history failed ${address}: ${err.message}`);

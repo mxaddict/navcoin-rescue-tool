@@ -68,6 +68,9 @@
       bind:value={confirmText}
       placeholder={REQUIRED}
       disabled={busy}
+      onkeydown={(e) => {
+        if (e.key === 'Enter' && confirmText.trim() === REQUIRED) submit();
+      }}
     />
     <p class="hint">Match the phrase exactly to enable the purge button.</p>
   </div>

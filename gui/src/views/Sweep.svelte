@@ -106,6 +106,9 @@
         placeholder="N..."
         disabled={busy}
         spellcheck="false"
+        onkeydown={(e) => {
+          if (e.key === 'Enter' && destination.trim()) goToVerify();
+        }}
       />
       <p class="hint">A new wallet address you control. Verify carefully.</p>
     </div>
@@ -131,6 +134,9 @@
         placeholder="paste again"
         disabled={busy}
         spellcheck="false"
+        onkeydown={(e) => {
+          if (e.key === 'Enter' && destinationVerify.trim()) goToReview();
+        }}
       />
     </div>
     <div class="form-actions">
@@ -187,6 +193,9 @@
         placeholder={REQUIRED_PHRASE}
         disabled={busy}
         spellcheck="false"
+        onkeydown={(e) => {
+          if (e.key === 'Enter' && phrase === REQUIRED_PHRASE) broadcast();
+        }}
       />
     </div>
 

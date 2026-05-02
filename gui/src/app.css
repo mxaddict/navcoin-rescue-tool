@@ -89,6 +89,11 @@ button:disabled {
   padding: 12px 14px;
   border-radius: 6px;
   border-left: 3px solid var(--cyan);
+  margin-bottom: 12px;
+}
+
+.callout:last-child {
+  margin-bottom: 0;
 }
 
 .callout.warn {

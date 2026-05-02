@@ -46,6 +46,10 @@ class MockWalletFile extends EventEmitter {
       tx: 'deadbeef',
       fee: 10000,
     };
+    this._xnavTxResult = opts._xnavTxResult ?? null;
+    // Support queue-based send results: if _sendResultQueue is set, pop from
+    // the front on each SendTransaction call; otherwise fall back to _sendResult.
+    this._sendResultQueue = opts._sendResultQueue ?? null;
     this._sendResult = opts._sendResult ?? { hashes: ['abc123'], error: null };
   }
 
@@ -77,8 +81,22 @@ class MockWalletFile extends EventEmitter {
     return this._txResult;
   }
 
+  async xNavCreateTransaction(
+    destination,
+    amount,
+    memo,
+    password,
+    subtractFee,
+  ) {
+    this._lastXNavTxArgs = { destination, amount, memo, password, subtractFee };
+    return this._xnavTxResult;
+  }
+
   async SendTransaction(tx) {
     this._lastSentTx = tx;
+    if (this._sendResultQueue && this._sendResultQueue.length > 0) {
+      return this._sendResultQueue.shift();
+    }
     return this._sendResult;
   }
 
@@ -428,6 +446,65 @@ test('executeSweep passes full confirmed balance with subtractFee=true', async (
     assert.equal(result.totalSent, 10_0000_0000 - 25_000);
     assert.equal(result.totalFee, 25_000);
     assert.equal(result.hashes.length, 1);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('executeSweep broadcasts NAV and xNAV legs from same source', async () => {
+  const root = await makeProjectTempDir('sweep-xnav');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: 'src-xnav', type: 'mnemonic', label: 'xNAV' };
+    const navWallet = makeNavWallet({
+      _balance: {
+        nav: { confirmed: 4_0000_0000, pending: 0 },
+        xnav: { confirmed: 6_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _txResult: { tx: 'navhex', fee: 12_000 },
+      _xnavTxResult: { tx: 'xnavhex', fee: 25_000 },
+      // Queue: first SendTransaction call (NAV leg) returns nav-hash,
+      // second call (xNAV leg) returns xnav-hash.
+      _sendResultQueue: [
+        { hashes: ['nav-hash'], error: null },
+        { hashes: ['xnav-hash'], error: null },
+      ],
+    });
+    await openSourceWallet(source, root, navWallet);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const result = await executeSweep('NDestinationAddr1');
+
+    // Both hashes present.
+    const hashSet = new Set(result.hashes);
+    assert.ok(hashSet.has('nav-hash'), 'nav-hash missing from result');
+    assert.ok(hashSet.has('xnav-hash'), 'xnav-hash missing from result');
+
+    // Totals: each leg's balance minus its own fee.
+    assert.equal(
+      result.totalSent,
+      4_0000_0000 - 12_000 + (6_0000_0000 - 25_000),
+    );
+    assert.equal(result.totalFee, 12_000 + 25_000);
+
+    // NAV leg args.
+    const wallet = getSourceState(source.id).wallet;
+    assert.equal(wallet._lastTxArgs.amount, 4_0000_0000);
+    assert.equal(wallet._lastTxArgs.subtractFee, true);
+
+    // xNAV leg args.
+    assert.equal(wallet._lastXNavTxArgs.destination, 'NDestinationAddr1');
+    assert.equal(wallet._lastXNavTxArgs.amount, 6_0000_0000);
+    assert.equal(wallet._lastXNavTxArgs.subtractFee, true);
   } finally {
     global.WebSocket = OriginalWebSocket;
     await closeAllWallets();

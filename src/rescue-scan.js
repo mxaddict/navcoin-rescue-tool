@@ -30,35 +30,36 @@ export async function rescueScan(wallet, opts = {}) {
 
   wallet.emit('bootstrap_started');
 
-  try {
-    if (cfg.skipDerive !== true && cfg.xNavPoolSize > 0) {
-      const wasFilled = wallet.poolFilled;
-      wallet.poolFilled = false;
-      try {
-        await wallet.xNavFillKeyPool(password, cfg.xNavPoolSize);
-      } finally {
-        wallet.poolFilled = wasFilled;
-      }
+  if (cfg.skipDerive !== true && cfg.xNavPoolSize > 0) {
+    const wasFilled = wallet.poolFilled;
+    wallet.poolFilled = false;
+    try {
+      await wallet.xNavFillKeyPool(password, cfg.xNavPoolSize);
+    } finally {
+      wallet.poolFilled = wasFilled;
     }
-
-    if (cfg.skipDerive) {
-      await scanExistingNavAddrs(wallet, cfg);
-    } else {
-      await walkBranch(wallet, password, RECEIVE_BRANCH, cfg);
-      await walkBranch(wallet, password, CHANGE_BRANCH, cfg);
-    }
-
-    await scanStaking(wallet, cfg);
-
-    if (cfg.skipXNav !== true) {
-      await scanXNav(wallet, cfg);
-    }
-
-    wallet.emit('bootstrap_finished');
-    wallet.emit('sync_finished');
-  } finally {
-    wallet.spendingPassword = '';
   }
+
+  if (cfg.skipDerive) {
+    await scanExistingNavAddrs(wallet, cfg);
+  } else {
+    await walkBranch(wallet, password, RECEIVE_BRANCH, cfg);
+    await walkBranch(wallet, password, CHANGE_BRANCH, cfg);
+  }
+
+  await scanStaking(wallet, cfg);
+
+  if (cfg.skipXNav !== true) {
+    await scanXNav(wallet, cfg);
+  }
+
+  wallet.emit('bootstrap_finished');
+  wallet.emit('sync_finished');
+
+  // wallet.spendingPassword stays set so periodic re-scans can re-derive
+  // and re-fill pools as new addresses come into use. The static password
+  // is already a known-public constant in this codebase, so retaining it
+  // in memory after the initial sync doesn't change the security posture.
 }
 
 // Adaptive gap-bounded scan for one branch. Derives in batches and scans

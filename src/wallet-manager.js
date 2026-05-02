@@ -20,6 +20,9 @@ const RECONNECT_TIMEOUT_MS = 30_000;
 // How long to wait between reconnect attempts (ms).
 const RECONNECT_INTERVAL_MS = 10_000;
 const ELECTRUM_PROBE_TIMEOUT_MS = 5_000;
+// Periodic re-scan interval after a source reaches 'synced'.
+const RESCAN_INTERVAL_MS =
+  Number(process.env.NTR_RESCAN_INTERVAL_MS) || 5 * 60 * 1000;
 
 let electrumNodeCache = null;
 let electrumNodeCacheAt = 0;
@@ -52,6 +55,8 @@ function makeInitialState(sourceId) {
     error: null,
     reconnectTimer: null,
     watchdog: null,
+    rescanTimer: null,
+    rescanInFlight: false,
     closing: false,
     connectPromise: null,
   };
@@ -81,6 +86,27 @@ export function getAllSourceStates() {
 function getSourceMinPoolSize(source) {
   // Match wallet-worker: start small; rescueScan derives the rest.
   return source.type === 'private-key' ? 0 : 10;
+}
+
+function schedulePeriodicRescan(state, source) {
+  clearInterval(state.rescanTimer);
+  state.rescanTimer = setInterval(async () => {
+    if (state.closing || state.rescanInFlight || !state.wallet) return;
+    if (state.syncStatus !== 'synced') return;
+
+    state.rescanInFlight = true;
+    try {
+      await rescueScan(state.wallet, {
+        skipDerive: source.type === 'private-key',
+      });
+    } catch (err) {
+      if (state.closing) return;
+      state.syncStatus = 'error';
+      state.error = err.message;
+    } finally {
+      state.rescanInFlight = false;
+    }
+  }, RESCAN_INTERVAL_MS);
 }
 
 async function waitForConnected(state, timeoutMs = 15_000) {
@@ -316,6 +342,7 @@ export async function openSourceWallet(source, root, navWallet) {
       state.syncProgress = 100;
       state.syncCurrent = state.syncTotal;
       await refreshAddressesAndBalance(source.id, wallet);
+      schedulePeriodicRescan(state, source);
     });
 
     wallet.on('new_tx', async () => {
@@ -477,6 +504,9 @@ export async function closeSourceWallet(sourceId) {
 
   clearInterval(state.watchdog);
   state.watchdog = null;
+
+  clearInterval(state.rescanTimer);
+  state.rescanTimer = null;
 
   if (!state.wallet) {
     walletState.delete(sourceId);

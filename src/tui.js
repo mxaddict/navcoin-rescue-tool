@@ -265,8 +265,10 @@ function renderStatus(C, data) {
     return lines.join('\n');
   }
 
-  let totalNav = 0;
-  let totalXNav = 0;
+  let totalNavConf = 0;
+  let totalNavPend = 0;
+  let totalXNavConf = 0;
+  let totalXNavPend = 0;
 
   for (const src of data.sources) {
     lines.push(SEP);
@@ -298,24 +300,39 @@ function renderStatus(C, data) {
       lines.push(`  ${C.pink('Error:')}   ${src.liveError}`);
     }
 
-    const navSat = src.balance.nav.confirmed;
-    const xnavSat = src.balance.xnav?.confirmed ?? 0;
-    const totalSat = navSat + xnavSat;
+    const navConf = src.balance.nav.confirmed;
+    const navPend = src.balance.nav.pending;
+    const xnavConf = src.balance.xnav?.confirmed ?? 0;
+    const xnavPend = src.balance.xnav?.pending ?? 0;
     lines.push(
-      `  ${C.bold('Balance:')} ${C.cyan(navStr(navSat))} NAV  +  ` +
-        `${C.indigo(navStr(xnavSat))} xNAV  =  ` +
-        `${C.bold(navStr(totalSat))} total`,
+      `  ${C.bold('Confirmed:')} ${C.cyan(navStr(navConf))} NAV  +  ` +
+        `${C.indigo(navStr(xnavConf))} xNAV`,
+    );
+    lines.push(
+      `  ${C.bold('Pending:')}   ${C.cyan(navStr(navPend))} NAV  +  ` +
+        `${C.indigo(navStr(xnavPend))} xNAV`,
+    );
+    lines.push(
+      `  ${C.bold('Total:')}     ${C.bold(navStr(navConf + navPend + xnavConf + xnavPend))}`,
     );
 
-    totalNav += navSat;
-    totalXNav += xnavSat;
+    totalNavConf += navConf;
+    totalNavPend += navPend;
+    totalXNavConf += xnavConf;
+    totalXNavPend += xnavPend;
   }
 
   lines.push(SEP);
   lines.push(C.gradient('  Totals'));
-  lines.push(`  ${C.bold('NAV:')}    ${C.cyan(navStr(totalNav))}`);
-  lines.push(`  ${C.bold('xNAV:')}   ${C.indigo(navStr(totalXNav))}`);
-  lines.push(`  ${C.bold('Total:')}  ${C.bold(navStr(totalNav + totalXNav))}`);
+  lines.push(
+    `  ${C.bold('NAV:')}    ${C.cyan(navStr(totalNavConf))}  ${C.muted(`(+${navStr(totalNavPend)} pending)`)}`,
+  );
+  lines.push(
+    `  ${C.bold('xNAV:')}   ${C.indigo(navStr(totalXNavConf))}  ${C.muted(`(+${navStr(totalXNavPend)} pending)`)}`,
+  );
+  lines.push(
+    `  ${C.bold('Total:')}  ${C.bold(navStr(totalNavConf + totalNavPend + totalXNavConf + totalXNavPend))}`,
+  );
   lines.push(SEP);
 
   return lines.join('\n');
@@ -345,7 +362,9 @@ function renderShow(C, data) {
       `  ${C.boldMagenta('Source')}  ${C.muted(`[${typeLabel}]`)}  ${src.id}`,
     );
 
-    const funded = (src.addresses ?? []).filter((a) => (a.balance ?? 0) > 0);
+    const funded = (src.addresses ?? [])
+      .filter((a) => (a.balance ?? 0) > 0)
+      .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0));
 
     if (funded.length === 0) {
       lines.push('  No addresses with balance.');

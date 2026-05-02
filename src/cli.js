@@ -162,14 +162,19 @@ async function handleStatus() {
         process.stdout.write(`  Error:  ${source.liveError}\n`);
       }
 
-      const navSat = source.balance.nav.confirmed;
-      const xnavSat = source.balance.xnav?.confirmed ?? 0;
-      const navStr = (navSat / 1e8).toFixed(8);
-      const xnavStr = (xnavSat / 1e8).toFixed(8);
-      const totalStr = ((navSat + xnavSat) / 1e8).toFixed(8);
+      const navConf = source.balance.nav.confirmed;
+      const navPend = source.balance.nav.pending;
+      const xnavConf = source.balance.xnav?.confirmed ?? 0;
+      const xnavPend = source.balance.xnav?.pending ?? 0;
+      const total = navConf + navPend + xnavConf + xnavPend;
+      const fmt = (sat) => (sat / 1e8).toFixed(8);
       process.stdout.write(
-        `  Balance: ${navStr} NAV + ${xnavStr} xNAV = ${totalStr} total\n`,
+        `  Confirmed: ${fmt(navConf)} NAV + ${fmt(xnavConf)} xNAV\n`,
       );
+      process.stdout.write(
+        `  Pending:   ${fmt(navPend)} NAV + ${fmt(xnavPend)} xNAV\n`,
+      );
+      process.stdout.write(`  Total:     ${fmt(total)}\n`);
     }
   } catch {
     process.stderr.write(
@@ -191,9 +196,9 @@ async function handleShow() {
 
       process.stdout.write(`\nSource: ${source.id} [${typeLabel}]\n`);
 
-      const funded = (source.addresses ?? []).filter(
-        (a) => (a.balance ?? 0) > 0,
-      );
+      const funded = (source.addresses ?? [])
+        .filter((a) => (a.balance ?? 0) > 0)
+        .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0));
 
       if (funded.length === 0) {
         process.stdout.write('  No addresses with balance.\n');

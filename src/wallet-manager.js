@@ -1,5 +1,6 @@
 import { getLayout } from './app-data.js';
 import { STATIC_WALLET_PASSWORD } from './constants.js';
+import { rescueScan } from './rescue-scan.js';
 
 // Per-source wallet state held in daemon memory.
 // Not persisted - rebuilt on every daemon start.
@@ -87,7 +88,7 @@ export function getAllSourceStates() {
 }
 
 function getSourceMinPoolSize(source) {
-  // Match wallet-worker: start small, then SyncUtxos expands lazily.
+  // Match wallet-worker: start small; rescueScan derives the rest.
   return source.type === 'private-key' ? 0 : 10;
 }
 
@@ -400,9 +401,14 @@ export async function openSourceWallet(source, root, navWallet) {
       state.connectPromise = wallet.Connect();
       await state.connectPromise;
 
-      // Rescue mode skips full history sync and hydrates spendable UTXOs only.
       state.activeSyncPhase = 'utxo';
-      wallet.SyncUtxos().catch(() => {});
+      rescueScan(wallet, {
+        skipDerive: source.type === 'private-key',
+      }).catch((err) => {
+        if (state.closing) return;
+        state.syncStatus = 'error';
+        state.error = err.message;
+      });
     } catch (error) {
       state.syncStatus = 'error';
       state.error = error.message;

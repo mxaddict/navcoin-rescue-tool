@@ -49,7 +49,7 @@ const PRIVATE_KEY_CONTAINER_MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 function getWalletInitialPoolSize(source) {
-  // Initial creation uses a small pool for speed. SyncUtxos expands lazily.
+  // Initial creation uses a small pool for speed; rescueScan derives the rest.
   return source.type === 'private-key' ? 0 : 10;
 }
 

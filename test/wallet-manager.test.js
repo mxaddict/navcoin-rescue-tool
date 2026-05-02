@@ -47,6 +47,11 @@ class MockWalletFile extends EventEmitter {
 
   async Connect() {
     this.emit('connected', 'mock-server:40004');
+    queueMicrotask(() => {
+      this.emit('bootstrap_started');
+      this.emit('scripthash_progress', 10, 10);
+      this.emit('sync_finished');
+    });
   }
 
   async NavReceivingAddresses() {
@@ -74,12 +79,6 @@ class MockWalletFile extends EventEmitter {
 
   Disconnect() {}
   CloseDb() {}
-  SyncUtxos() {
-    this.emit('bootstrap_started');
-    this.emit('scripthash_progress', 10, 10);
-    this.emit('sync_finished');
-    return Promise.resolve();
-  }
 }
 
 function makeMockNavWallet() {
@@ -155,6 +154,10 @@ test('wallet manager rotates electrum node on reconnect attempts', async () => {
         'connected',
         `${this.electrumNodes[this.electrumNodeIndex].host}:40004`,
       );
+      queueMicrotask(() => {
+        this.emit('bootstrap_started');
+        this.emit('sync_finished');
+      });
     }
 
     async NavReceivingAddresses() {
@@ -178,12 +181,6 @@ test('wallet manager rotates electrum node on reconnect attempts', async () => {
 
     Disconnect() {}
     CloseDb() {}
-    SyncUtxos() {
-      this.emit('bootstrap_started');
-      this.emit('scripthash_progress', 10, 10);
-      this.emit('sync_finished');
-      return Promise.resolve();
-    }
   }
 
   try {
@@ -267,6 +264,10 @@ test('wallet manager prefers healthy electrum nodes before connect', async () =>
     async Connect() {
       this.connectedTo = this.electrumNodes[this.electrumNodeIndex].host;
       this.emit('connected', `${this.connectedTo}:40004`);
+      queueMicrotask(() => {
+        this.emit('bootstrap_started');
+        this.emit('sync_finished');
+      });
     }
 
     async NavReceivingAddresses() {
@@ -282,12 +283,6 @@ test('wallet manager prefers healthy electrum nodes before connect', async () =>
 
     Disconnect() {}
     CloseDb() {}
-    SyncUtxos() {
-      this.emit('bootstrap_started');
-      this.emit('scripthash_progress', 10, 10);
-      this.emit('sync_finished');
-      return Promise.resolve();
-    }
   }
 
   try {
@@ -376,6 +371,10 @@ test('wallet manager hides dummy pool addresses for private-key sources', async 
 
     async Connect() {
       this.emit('connected', 'mock-server:40004');
+      queueMicrotask(() => {
+        this.emit('bootstrap_started');
+        this.emit('sync_finished');
+      });
     }
 
     async NavReceivingAddresses() {
@@ -391,12 +390,6 @@ test('wallet manager hides dummy pool addresses for private-key sources', async 
 
     Disconnect() {}
     CloseDb() {}
-    SyncUtxos() {
-      this.emit('bootstrap_started');
-      this.emit('scripthash_progress', 10, 10);
-      this.emit('sync_finished');
-      return Promise.resolve();
-    }
   }
 
   try {

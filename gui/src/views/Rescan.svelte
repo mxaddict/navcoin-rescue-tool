@@ -71,9 +71,13 @@
 </div>
 
 {#if sourceCount === 0}
-  <p class="muted">No imported sources to rescan.</p>
+  <div class="callout warn">
+    <p>No imported sources to rescan.</p>
+  </div>
 {:else if anyScanning}
-  <p class="muted">A scan is already in progress — see Status for progress.</p>
+  <div class="callout">
+    <p>A scan is already in progress — see Status for progress.</p>
+  </div>
 {/if}
 
 {#if error}

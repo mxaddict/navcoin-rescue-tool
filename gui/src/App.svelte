@@ -1,6 +1,7 @@
 <script>
   import Status from './views/Status.svelte';
   import Import from './views/Import.svelte';
+  import Sweep from './views/Sweep.svelte';
   import Purge from './views/Purge.svelte';
   import Logs from './views/Logs.svelte';
   import navioLogo from './assets/navio-icon.svg';
@@ -8,6 +9,7 @@
   const VIEWS = [
     { id: 'status', label: 'Status' },
     { id: 'import', label: 'Import' },
+    { id: 'sweep', label: 'Sweep' },
     { id: 'purge', label: 'Purge' },
     { id: 'logs', label: 'Logs' },
   ];
@@ -43,6 +45,8 @@
         <Status />
       {:else if view === 'import'}
         <Import />
+      {:else if view === 'sweep'}
+        <Sweep />
       {:else if view === 'purge'}
         <Purge />
       {:else if view === 'logs'}

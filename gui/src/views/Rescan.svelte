@@ -27,7 +27,14 @@
   }
 </script>
 
-<h2>Rescan</h2>
+<header class="page-header">
+  <h2>Rescan</h2>
+  <div class="actions">
+    <button onclick={submit} disabled={busy || sourceCount === 0}>
+      {busy ? 'Starting…' : 'Start rescan'}
+    </button>
+  </div>
+</header>
 
 <p class="muted">
   Wipes UTXO + transaction state for every imported source and rebuilds it
@@ -43,12 +50,6 @@
 {#if sourceCount === 0}
   <p class="muted">No imported sources to rescan.</p>
 {/if}
-
-<div class="actions">
-  <button onclick={submit} disabled={busy || sourceCount === 0}>
-    {busy ? 'Starting…' : 'Start rescan'}
-  </button>
-</div>
 
 {#if error}
   <p class="error">Rescan failed: {error}</p>
@@ -71,10 +72,6 @@
 {/if}
 
 <style>
-  h2 {
-    margin: 0 0 16px;
-  }
-
   .muted {
     color: var(--muted);
   }

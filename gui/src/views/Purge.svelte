@@ -25,7 +25,18 @@
   }
 </script>
 
-<h2>Purge</h2>
+<header class="page-header">
+  <h2>Purge</h2>
+  <div class="actions">
+    <button
+      class="danger"
+      onclick={submit}
+      disabled={busy || confirmText.trim() !== REQUIRED}
+    >
+      {busy ? 'Purging…' : 'Purge all data'}
+    </button>
+  </div>
+</header>
 
 <p class="warn">
   This deletes <strong>every</strong> imported wallet from disk: keys, address
@@ -48,15 +59,6 @@
     />
   </label>
 
-  <div class="actions">
-    <button
-      class="danger"
-      onclick={submit}
-      disabled={busy || confirmText.trim() !== REQUIRED}
-    >
-      {busy ? 'Purging…' : 'Purge all data'}
-    </button>
-  </div>
 </div>
 
 {#if error}
@@ -68,10 +70,6 @@
 {/if}
 
 <style>
-  h2 {
-    margin: 0 0 16px;
-  }
-
   .warn {
     color: var(--text);
     background: var(--panel);

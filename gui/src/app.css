@@ -54,15 +54,26 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Shared action row used by every view's primary submit area: button
-   right-aligned with a consistent minimum width so the page-to-page
-   click target lines up. */
-.actions {
+/* Page header pattern: view title on the left, primary action(s) on
+   the right, on the same row. Each view's root renders one of these
+   so the action button is in the same place across pages. */
+.page-header {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-top: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.page-header h2 {
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .actions button {

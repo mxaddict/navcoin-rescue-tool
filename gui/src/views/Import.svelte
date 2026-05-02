@@ -61,7 +61,14 @@
   }
 </script>
 
-<h2>Import</h2>
+<header class="page-header">
+  <h2>Import</h2>
+  <div class="actions">
+    <button onclick={submit} disabled={busy}>
+      {busy ? 'Importing…' : 'Import'}
+    </button>
+  </div>
+</header>
 
 <div class="form">
   <label class="row">
@@ -102,11 +109,6 @@
     </label>
   {/if}
 
-  <div class="actions">
-    <button onclick={submit} disabled={busy}>
-      {busy ? 'Importing…' : 'Import'}
-    </button>
-  </div>
 </div>
 
 {#if error}
@@ -128,10 +130,6 @@
 {/if}
 
 <style>
-  h2 {
-    margin: 0 0 16px;
-  }
-
   .form {
     display: flex;
     flex-direction: column;

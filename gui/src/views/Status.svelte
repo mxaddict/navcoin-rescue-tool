@@ -38,7 +38,9 @@
   }
 </script>
 
-<h2>Status</h2>
+<header class="page-header">
+  <h2>Status</h2>
+</header>
 
 {#if loading}
   <p class="muted">Loading…</p>
@@ -74,10 +76,6 @@
 {/if}
 
 <style>
-  h2 {
-    margin: 0 0 16px;
-  }
-
   .muted {
     color: var(--muted);
   }

@@ -314,6 +314,11 @@ export async function openSourceWallet(source, root, navWallet) {
       state.totalAddresses = total;
     });
 
+    wallet.on('derive_progress', (receiveCount, changeCount) => {
+      state.derivedCount = receiveCount;
+      state.changeCount = changeCount;
+    });
+
     wallet.on('utxo_phase', (phase) => {
       state.syncStatus =
         phase === 'change'

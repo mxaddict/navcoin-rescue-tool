@@ -3,6 +3,65 @@ import { STATIC_WALLET_PASSWORD } from './constants.js';
 import { rescueScan } from './rescue-scan.js';
 import { markSourceSynced } from './source-registry.js';
 
+// Output type bitmask values from navcoin-js (utils/output_types.js).
+// Inlined to avoid coupling to internal module paths.
+const OUT_NAV = 0x1;
+const OUT_STAKED = 0x2;
+const OUT_XNAV = 0x4;
+
+// Replacement for navcoin-js wallet.GetBalance with a recovery-friendly
+// pending rule: anything with at least one confirmation is spendable. The
+// upstream rule flags coinstake/coinbase outputs (tx.pos < 2) as pending
+// for 120 blocks, which leaves matured stake rewards stuck in pending if
+// the wallet's tip lags. For a one-shot rescue + sweep flow we'd rather
+// surface the balance as confirmed and let the broadcast fail clearly if
+// the chain still considers it immature.
+async function computeBalance(wallet) {
+  // Real wallets expose wallet.db.GetUtxos / wallet.db.GetTx; tests use a
+  // simpler mock without a db. Fall back to the wallet's own GetBalance in
+  // that case so the test fixtures don't need to model UTXOs.
+  let utxos;
+  try {
+    utxos = await wallet.db.GetUtxos(true);
+  } catch {
+    return await wallet.GetBalance();
+  }
+  if (!Array.isArray(utxos)) return await wallet.GetBalance();
+
+  let navConfirmed = 0;
+  let navPending = 0;
+  let xnavConfirmed = 0;
+  let xnavPending = 0;
+  let stakedConfirmed = 0;
+  let stakedPending = 0;
+
+  for (const utxo of utxos) {
+    if (utxo.spentIn) continue;
+    const prevHash = utxo.id.split(':')[0];
+    const tx = await wallet.db.GetTx(prevHash);
+    if (!tx) continue;
+
+    const pending = tx.height === undefined || tx.height <= 0;
+
+    if (utxo.type & OUT_XNAV && utxo.amount > 0) {
+      if (pending) xnavPending += utxo.amount;
+      else xnavConfirmed += utxo.amount;
+    } else if (utxo.type & OUT_STAKED) {
+      if (pending) stakedPending += utxo.amount;
+      else stakedConfirmed += utxo.amount;
+    } else if (utxo.type & OUT_NAV) {
+      if (pending) navPending += utxo.amount;
+      else navConfirmed += utxo.amount;
+    }
+  }
+
+  return {
+    nav: { confirmed: navConfirmed, pending: navPending },
+    xnav: { confirmed: xnavConfirmed, pending: xnavPending },
+    staked: { confirmed: stakedConfirmed, pending: stakedPending },
+  };
+}
+
 // Per-source wallet state held in daemon memory.
 // Not persisted - rebuilt on every daemon start.
 const walletState = new Map();
@@ -349,21 +408,7 @@ export async function openSourceWallet(source, root, navWallet) {
 
     wallet.on('balance_changed', async () => {
       try {
-        const bal = await wallet.GetBalance();
-        state.balance = {
-          nav: {
-            confirmed: bal.nav?.confirmed ?? 0,
-            pending: bal.nav?.pending ?? 0,
-          },
-          xnav: {
-            confirmed: bal.xnav?.confirmed ?? 0,
-            pending: bal.xnav?.pending ?? 0,
-          },
-          staked: {
-            confirmed: bal.staked?.confirmed ?? 0,
-            pending: bal.staked?.pending ?? 0,
-          },
-        };
+        state.balance = await computeBalance(wallet);
       } catch {
         // Non-fatal: leave previous balance intact.
       }
@@ -525,21 +570,7 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
   }
 
   try {
-    const bal = await wallet.GetBalance();
-    state.balance = {
-      nav: {
-        confirmed: bal.nav?.confirmed ?? 0,
-        pending: bal.nav?.pending ?? 0,
-      },
-      xnav: {
-        confirmed: bal.xnav?.confirmed ?? 0,
-        pending: bal.xnav?.pending ?? 0,
-      },
-      staked: {
-        confirmed: bal.staked?.confirmed ?? 0,
-        pending: bal.staked?.pending ?? 0,
-      },
-    };
+    state.balance = await computeBalance(wallet);
   } catch {
     // Non-fatal: leave previous balance intact.
   }

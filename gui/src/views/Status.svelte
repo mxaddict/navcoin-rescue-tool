@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { fetchDaemonStatus } from '../lib/daemon.js';
+  import { syncLabel } from '../lib/sync.js';
 
   let status = $state(null);
   let error = $state(null);
@@ -60,7 +61,7 @@
       {#each status.sources as s}
         <tr>
           <td class="mono">{s.id}</td>
-          <td>{s.syncStatus}</td>
+          <td>{syncLabel(s)}</td>
           <td class="num">{fmtNav(s.balance?.nav?.confirmed)}</td>
           <td class="num">{fmtNav(s.balance?.xnav?.confirmed)}</td>
           <td class="num">{totalNav(s)}</td>

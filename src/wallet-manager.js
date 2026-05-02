@@ -67,13 +67,28 @@ async function computeBalance(wallet) {
 const walletState = new Map();
 const openingWallets = new Map();
 
-const MAINNET_ELECTRUM_NODES = [
+const DEFAULT_MAINNET_ELECTRUM_NODES = [
   { host: 'electrum4.nav.community', port: 40004, proto: 'wss' },
   { host: 'electrum.nextwallet.org', port: 40004, proto: 'wss' },
   { host: 'electrum2.nav.community', port: 40004, proto: 'wss' },
   { host: 'electrum3.nav.community', port: 40004, proto: 'wss' },
   { host: 'electrum.nav.community', port: 40004, proto: 'wss' },
 ];
+
+// Parse NTR_ELECTRUM_NODES env var (format: "host:port:proto,...").
+// When set, use those nodes verbatim and skip probing.
+function getConfiguredElectrumNodes() {
+  const raw = process.env.NTR_ELECTRUM_NODES;
+  if (!raw) return null;
+  return raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const parts = entry.split(':');
+      return { host: parts[0], port: Number(parts[1]), proto: parts[2] };
+    });
+}
 
 // How long to wait in 'connecting' before attempting a reconnect (ms).
 const RECONNECT_TIMEOUT_MS = 30_000;
@@ -267,6 +282,12 @@ function probeElectrumNode(node) {
 }
 
 async function selectElectrumNodes() {
+  // When NTR_ELECTRUM_NODES is set, skip probing and use the configured list
+  // directly. This allows tests (and CI) to point the daemon at a local stub
+  // without requiring WSS or live mainnet access.
+  const configured = getConfiguredElectrumNodes();
+  if (configured) return configured;
+
   const now = Date.now();
   if (electrumNodeCache && now - electrumNodeCacheAt < 60_000) {
     return electrumNodeCache;
@@ -275,7 +296,7 @@ async function selectElectrumNodes() {
   if (!electrumNodeProbePromise) {
     electrumNodeProbePromise = (async () => {
       const results = await Promise.all(
-        MAINNET_ELECTRUM_NODES.map(async (node) => ({
+        DEFAULT_MAINNET_ELECTRUM_NODES.map(async (node) => ({
           node,
           ok: await probeElectrumNode(node),
         })),
@@ -286,7 +307,7 @@ async function selectElectrumNodes() {
       const selected =
         healthy.length > 0
           ? [...healthy, ...unhealthy]
-          : MAINNET_ELECTRUM_NODES;
+          : DEFAULT_MAINNET_ELECTRUM_NODES;
 
       electrumNodeCache = selected;
       electrumNodeCacheAt = Date.now();

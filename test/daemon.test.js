@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
-import test, { before } from 'node:test';
+import test, { after, before } from 'node:test';
 
 import {
   bootstrapAppData,
@@ -15,15 +15,23 @@ import {
   purgeDaemon,
   stopDaemon,
 } from '../src/daemon-client.js';
-import { getProjectRoot, makeProjectTempDir } from './test-helpers.js';
+import {
+  getProjectRoot,
+  makeProjectTempDir,
+  startStubElectrumServer,
+} from './test-helpers.js';
 
 const TEST_PORT = 46199;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 
+let stubPort = 0;
+let stubClose = null;
+
 // Kill anything still holding the test daemon port from a previous run
 // (interrupted test, leaked process, stale CI worker). Without this, the
 // first spawnDaemon hits EADDRINUSE and the whole file fails.
-before(() => {
+// Also start the stub electrum server once for the whole file.
+before(async () => {
   const pids = spawnSync('lsof', ['-ti', `tcp:${TEST_PORT}`], {
     encoding: 'utf8',
   })
@@ -37,6 +45,14 @@ before(() => {
       // already gone
     }
   }
+
+  const stub = await startStubElectrumServer();
+  stubPort = stub.port;
+  stubClose = stub.close;
+});
+
+after(async () => {
+  if (stubClose) await stubClose();
 });
 
 async function waitForReady(child) {
@@ -77,6 +93,7 @@ function spawnDaemon(projectRoot, root) {
       ...process.env,
       NTR_APP_DATA: root,
       NTR_DAEMON_PORT: String(TEST_PORT),
+      NTR_ELECTRUM_NODES: `127.0.0.1:${stubPort}:ws`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

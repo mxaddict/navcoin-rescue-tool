@@ -185,7 +185,7 @@
   }
 
   .card.totals {
-    background: var(--deep);
+    border-left-color: var(--pink);
   }
 
   .card-header {

@@ -103,7 +103,7 @@
   }
 
   .main {
-    padding: 32px 24px 48px;
+    padding: 24px;
     overflow: auto;
     min-width: 0;
   }
@@ -115,7 +115,7 @@
 
   @media (max-width: 600px) {
     .main {
-      padding: 20px 14px 32px;
+      padding: 16px;
     }
   }
 </style>

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+tmp/
+src-tauri/target/
+src-tauri/gen/
+gui/dist/
+gui/.vite/
+package-lock.json
+gui/package-lock.json

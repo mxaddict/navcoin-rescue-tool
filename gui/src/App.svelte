@@ -1,5 +1,11 @@
 <script>
   import Status from './views/Status.svelte';
+  import Import from './views/Import.svelte';
+
+  const VIEWS = [
+    { id: 'status', label: 'Status' },
+    { id: 'import', label: 'Import' },
+  ];
 
   let view = $state('status');
 </script>
@@ -8,15 +14,23 @@
   <aside class="sidebar">
     <h1 class="brand">navcoin-rescue-tool</h1>
     <nav>
-      <button class="nav-btn" class:active={view === 'status'} onclick={() => (view = 'status')}>
-        Status
-      </button>
+      {#each VIEWS as v}
+        <button
+          class="nav-btn"
+          class:active={view === v.id}
+          onclick={() => (view = v.id)}
+        >
+          {v.label}
+        </button>
+      {/each}
     </nav>
   </aside>
 
   <main class="main">
     {#if view === 'status'}
       <Status />
+    {:else if view === 'import'}
+      <Import />
     {/if}
   </main>
 </div>

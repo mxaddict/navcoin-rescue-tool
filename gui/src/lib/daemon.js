@@ -15,15 +15,39 @@ async function ensureDaemon() {
   await invoke('ensure_daemon');
 }
 
-export async function fetchDaemonStatus() {
+async function daemonRequest(path, init = {}) {
   await ensureDaemon();
   const { url, cookie } = await getAuth();
-  const res = await fetch(`${url}/status`, {
-    headers: { Authorization: cookie },
+  const res = await fetch(`${url}${path}`, {
+    ...init,
+    headers: {
+      Authorization: cookie,
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init.headers ?? {}),
+    },
     credentials: 'include',
   });
-  if (!res.ok) {
-    throw new Error(`status ${res.status}: ${await res.text()}`);
+  const text = await res.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = text;
   }
-  return await res.json();
+  if (!res.ok) {
+    const msg = body?.error ?? body ?? `status ${res.status}`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return body;
+}
+
+export async function fetchDaemonStatus() {
+  return await daemonRequest('/status');
+}
+
+export async function importSource(payload) {
+  return await daemonRequest('/import', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }

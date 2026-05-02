@@ -3,8 +3,44 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { createRequire } from 'node:module';
+
 import { getAppDataRoot, getLayout } from './app-data.js';
 import { STATIC_WALLET_PASSWORD } from './constants.js';
+
+const require = createRequire(import.meta.url);
+
+// Default W3CWebSocket frame/message size limits are 64KB / 1MB. Mainnet
+// electrum responses (consensus + dao subscribe state, OP_TRUE anchor
+// history, heavily-used scripthash history) routinely exceed 1MB and
+// trigger 'Frame size exceeds maximum' (close code 1009). Bump the
+// limits to 64MB before navcoin-js loads electrum-client-js, so the
+// `const W3CWebSocket = require('websocket').w3cwebsocket` capture in
+// socket_client_ws.js picks up the patched constructor.
+function patchWebSocketFrameLimits() {
+  if (patchWebSocketFrameLimits.applied) return;
+  patchWebSocketFrameLimits.applied = true;
+
+  const websocketMod = require('websocket');
+  const OriginalW3C = websocketMod.w3cwebsocket;
+  if (!OriginalW3C) return;
+
+  const LARGE = 64 * 1024 * 1024;
+  websocketMod.w3cwebsocket = function PatchedW3CWebSocket(
+    url,
+    protocols,
+    origin,
+    headers,
+    requestOptions,
+    clientConfig,
+  ) {
+    return new OriginalW3C(url, protocols, origin, headers, requestOptions, {
+      maxReceivedFrameSize: LARGE,
+      maxReceivedMessageSize: LARGE,
+      ...(clientConfig || {}),
+    });
+  };
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +63,7 @@ async function loadNavcoinJs() {
   if (!navcoinJsPromise) {
     navcoinJsPromise = (async () => {
       global.window = global;
+      patchWebSocketFrameLimits();
       const { default: setGlobalVars } = await import('indexeddbshim');
       const navcoinJs = await import('navcoin-js');
       return { navcoinJs, setGlobalVars };

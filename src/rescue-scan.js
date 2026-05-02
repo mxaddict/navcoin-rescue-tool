@@ -9,12 +9,15 @@ const RECEIVE_BRANCH = 0;
 const CHANGE_BRANCH = 1;
 
 const DEFAULT_OPTS = {
-  maxReceive: 5000,
-  maxChange: 10000,
+  // BIP44 standard gap is 20; recovery uses 100 to absorb edge cases.
+  gapLimit: 100,
+  // Derive + scan in chunks of this many keys per branch iteration.
+  walkBatchSize: 100,
+  // Static xNAV subaddress pool. Recovery scan needs each user xNAV key in
+  // the db so HaveKey lookup matches against blsct hashIds.
   xNavPoolSize: 100,
   concurrency: 25,
   progressInterval: 25,
-  deriveProgressInterval: 100,
 };
 
 export async function rescueScan(wallet, opts = {}) {
@@ -28,14 +31,24 @@ export async function rescueScan(wallet, opts = {}) {
   wallet.emit('bootstrap_started');
 
   try {
-    if (cfg.skipDerive !== true) {
-      await derivePool(wallet, password, cfg);
+    if (cfg.skipDerive !== true && cfg.xNavPoolSize > 0) {
+      const wasFilled = wallet.poolFilled;
+      wallet.poolFilled = false;
+      try {
+        await wallet.xNavFillKeyPool(password, cfg.xNavPoolSize);
+      } finally {
+        wallet.poolFilled = wasFilled;
+      }
     }
 
-    const navUtxos = await scanNavBranches(wallet, cfg);
-    const stakingUtxos = await scanStaking(wallet, cfg);
+    if (cfg.skipDerive) {
+      await scanExistingNavAddrs(wallet, cfg);
+    } else {
+      await walkBranch(wallet, password, RECEIVE_BRANCH, cfg);
+      await walkBranch(wallet, password, CHANGE_BRANCH, cfg);
+    }
 
-    await hydrateAndStore(wallet, navUtxos.concat(stakingUtxos), cfg);
+    await scanStaking(wallet, cfg);
 
     if (cfg.skipXNav !== true) {
       await scanXNav(wallet, cfg);
@@ -48,92 +61,139 @@ export async function rescueScan(wallet, opts = {}) {
   }
 }
 
-async function derivePool(wallet, password, cfg) {
-  const target = cfg.maxReceive + cfg.maxChange + cfg.xNavPoolSize;
+// Adaptive gap-bounded scan for one branch. Derives in batches and scans
+// each batch via history + listunspent + GetTx + AddOutput inline. The
+// confirmed balance climbs during the scan instead of only at the end.
+// Walks until scannedIdx - 1 - lastUsedIdx >= gapLimit.
+async function walkBranch(wallet, password, branch, cfg) {
+  const counterName = branch === CHANGE_BRANCH ? 'NavChange' : 'Nav';
+  const phase = branch === CHANGE_BRANCH ? 'change' : 'receive';
 
-  wallet.emit('utxo_phase', 'derive');
-  wallet.emit('scripthash_progress', 0, target);
+  wallet.emit('utxo_phase', phase);
+
+  let lastUsedIdx = -1;
+  let scannedIdx = 0;
+  let derivedIdx = (await wallet.db.GetCounter(counterName)) ?? 0;
 
   const wasFilled = wallet.poolFilled;
   wallet.poolFilled = false;
+
   try {
-    let receiveIdx = (await wallet.db.GetCounter('Nav')) ?? 0;
-    let changeIdx = (await wallet.db.GetCounter('NavChange')) ?? 0;
-
-    while (receiveIdx < cfg.maxReceive) {
-      await wallet.NavCreateAddress(password, RECEIVE_BRANCH);
-      receiveIdx++;
-      if (receiveIdx % cfg.deriveProgressInterval === 0) {
-        wallet.emit('scripthash_progress', receiveIdx, target);
-        await yieldEventLoop();
+    while (true) {
+      // Derive ahead so we always have walkBatchSize unscanned addrs ready.
+      const needed = scannedIdx + cfg.walkBatchSize;
+      while (derivedIdx < needed) {
+        await wallet.NavCreateAddress(password, branch);
+        derivedIdx++;
       }
-    }
-    wallet.emit('scripthash_progress', receiveIdx, target);
 
-    while (changeIdx < cfg.maxChange) {
-      await wallet.NavCreateAddress(password, CHANGE_BRANCH);
-      changeIdx++;
-      if (changeIdx % cfg.deriveProgressInterval === 0) {
-        wallet.emit('scripthash_progress', receiveIdx + changeIdx, target);
-        await yieldEventLoop();
-      }
-    }
-    wallet.emit('scripthash_progress', receiveIdx + changeIdx, target);
+      const branchAddrs = await getBranchAddrs(wallet, branch);
+      const batch = branchAddrs.slice(
+        scannedIdx,
+        scannedIdx + cfg.walkBatchSize,
+      );
+      if (batch.length === 0) break;
 
-    if (cfg.xNavPoolSize > 0) {
-      await wallet.xNavFillKeyPool(password, cfg.xNavPoolSize);
+      await mapConcurrent(batch, cfg.concurrency, async (addr) => {
+        const found = await scanAndHydrateAddr(wallet, addr.address);
+        if (found > 0 && addr.idx > lastUsedIdx) lastUsedIdx = addr.idx;
+      });
+
+      scannedIdx += batch.length;
       wallet.emit(
         'scripthash_progress',
-        receiveIdx + changeIdx + cfg.xNavPoolSize,
-        target,
+        scannedIdx,
+        Math.max(scannedIdx, derivedIdx),
       );
+      await yieldEventLoop();
+
+      // Termination: scanned past last-used by gap.
+      if (scannedIdx - 1 - lastUsedIdx >= cfg.gapLimit) break;
     }
   } finally {
     wallet.poolFilled = wasFilled;
   }
-
-  // Refresh address counts in wallet-manager state.
-  wallet.emit('new_tx');
 }
 
-async function scanNavBranches(wallet, cfg) {
-  const all = await wallet.db.GetNavReceivingAddresses(true);
-  const receive = all.filter((a) => !a.change);
-  const change = all.filter((a) => a.change);
-  const total = receive.length + change.length;
-
+// One-shot scan of existing NAV addrs for skipDerive sources (private-key
+// imports). No walking — just iterate the imported keys once.
+async function scanExistingNavAddrs(wallet, cfg) {
   wallet.emit('utxo_phase', 'receive');
-  const r1 = await scanScriptHashes(wallet, receive, cfg, 0, total);
 
-  wallet.emit('utxo_phase', 'change');
-  const r2 = await scanScriptHashes(wallet, change, cfg, receive.length, total);
-
-  return r1.concat(r2);
-}
-
-async function scanScriptHashes(wallet, addrs, cfg, baseIdx, total) {
-  const utxos = [];
+  const all = await wallet.db.GetNavReceivingAddresses(true);
   let scanned = 0;
 
-  await mapConcurrent(addrs, cfg.concurrency, async (addr) => {
-    const sh = wallet.AddressToScriptHash(addr.address);
-    try {
-      const list = await wallet.client.blockchain_scripthash_listunspent(sh);
-      for (const u of list) {
-        utxos.push({ ...u, address: addr.address, scriptHash: sh });
-      }
-    } catch (err) {
-      console.error(
-        `[rescue-scan] listunspent failed for ${addr.address}: ${err.message}`,
-      );
-    }
+  await mapConcurrent(all, cfg.concurrency, async (addr) => {
+    await scanAndHydrateAddr(wallet, addr.address);
     scanned++;
-    if (scanned % cfg.progressInterval === 0 || scanned === addrs.length) {
-      wallet.emit('scripthash_progress', baseIdx + scanned, total);
+    if (scanned % cfg.progressInterval === 0 || scanned === all.length) {
+      wallet.emit('scripthash_progress', scanned, all.length);
     }
   });
+}
 
-  return utxos;
+// Scan one address: history → listunspent → GetTx + AddOutput inline.
+// wallet.GetTx fetches the merkle proof so tx.height is set in the db,
+// which is required for GetBalance to return a confirmed (vs pending)
+// balance. Returns the number of UTXOs added.
+async function scanAndHydrateAddr(wallet, address) {
+  const sh = wallet.AddressToScriptHash(address);
+
+  let history;
+  try {
+    const result = await wallet.client.blockchain_scripthash_get_history(sh);
+    history = result?.history ?? (Array.isArray(result) ? result : []);
+  } catch (err) {
+    console.error(`[rescue-scan] history failed ${address}: ${err.message}`);
+    return 0;
+  }
+  if (history.length === 0) return 0;
+
+  let list;
+  try {
+    list = await wallet.client.blockchain_scripthash_listunspent(sh);
+  } catch (err) {
+    console.error(
+      `[rescue-scan] listunspent failed ${address}: ${err.message}`,
+    );
+    return 0;
+  }
+  if (list.length === 0) return 0;
+
+  let added = 0;
+  for (const u of list) {
+    try {
+      const tx = await wallet.GetTx(u.tx_hash, undefined, u.height, false);
+      if (!tx?.hex) continue;
+      const decoded = BitcoreTransaction(tx.hex);
+      const out = decoded.outputs[u.tx_pos];
+      if (!out) continue;
+      await wallet.AddOutput(`${u.tx_hash}:${u.tx_pos}`, out, u.height);
+      wallet.emit('balance_changed');
+      added++;
+    } catch (err) {
+      console.error(
+        `[rescue-scan] hydrate failed for ${u.tx_hash}:${u.tx_pos}: ${err.message}`,
+      );
+    }
+  }
+  return added;
+}
+
+async function getBranchAddrs(wallet, branch) {
+  const all = await wallet.db.GetNavReceivingAddresses(true);
+  return all
+    .filter((a) => Boolean(a.change) === (branch === CHANGE_BRANCH))
+    .map((a) => ({ ...a, idx: parsePathIndex(a.path) }))
+    .sort((a, b) => a.idx - b.idx);
+}
+
+function parsePathIndex(path) {
+  if (!path) return 0;
+  const parts = path.split('/');
+  const last = parts[parts.length - 1].replace(/'$/, '');
+  const n = parseInt(last, 10);
+  return Number.isFinite(n) ? n : 0;
 }
 
 async function scanStaking(wallet, cfg) {
@@ -146,94 +206,36 @@ async function scanStaking(wallet, cfg) {
     for (const sh of shs) items.push(sh);
   }
 
-  const utxos = [];
   let scanned = 0;
 
   await mapConcurrent(items, cfg.concurrency, async (sh) => {
+    let list;
     try {
-      const list = await wallet.client.blockchain_scripthash_listunspent(sh);
-      for (const u of list) {
-        utxos.push({ ...u, scriptHash: sh });
-      }
+      list = await wallet.client.blockchain_scripthash_listunspent(sh);
     } catch (err) {
       console.error(`[rescue-scan] staking listunspent failed: ${err.message}`);
+      list = [];
+    }
+    for (const u of list) {
+      try {
+        const tx = await wallet.GetTx(u.tx_hash, undefined, u.height, false);
+        if (!tx?.hex) continue;
+        const decoded = BitcoreTransaction(tx.hex);
+        const out = decoded.outputs[u.tx_pos];
+        if (!out) continue;
+        await wallet.AddOutput(`${u.tx_hash}:${u.tx_pos}`, out, u.height);
+        wallet.emit('balance_changed');
+      } catch (err) {
+        console.error(
+          `[rescue-scan] staking hydrate failed for ${u.tx_hash}:${u.tx_pos}: ${err.message}`,
+        );
+      }
     }
     scanned++;
     if (scanned % cfg.progressInterval === 0 || scanned === items.length) {
       wallet.emit('scripthash_progress', scanned, items.length);
     }
   });
-
-  return utxos;
-}
-
-async function hydrateAndStore(wallet, utxos, cfg) {
-  if (utxos.length === 0) return;
-
-  wallet.emit('utxo_phase', 'hydrate');
-
-  // Map txid → hint height from listunspent so wallet.GetTx can pick the
-  // right merkle proof on first fetch.
-  const heightHint = new Map();
-  for (const u of utxos) {
-    if (!heightHint.has(u.tx_hash)) heightHint.set(u.tx_hash, u.height);
-  }
-
-  const txids = [...new Set(utxos.map((u) => u.tx_hash))];
-  const txCache = new Map();
-  let fetched = 0;
-
-  await mapConcurrent(txids, cfg.concurrency, async (txid) => {
-    try {
-      // wallet.GetTx fetches the tx hex AND fetches the merkle proof to set
-      // tx.height + tx.pos in the db. GetBalance flags UTXOs as pending when
-      // tx.height is undefined, so this height-write is required for the
-      // confirmed balance to populate.
-      const tx = await wallet.GetTx(
-        txid,
-        undefined,
-        heightHint.get(txid),
-        false,
-      );
-      if (tx?.hex) txCache.set(txid, tx.hex);
-    } catch (err) {
-      console.error(`[rescue-scan] GetTx failed for ${txid}: ${err.message}`);
-    }
-    fetched++;
-    if (fetched % cfg.progressInterval === 0 || fetched === txids.length) {
-      wallet.emit('scripthash_progress', fetched, txids.length);
-    }
-  });
-
-  let written = 0;
-  for (const u of utxos) {
-    const hex = txCache.get(u.tx_hash);
-    if (hex) {
-      let decoded;
-      try {
-        decoded = BitcoreTransaction(hex);
-      } catch {
-        decoded = null;
-      }
-      const out = decoded?.outputs[u.tx_pos];
-      if (out) {
-        try {
-          await wallet.AddOutput(`${u.tx_hash}:${u.tx_pos}`, out, u.height);
-          wallet.emit('balance_changed');
-        } catch (err) {
-          console.error(
-            `[rescue-scan] AddOutput failed for ${u.tx_hash}:${u.tx_pos}: ${err.message}`,
-          );
-        }
-      }
-    }
-    written++;
-    if (written % cfg.progressInterval === 0 || written === utxos.length) {
-      wallet.emit('scripthash_progress', written, utxos.length);
-    }
-  }
-
-  wallet.emit('new_tx');
 }
 
 async function scanXNav(wallet, cfg) {
@@ -297,8 +299,6 @@ async function scanXNav(wallet, cfg) {
 
     let hex;
     try {
-      // GetTx persists the merkle-proof height; required for GetBalance to
-      // return a confirmed (vs pending) xNAV balance.
       const tx = await wallet.GetTx(txid, undefined, height, false);
       hex = tx?.hex;
     } catch (err) {
@@ -355,8 +355,6 @@ async function scanXNav(wallet, cfg) {
       }
     }
   }
-
-  wallet.emit('new_tx');
 }
 
 async function loadTxKeys(wallet, txid) {

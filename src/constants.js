@@ -31,11 +31,9 @@ export const FILE_LAYOUT = {
 // in the CLI and TUI so users see "deriving keys" instead of "utxo" during
 // the long key-derivation pass, etc.
 export const SYNC_PHASES = {
-  derive: { label: 'deriving keys', unit: 'keys' },
   receive: { label: 'scanning receive', unit: 'addr' },
   change: { label: 'scanning change', unit: 'addr' },
   stake: { label: 'scanning stake', unit: 'script' },
-  hydrate: { label: 'fetching txs', unit: 'tx' },
   xnav: { label: 'scanning xNAV', unit: 'tx' },
   'xnav-claim': { label: 'claiming xNAV', unit: 'tx' },
 };

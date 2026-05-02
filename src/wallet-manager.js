@@ -102,18 +102,48 @@ export async function rescanAllSources() {
 
     state.rescanInFlight = true;
     started.push(state.sourceId);
-    rescueScan(state.wallet, { skipDerive: state.sourceType === 'private-key' })
-      .catch((err) => {
-        if (state.closing) return;
-        state.syncStatus = 'error';
-        state.error = err.message;
-      })
-      .finally(() => {
-        state.rescanInFlight = false;
-      });
+    runFreshRescan(state).catch(() => {
+      // Errors are surfaced into state.syncStatus/error inside runFreshRescan.
+    });
   }
 
   return { started };
+}
+
+async function runFreshRescan(state) {
+  try {
+    // Wipe UTXO/tx/scripthash state so the scan rebuilds from a clean
+    // slate — addresses no longer in chain's listunspent set don't carry
+    // over and inflate the balance. Keys, master keys, and the txKeys
+    // bootstrap cache survive (ZapWalletTxes only touches statuses,
+    // scriptHistories, outPoints, walletTxs, names).
+    try {
+      await state.wallet.db.ZapWalletTxes();
+    } catch (err) {
+      console.error(
+        `[wallet-manager] zap before rescan failed for ${state.sourceId}: ${err.message}`,
+      );
+    }
+
+    // Reset displayed balance immediately so the user sees the rescan
+    // start from zero rather than showing stale numbers until the first
+    // balance_changed emit.
+    state.balance = {
+      nav: { confirmed: 0, pending: 0 },
+      xnav: { confirmed: 0, pending: 0 },
+      staked: { confirmed: 0, pending: 0 },
+    };
+
+    await rescueScan(state.wallet, {
+      skipDerive: state.sourceType === 'private-key',
+    });
+  } catch (err) {
+    if (state.closing) return;
+    state.syncStatus = 'error';
+    state.error = err.message;
+  } finally {
+    state.rescanInFlight = false;
+  }
 }
 
 async function waitForConnected(state, timeoutMs = 15_000) {

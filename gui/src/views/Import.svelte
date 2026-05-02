@@ -102,12 +102,21 @@
 
   {#if kind === 'mnemonic'}
     <div class="field">
-      <label for="walletType">Wallet type</label>
-      <select id="walletType" bind:value={walletType} disabled={busy}>
+      <label>Wallet type</label>
+      <div class="kind-toggle wallet-toggle" role="tablist">
         {#each WALLET_TYPES as t}
-          <option value={t}>{t}</option>
+          <button
+            type="button"
+            role="tab"
+            class:active={walletType === t}
+            aria-selected={walletType === t}
+            onclick={() => (walletType = t)}
+            disabled={busy}
+          >
+            {t}
+          </button>
         {/each}
-      </select>
+      </div>
       <p class="hint">
         Pick the source app that originally generated this mnemonic.
       </p>
@@ -195,6 +204,20 @@
     border-radius: 6px;
     font-weight: 500;
     min-width: 120px;
+  }
+
+  .wallet-toggle {
+    flex-wrap: wrap;
+  }
+
+  .wallet-toggle button {
+    min-width: 0;
+    font-family:
+      ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      monospace;
+    font-size: 12px;
   }
 
   .kind-toggle button:hover {

@@ -41,14 +41,17 @@ discovers recoverable funds, and sweeps to a new destination. CLI command is
 
 ## Pending Work
 
-1. **Tauri GUI** (`ntr-gui`) — primary next slice.
-2. **CI release pipeline** — cross-platform artifact builds on version tags.
-3. **Test coverage gaps** — see Testing Strategy below.
-4. **Code-signing decision** — macOS notarization and Windows Authenticode are
+1. **CI release pipeline** — cross-platform artifact builds on version tags.
+2. **Test coverage gaps** — see Testing Strategy below.
+3. **Code-signing decision** — macOS notarization and Windows Authenticode are
    currently unsigned. Plan a budget/decision before public release.
 
 ## Recently Completed
 
+- Tauri GUI (`ntr-gui`) shipped — Svelte 5 frontend over the same daemon API
+  as CLI/TUI, with Status/Import/Sweep/Logs/Purge views. Auto-strips GTK CSD
+  on known Wayland tilers (Hyprland, Sway, niri, river, Wayfire); overridable
+  via `NTR_DECORATIONS=0/1`.
 - Replaced the patched `navcoin-js` SyncUtxos with `src/rescue-scan.js`
   (adaptive gap-walker + inline hydrate, named per-phase progress, stale-UTXO
   reap pass).
@@ -59,8 +62,8 @@ discovers recoverable funds, and sweeps to a new destination. CLI command is
 - Persisted `lastSyncedAt` per source so daemon restart skips the auto-rescan.
 - Status display shows confirmed and pending separately, with totals.
 - WebSocket frame-size patch (64MB) for large electrum responses.
-- Local-storage warning shown after every successful import (CLI + TUI), via
-  `getStorageWarningLines` in `src/constants.js`.
+- Local-storage warning shown after every successful import (CLI + TUI + GUI),
+  via `getStorageWarningLines` in `src/constants.js`.
 
 ## CI And Releases
 

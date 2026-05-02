@@ -4,17 +4,18 @@ Recovery-first tooling for legacy NavCoin wallets.
 
 `navcoin-rescue-tool` imports legacy recovery material, inspects recoverable
 balances, and sweeps funds to a new destination address. The CLI command is
-`ntr`.
+`ntr`; the GUI command is `ntr-gui`.
 
 ## Status
 
-The CLI/TUI/daemon path is functional and has reconciled real wallet
+The CLI/TUI/GUI/daemon path is functional and has reconciled real wallet
 balances against `navcoin-cli` to the satoshi. Treat as beta — verify on a
 test wallet before sweeping anything irreplaceable.
 
 What works now:
 
 - TUI: run `ntr` with no arguments for a full terminal UI
+- GUI: run `ntr-gui` for a Tauri desktop app over the same daemon
 - daemon lifecycle: `ntr start`, `ntr status`, `ntr stop`
 - mnemonic and private-key import backed by `navcoin-js`
 - source removal and duplicate-source rejection
@@ -31,7 +32,6 @@ What works now:
 
 What does not work yet:
 
-- no GUI yet (Tauri client planned)
 - non-atomic sweep — partial broadcast failure leaves earlier legs on chain
 
 ## Safety Warning
@@ -99,6 +99,27 @@ The TUI auto-starts the daemon if it is not already running. Commands:
 - ↑/↓ recall previous commands; PgUp/PgDn scroll output.
 - Press Ctrl+C twice to quit.
 - Adapts to dark and light terminal backgrounds automatically.
+
+## GUI
+
+Run `ntr-gui` to launch the Tauri desktop app:
+
+```bash
+ntr-gui
+```
+
+The GUI auto-starts the daemon if it is not already running and is a thin
+client over the same `127.0.0.1:46117` API as `ntr` and the TUI. Views:
+Status, Import, Sweep, Logs, Purge.
+
+### Window decorations
+
+GTK on Wayland always draws client-side titlebars, which look foreign on
+tiling compositors. The GUI strips its titlebar automatically when launched
+under Hyprland, Sway, niri, river, or Wayfire. Override:
+
+- `NTR_DECORATIONS=0` — force-strip the titlebar
+- `NTR_DECORATIONS=1` — force-keep the titlebar
 
 ## CLI Usage
 
@@ -211,11 +232,10 @@ Layout:
 
 Near-term:
 
-1. Tauri GUI client (`ntr-gui`) — see `PLAN.md`
-2. Atomic / per-source-result sweep so partial broadcast failure is visible
+1. Atomic / per-source-result sweep so partial broadcast failure is visible
+2. CI release pipeline + cross-platform archives (Linux/macOS/Windows × x86_64/arm64)
 
 Longer-term:
 
-1. CI release pipeline + cross-platform archives (Linux/macOS/Windows × x86_64/arm64)
-2. Broader wallet-type fixture coverage in the test suite
-3. Code-signing for macOS/Windows release artifacts
+1. Broader wallet-type fixture coverage in the test suite
+2. Code-signing for macOS/Windows release artifacts

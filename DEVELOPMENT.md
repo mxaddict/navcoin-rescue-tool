@@ -4,6 +4,8 @@
 
 - Node.js with built-in `fetch` and `node:test` (v18+)
 - npm
+- Rust toolchain (stable) and Tauri 2 system deps for the GUI — see
+  https://tauri.app/start/prerequisites/
 
 ## Setup
 
@@ -33,7 +35,7 @@ npm run format:check
 
 - Daemon listens on `127.0.0.1:46117`
 - Daemon owns all local state and persistence
-- CLI, TUI, and planned Tauri GUI all share the same daemon backend via HTTP
+- CLI, TUI, and Tauri GUI all share the same daemon backend via HTTP
 
 Daemon API:
 
@@ -61,7 +63,19 @@ src/
   wallet-worker.js      child-process wallet creation (avoids blocking daemon)
   cli.js                ntr CLI entrypoint and command handlers
   tui.js                blessed TUI launched by ntr with no arguments
-  gui.js                ntr-gui placeholder
+  gui.js                ntr-gui entrypoint — spawns `tauri dev` / built bundle
+```
+
+GUI sources:
+
+```text
+gui/
+  src/                  Svelte 5 frontend (App, views, lib)
+  src/app.css           Navio palette + shared styles
+src-tauri/
+  src/lib.rs            Rust shell — daemon_auth, ensure_daemon,
+                        read_log_tail, decoration handling
+  tauri.conf.json       window + bundle config
 ```
 
 ## Testing the TUI
@@ -77,6 +91,25 @@ Or if installed globally:
 ```bash
 ntr
 ```
+
+## Running the GUI
+
+Dev mode (auto-reload via Vite + Tauri):
+
+```bash
+npm run gui:dev
+```
+
+Production build:
+
+```bash
+npm run gui:build
+```
+
+The GUI auto-strips its titlebar under known Wayland tiling compositors
+(Hyprland, Sway, niri, river, Wayfire). Override with
+`NTR_DECORATIONS=0` (force strip) or `NTR_DECORATIONS=1` (force keep).
+Detection logic lives in `src-tauri/src/lib.rs::should_strip_decorations`.
 
 ## Key Implementation Notes
 

@@ -171,28 +171,22 @@
           {/if}
 
           <div class="row">
-            <dt>Confirmed</dt>
-            <dd class="amounts">
+            <dt>NAV</dt>
+            <dd class="totals-line">
               <span class="num cyan mono">{fmt(navConf)}</span>
-              <span class="unit">NAV</span>
-              <span class="plus">+</span>
-              <span class="num indigo mono">{fmt(xnavConf)}</span>
-              <span class="unit">xNAV</span>
+              <span class="dim">(+{fmt(navPend)} pending)</span>
             </dd>
           </div>
           <div class="row">
-            <dt>Pending</dt>
-            <dd class="amounts">
-              <span class="num cyan mono">{fmt(navPend)}</span>
-              <span class="unit">NAV</span>
-              <span class="plus">+</span>
-              <span class="num indigo mono">{fmt(xnavPend)}</span>
-              <span class="unit">xNAV</span>
+            <dt>xNAV</dt>
+            <dd class="totals-line">
+              <span class="num indigo mono">{fmt(xnavConf)}</span>
+              <span class="dim">(+{fmt(xnavPend)} pending)</span>
             </dd>
           </div>
           <div class="row">
             <dt>Total</dt>
-            <dd class="amounts">
+            <dd class="totals-line">
               <span class="num strong mono">{fmt(total)}</span>
             </dd>
           </div>

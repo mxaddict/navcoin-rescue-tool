@@ -41,11 +41,6 @@
 
 <header class="page-header">
   <h2>Logs</h2>
-  <div class="actions">
-    <button onclick={() => (autoScroll = true)} disabled={autoScroll}>
-      Jump to end
-    </button>
-  </div>
 </header>
 
 {#if error}
@@ -54,9 +49,63 @@
   </div>
 {/if}
 
-<pre class="log" bind:this={pre} onscroll={onScroll}>{text || '(no log output yet)'}</pre>
+<div class="log-wrap">
+  <pre class="log" bind:this={pre} onscroll={onScroll}>{text ||
+      '(no log output yet)'}</pre>
+
+  <div class="jump">
+    <button
+      class="jump-btn"
+      title="Jump to top"
+      onclick={() => {
+        if (pre) pre.scrollTop = 0;
+      }}
+    >
+      ↑ Top
+    </button>
+    <button
+      class="jump-btn"
+      title="Jump to bottom"
+      onclick={() => {
+        autoScroll = true;
+        if (pre) pre.scrollTop = pre.scrollHeight;
+      }}
+    >
+      ↓ Bottom
+    </button>
+  </div>
+</div>
 
 <style>
+  .log-wrap {
+    position: relative;
+  }
+
+  .jump {
+    position: absolute;
+    bottom: 12px;
+    right: 16px;
+    display: flex;
+    gap: 6px;
+    z-index: 1;
+  }
+
+  .jump-btn {
+    background: rgba(31, 41, 55, 0.85);
+    color: var(--muted);
+    border: 1px solid #374151;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    min-width: 0;
+    backdrop-filter: blur(4px);
+  }
+
+  .jump-btn:hover {
+    color: white;
+    border-color: var(--muted);
+  }
+
   .log {
     background: #0b101a;
     color: #cbd5e1;

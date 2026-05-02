@@ -55,3 +55,7 @@ export async function importSource(payload) {
 export async function purgeDaemon() {
   return await daemonRequest('/purge', { method: 'POST' });
 }
+
+export async function rescanDaemon() {
+  return await daemonRequest('/rescan', { method: 'POST' });
+}

@@ -303,25 +303,23 @@ prepare/confirm, and wallet-manager state. The following high-priority cases
 are not yet covered:
 
 1. Empty wallet import — scan completes, no balances, sweep blocked.
-2. Wrong network — source/daemon mismatch, no false balances reported.
-3. Restart persistence — state and sync progress restore across daemon stop /
+2. Restart persistence — state and sync progress restore across daemon stop /
    start.
-4. Sweep amount + fee handling — final sent equals total minus fee, no
+3. Sweep amount + fee handling — final sent equals total minus fee, no
    leftover spendable balance.
-5. Multi-source sweep correctness — funds consumed from all sources, none
+4. Multi-source sweep correctness — funds consumed from all sources, none
    omitted or double-counted.
-6. xNAV sweep correctness (once implemented) — xNAV leg claimed, balances
-   match expected.
-7. Sync state reporting — pre-sync, mid-sync, post-sync indicators flip only
+5. xNAV sweep correctness — xNAV leg claimed, balances match expected.
+6. Sync state reporting — pre-sync, mid-sync, post-sync indicators flip only
    when caught up to head.
-8. Address reporting — every derived/imported address listed, balances
+7. Address reporting — every derived/imported address listed, balances
    attached correctly, totals match per-address sums.
-9. Import validation — invalid mnemonic, unsupported type, malformed key,
+8. Import validation — invalid mnemonic, unsupported type, malformed key,
    no broken persisted state after failure.
-10. Source isolation — addresses identified per source, remove/sweep respect
-    source boundaries.
-11. Idempotent status — repeated calls do not mutate state.
-12. Staked or non-sweepable funds — reported distinctly, sweep handles
+9. Source isolation — addresses identified per source, remove/sweep respect
+   source boundaries.
+10. Idempotent status — repeated calls do not mutate state.
+11. Staked or non-sweepable funds — reported distinctly, sweep handles
     correctly or explains why not.
 
 ### Mock Design
@@ -330,8 +328,8 @@ are not yet covered:
 - Feed deterministic wallet snapshots, address discovery results, sync
   progress, network head updates, and transaction creation results.
 - Fixtures should cover: empty wallets, single-source funded, multi-source
-  funded, duplicate imports, wrong-network imports, partially synced wallets,
-  staked balances, sweep success and failure cases.
+  funded, duplicate imports, partially synced wallets, staked balances, sweep
+  success and failure cases.
 
 ### Manual Post-MVP Testing
 

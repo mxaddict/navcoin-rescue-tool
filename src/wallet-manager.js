@@ -83,6 +83,16 @@ function getSourceMinPoolSize(source) {
   return source.type === 'private-key' ? 0 : 10;
 }
 
+async function waitForConnected(state, timeoutMs = 15_000) {
+  const start = Date.now();
+  while (!state.connected) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('Timed out waiting for electrum connection to be ready');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 function setSyncProgress(state, phaseProgress) {
   state.syncStatus = 'syncing';
   state.syncProgress = Math.max(5, phaseProgress);
@@ -261,11 +271,11 @@ export async function openSourceWallet(source, root, navWallet) {
       }
     });
 
-    wallet.on('bootstrap_started', () => {
-      setSyncProgress(state, 0);
-      state.syncCurrent = 0;
-      state.syncTotal = 0;
-    });
+    // bootstrap_started fires once at rescueScan entry AND on every electrum
+    // reconnect (wallet.js:818, inside the 'ready' handler). Resetting
+    // sync counters here would make progress visibly drop to 0/N on every
+    // reconnect mid-scan. scripthash_progress drives the counters; nothing
+    // to do here.
 
     wallet.on('scripthash_progress', (index, total) => {
       setSyncProgress(state, Math.round((index / total) * 100));
@@ -365,6 +375,13 @@ export async function openSourceWallet(source, root, navWallet) {
       state.connectingAt = Date.now();
       state.connectPromise = wallet.Connect();
       await state.connectPromise;
+
+      // wallet.Connect resolves when server_banner returns, but the
+      // 'ready' handler (which subscribes to headers/dao/etc) is async
+      // and may still be running. Wait for the 'connected' event handler
+      // to flip state.connected before starting the scan so the first
+      // requests don't race against the connect handshake.
+      await waitForConnected(state);
 
       rescueScan(wallet, {
         skipDerive: source.type === 'private-key',

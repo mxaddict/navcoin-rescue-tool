@@ -3,7 +3,7 @@
   import Import from './views/Import.svelte';
   import Rescan from './views/Rescan.svelte';
   import Purge from './views/Purge.svelte';
-  import navioLogo from './assets/navio-logo.svg';
+  import navioLogo from './assets/navio-icon.svg';
 
   const VIEWS = [
     { id: 'status', label: 'Status' },
@@ -20,7 +20,7 @@
     <div class="bar-inner">
       <div class="brand">
         <img src={navioLogo} alt="Navio" class="logo" />
-        <span class="brand-suffix">Rescue Tool</span>
+        <span class="brand-suffix">Navcoin Rescue Tool</span>
       </div>
       <nav>
         {#each VIEWS as v}

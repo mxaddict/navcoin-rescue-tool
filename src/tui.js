@@ -154,8 +154,6 @@ const COMMANDS = [
   'status',
   'show',
   'import',
-  'import mnemonic',
-  'import private-key',
   'remove',
   'sweep',
   'purge',

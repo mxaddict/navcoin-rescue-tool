@@ -45,6 +45,18 @@
   </p>
 </div>
 
+{#if error}
+  <div class="callout error">
+    <p>Purge failed: {error}</p>
+  </div>
+{/if}
+
+{#if done}
+  <div class="callout success">
+    <p>All wallet data deleted. Daemon restarting in the background.</p>
+  </div>
+{/if}
+
 <section class="card">
   <div class="field">
     <label for="confirm">
@@ -57,19 +69,9 @@
       placeholder={REQUIRED}
       disabled={busy}
     />
-    <p class="hint">
-      Match the phrase exactly to enable the purge button.
-    </p>
+    <p class="hint">Match the phrase exactly to enable the purge button.</p>
   </div>
 </section>
-
-{#if error}
-  <p class="error">Purge failed: {error}</p>
-{/if}
-
-{#if done}
-  <p class="ok">All wallet data deleted. Daemon restarting in the background.</p>
-{/if}
 
 <style>
   .card {
@@ -119,11 +121,4 @@
     background: var(--pink);
   }
 
-  .error {
-    color: var(--pink);
-  }
-
-  .ok {
-    color: var(--teal);
-  }
 </style>

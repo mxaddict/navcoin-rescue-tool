@@ -345,15 +345,18 @@ function renderShow(C, data) {
       `  ${C.boldMagenta('Source')}  ${C.muted(`[${typeLabel}]`)}  ${src.id}`,
     );
 
-    if (src.addresses.length === 0) {
-      lines.push('  No addresses derived yet.');
+    const funded = (src.addresses ?? []).filter((a) => (a.balance ?? 0) > 0);
+
+    if (funded.length === 0) {
+      lines.push('  No addresses with balance.');
       continue;
     }
 
-    lines.push(`  ${C.bold('Addresses')} (${src.addresses.length}):`);
-    for (const addr of src.addresses) {
-      const usedLabel = addr.used ? C.muted(' [used]') : '';
-      lines.push(`    ${C.magenta(addr.address)}${usedLabel}`);
+    lines.push(`  ${C.bold('Addresses with balance')} (${funded.length}):`);
+    for (const addr of funded) {
+      lines.push(
+        `    ${C.cyan(navStr(addr.balance))} NAV  ${C.magenta(addr.address)}`,
+      );
     }
   }
 

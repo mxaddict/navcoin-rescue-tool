@@ -415,11 +415,31 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
 
   try {
     const rawAddresses = await wallet.NavReceivingAddresses(true);
+
+    // Aggregate UTXO amounts by spendingPk so we can attach a per-address
+    // balance. Covers both plain P2PKH (NAV) and cold-stake outputs we
+    // hold the spending key for.
+    const balanceByPk = new Map();
+    try {
+      const utxos = await wallet.db.GetUtxos(true);
+      for (const u of utxos) {
+        if (u.spentIn) continue;
+        if (!u.spendingPk) continue;
+        balanceByPk.set(
+          u.spendingPk,
+          (balanceByPk.get(u.spendingPk) ?? 0) + (u.amount ?? 0),
+        );
+      }
+    } catch {
+      // Non-fatal: balance map stays empty, addresses report 0.
+    }
+
     state.addresses = rawAddresses.map((a) => ({
       address: a.address,
       path: a.path,
       used: a.used === 1,
       isChange: a.change,
+      balance: balanceByPk.get(a.hash) ?? 0,
     }));
   } catch {
     // Non-fatal: leave previous address list intact.

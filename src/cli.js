@@ -191,15 +191,19 @@ async function handleShow() {
 
       process.stdout.write(`\nSource: ${source.id} [${typeLabel}]\n`);
 
-      if (source.addresses.length === 0) {
-        process.stdout.write('  No addresses derived yet.\n');
+      const funded = (source.addresses ?? []).filter(
+        (a) => (a.balance ?? 0) > 0,
+      );
+
+      if (funded.length === 0) {
+        process.stdout.write('  No addresses with balance.\n');
         continue;
       }
 
-      process.stdout.write(`  Addresses (${source.addresses.length}):\n`);
-      for (const addr of source.addresses) {
-        const usedLabel = addr.used ? ' [used]' : '';
-        process.stdout.write(`    ${addr.address}${usedLabel}\n`);
+      process.stdout.write(`  Addresses with balance (${funded.length}):\n`);
+      for (const addr of funded) {
+        const bal = (addr.balance / 1e8).toFixed(8);
+        process.stdout.write(`    ${bal} NAV  ${addr.address}\n`);
       }
     }
   } catch {

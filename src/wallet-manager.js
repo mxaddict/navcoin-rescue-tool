@@ -319,6 +319,24 @@ export async function openSourceWallet(source, root, navWallet) {
       state.changeCount = changeCount;
     });
 
+    wallet.on('balance_changed', async () => {
+      try {
+        const bal = await wallet.GetBalance();
+        state.balance = {
+          nav: {
+            confirmed: bal.nav?.confirmed ?? 0,
+            pending: bal.nav?.pending ?? 0,
+          },
+          staked: {
+            confirmed: bal.staked?.confirmed ?? 0,
+            pending: bal.staked?.pending ?? 0,
+          },
+        };
+      } catch {
+        // Non-fatal: leave previous balance intact.
+      }
+    });
+
     wallet.on('utxo_phase', (phase) => {
       state.syncStatus =
         phase === 'change'

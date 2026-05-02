@@ -216,6 +216,7 @@ async function hydrateAndStore(wallet, utxos, cfg) {
       if (out) {
         try {
           await wallet.AddOutput(`${u.tx_hash}:${u.tx_pos}`, out, u.height);
+          wallet.emit('balance_changed');
         } catch (err) {
           console.error(
             `[rescue-scan] AddOutput failed for ${u.tx_hash}:${u.tx_pos}: ${err.message}`,
@@ -347,6 +348,7 @@ async function scanXNav(wallet, cfg) {
 
       try {
         await wallet.AddOutput(`${txid}:${i}`, out, height);
+        wallet.emit('balance_changed');
       } catch (err) {
         console.error(
           `[rescue-scan] xnav AddOutput failed ${txid}:${i}: ${err.message}`,

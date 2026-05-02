@@ -41,7 +41,6 @@
       const res = await importSource(payload);
       result = res.source;
 
-      // Pull walletsDir from /status — it returns appData root.
       try {
         const status = await fetchDaemonStatus();
         if (status?.appData) {
@@ -70,99 +69,160 @@
   </div>
 </header>
 
-<div class="form">
-  <label class="row">
-    <span>Type</span>
-    <select bind:value={kind} disabled={busy}>
-      <option value="mnemonic">mnemonic</option>
-      <option value="private-key">private-key</option>
-    </select>
-  </label>
+<div class="callout">
+  <p>
+    Recovery material lives only on this machine. After a successful sweep,
+    visit Purge to wipe imported wallets from disk.
+  </p>
+</div>
+
+<section class="card">
+  <div class="kind-toggle" role="tablist" aria-label="Source type">
+    <button
+      type="button"
+      role="tab"
+      class:active={kind === 'mnemonic'}
+      aria-selected={kind === 'mnemonic'}
+      onclick={() => (kind = 'mnemonic')}
+      disabled={busy}
+    >
+      Mnemonic
+    </button>
+    <button
+      type="button"
+      role="tab"
+      class:active={kind === 'private-key'}
+      aria-selected={kind === 'private-key'}
+      onclick={() => (kind = 'private-key')}
+      disabled={busy}
+    >
+      Private Key
+    </button>
+  </div>
 
   {#if kind === 'mnemonic'}
-    <label class="row">
-      <span>Wallet type</span>
-      <select bind:value={walletType} disabled={busy}>
+    <div class="field">
+      <label for="walletType">Wallet type</label>
+      <select id="walletType" bind:value={walletType} disabled={busy}>
         {#each WALLET_TYPES as t}
           <option value={t}>{t}</option>
         {/each}
       </select>
-    </label>
-    <label class="row col">
-      <span>Mnemonic phrase</span>
+      <p class="hint">
+        Pick the source app that originally generated this mnemonic.
+      </p>
+    </div>
+
+    <div class="field">
+      <label for="phrase">Mnemonic phrase</label>
       <textarea
+        id="phrase"
         rows="3"
         bind:value={phrase}
         placeholder="word1 word2 ... word12"
         disabled={busy}
       ></textarea>
-    </label>
+      <p class="hint">12 or 24 words, separated by spaces.</p>
+    </div>
   {:else}
-    <label class="row col">
-      <span>WIF private keys (one per line)</span>
+    <div class="field">
+      <label for="keys">WIF private keys</label>
       <textarea
-        rows="4"
+        id="keys"
+        rows="5"
         bind:value={keysText}
-        placeholder="L1...&#10;5K..."
+        placeholder={'L1...\n5K...'}
         disabled={busy}
       ></textarea>
-    </label>
+      <p class="hint">One key per line. Imports together as a single source.</p>
+    </div>
   {/if}
-
-</div>
+</section>
 
 {#if error}
-  <p class="error">Import failed: {error}</p>
+  <div class="callout error">
+    <p>Import failed: {error}</p>
+  </div>
 {/if}
 
 {#if result}
-  <div class="result">
-    <p class="ok">Imported source: <span class="mono">{result.id}</span></p>
-    {#if result.walletType}
-      <p class="muted">Wallet type: {result.walletType}</p>
-    {/if}
+  <section class="card result">
+    <h3>Imported</h3>
+    <dl class="meta">
+      <div>
+        <dt>Source ID</dt>
+        <dd class="mono">{result.id}</dd>
+      </div>
+      {#if result.walletType}
+        <div>
+          <dt>Wallet type</dt>
+          <dd>{result.walletType}</dd>
+        </div>
+      {/if}
+    </dl>
     <p class="muted">Syncing in the background — see Status for progress.</p>
 
     {#if warningLines.length > 0}
       <pre class="warning">{warningLines.join('\n')}</pre>
     {/if}
-  </div>
+  </section>
 {/if}
 
 <style>
-  .form {
+  .card {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-top: 14px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 16px;
   }
 
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  .kind-toggle {
+    display: inline-flex;
+    background: var(--deep);
+    border-radius: 8px;
+    padding: 4px;
+    align-self: flex-start;
+    gap: 2px;
   }
 
-  .row.col {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
-  }
-
-  .row > span {
+  .kind-toggle button {
+    background: transparent;
     color: var(--muted);
-    font-size: 12px;
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-weight: 500;
+    min-width: 120px;
+  }
+
+  .kind-toggle button:hover {
+    color: var(--text);
+  }
+
+  .kind-toggle button.active {
+    background: linear-gradient(135deg, var(--indigo), var(--fuchsia));
+    color: white;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .field label {
+    color: var(--muted);
+    font-size: 11px;
     text-transform: uppercase;
-    width: 110px;
-    flex-shrink: 0;
+    letter-spacing: 0.06em;
+    font-weight: 600;
   }
 
-  .row.col > span {
-    width: auto;
-  }
-
-  textarea,
-  select {
-    flex: 1;
+  .field textarea,
+  .field select {
+    width: 100%;
     font-family:
       ui-monospace,
       SFMono-Regular,
@@ -170,16 +230,54 @@
       monospace;
   }
 
-  .error {
-    color: var(--pink);
+  .field textarea {
+    resize: vertical;
+    min-height: 70px;
   }
 
-  .ok {
+  .hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .result h3 {
+    margin: 0;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
     color: var(--teal);
+  }
+
+  .meta {
+    margin: 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .meta > div {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .meta dt {
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .meta dd {
+    margin: 0;
+    color: var(--text);
   }
 
   .muted {
     color: var(--muted);
+    margin: 0;
   }
 
   .mono {
@@ -190,18 +288,12 @@
       monospace;
   }
 
-  .result {
-    margin-top: 20px;
-    padding: 16px;
-    background: var(--panel);
-    border-radius: 8px;
-  }
-
   .warning {
-    margin: 12px 0 0;
-    padding: 12px;
+    margin: 4px 0 0;
+    padding: 12px 14px;
     background: var(--deep);
     border-left: 3px solid var(--warn);
+    border-radius: 6px;
     color: var(--warn);
     font-family:
       ui-monospace,

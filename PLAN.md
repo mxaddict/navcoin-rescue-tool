@@ -220,7 +220,7 @@ Notes:
 - Examples:
   - `navcoin-rescue-tool-v0.0.1-linux-x86_64.tar.gz`
   - `navcoin-rescue-tool-v0.0.1-linux-arm64.tar.gz`
-  - `navcoin-rescue-tool-v0.0.1-macos-arm64.zip`
+  - `navcoin-rescue-tool-v0.0.1-macos-arm64.tar.gz`
   - `navcoin-rescue-tool-v0.0.1-windows-x86_64.zip`
 - Platform names: `linux`, `macos`, `windows`. Arch names: `x86_64`, `arm64`.
 - One `.sha256` checksum file per artifact (not one combined file).

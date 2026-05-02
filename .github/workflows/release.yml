@@ -45,7 +45,7 @@ jobs:
             platform: macos
             arch: arm64
             node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-darwin-arm64.tar.gz
-            ext: zip
+            ext: tar.gz
           - os: windows-latest
             platform: windows
             arch: x86_64
@@ -219,18 +219,28 @@ jobs:
         shell: bash
         run: |
           stage="staging/${{ steps.stage.outputs.name }}"
-          cat > "$stage/README-macOS.txt" <<'EOF'
+          name="${{ steps.stage.outputs.name }}"
+          cat > "$stage/README-macOS.txt" <<EOF
           macOS Quarantine Notice
           =======================
 
-          The binaries in this archive are not code-signed. macOS will refuse to
-          run them until quarantine is removed.
+          The binaries in this archive are not code-signed by Apple. macOS
+          attaches a "com.apple.quarantine" extended attribute to anything
+          downloaded from the internet and will refuse to run unsigned
+          binaries until that attribute is stripped.
 
-          After extracting, run:
+          Assuming you downloaded the archive into ~/Downloads and extracted
+          it there (the macOS default), open Terminal and run:
 
-            xattr -dr com.apple.quarantine "$(pwd)"
+            xattr -dr com.apple.quarantine ~/Downloads/$name
 
-          Then launch ntr-gui or run ./ntr from the extracted directory.
+          Then double-click ntr-gui in Finder, or from Terminal run:
+
+            cd ~/Downloads/$name
+            ./ntr
+
+          If you extracted the archive somewhere else, replace
+          "~/Downloads/$name" with that path.
           EOF
 
       - name: Pack archive (tar.gz)

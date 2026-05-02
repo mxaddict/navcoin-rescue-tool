@@ -22,6 +22,22 @@
   let removeBusy = $state(false);
   let removeError = $state(null);
 
+  // Per-source expanded state for the address list. Set keyed by id.
+  let expanded = $state(new Set());
+
+  function toggleExpand(id) {
+    const next = new Set(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    expanded = next;
+  }
+
+  function fundedAddresses(s) {
+    return (s.addresses ?? [])
+      .filter((a) => (a.balance ?? 0) > 0)
+      .sort((a, b) => (a.address < b.address ? -1 : 1));
+  }
+
   // States that mean a scan is in flight; while any source is in one,
   // the rescan button is disabled to match wallet-manager skip rules.
   const SCANNING = new Set(['syncing', 'connecting', 'opening']);
@@ -249,6 +265,28 @@
           </div>
         </dl>
 
+        {@const funded = fundedAddresses(s)}
+        {#if funded.length > 0}
+          <button
+            class="expand-toggle"
+            onclick={() => toggleExpand(s.id)}
+            aria-expanded={expanded.has(s.id)}
+          >
+            {expanded.has(s.id) ? '▾' : '▸'}
+            {funded.length} funded address{funded.length === 1 ? '' : 'es'}
+          </button>
+
+          {#if expanded.has(s.id)}
+            <ul class="addr-list">
+              {#each funded as a}
+                <li>
+                  <span class="mono small addr">{a.address}</span>
+                  <span class="num cyan mono small">{fmt(a.balance)}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
       </article>
     {/each}
 
@@ -492,6 +530,54 @@
 
   .pink {
     color: var(--pink);
+  }
+
+  .small {
+    font-size: 12px;
+  }
+
+  .expand-toggle {
+    background: transparent;
+    color: var(--muted);
+    border: 0;
+    padding: 8px 0 0;
+    font-size: 12px;
+    text-align: left;
+    align-self: flex-start;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .expand-toggle:hover {
+    color: var(--text);
+  }
+
+  .addr-list {
+    margin: 4px 0 0;
+    padding: 8px 12px;
+    list-style: none;
+    background: var(--deep);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .addr-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 2px 0;
+  }
+
+  .addr-list .addr {
+    flex: 1;
+    word-break: break-all;
+  }
+
+  .addr-list .num {
+    text-align: right;
+    min-width: 130px;
   }
 
   @media (max-width: 500px) {

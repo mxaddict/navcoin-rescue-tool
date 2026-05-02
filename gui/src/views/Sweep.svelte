@@ -1,4 +1,5 @@
 <script>
+  import { tick } from 'svelte';
   import { sweepPrepare, sweepConfirm } from '../lib/daemon.js';
 
   const REQUIRED_PHRASE = 'SEND MY COINS';
@@ -19,6 +20,9 @@
   let busy = $state(false);
   let error = $state(null);
 
+  let verifyInput;
+  let phraseInput;
+
   function fmt(sat) {
     return (Number(sat ?? 0) / 1e8).toFixed(8);
   }
@@ -31,6 +35,8 @@
     error = null;
     destinationVerify = '';
     step = 'verify';
+    await tick();
+    verifyInput?.focus();
   }
 
   async function goToReview() {
@@ -45,6 +51,8 @@
       preview = res?.preview ?? null;
       step = 'review';
       phrase = '';
+      await tick();
+      phraseInput?.focus();
     } catch (err) {
       error = err.message ?? String(err);
     } finally {
@@ -131,6 +139,7 @@
         id="dest-verify"
         type="text"
         bind:value={destinationVerify}
+        bind:this={verifyInput}
         placeholder="paste again"
         disabled={busy}
         spellcheck="false"
@@ -190,6 +199,7 @@
         id="phrase"
         type="text"
         bind:value={phrase}
+        bind:this={phraseInput}
         placeholder={REQUIRED_PHRASE}
         disabled={busy}
         spellcheck="false"

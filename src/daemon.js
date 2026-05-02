@@ -128,6 +128,23 @@ async function main() {
   }
 
   const server = http.createServer(async (request, response) => {
+    // Permissive CORS so the Tauri GUI webview (origin
+    // http://localhost:1420 in dev, tauri://localhost in prod) can fetch
+    // the daemon directly. Auth still gates every request — without the
+    // cookie file (mode 0600 in the user's app-data dir) any caller
+    // gets a 401 regardless of origin.
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader(
+      'Access-Control-Allow-Headers',
+      'Authorization, Content-Type',
+    );
+    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+
     if (shuttingDown && request.url !== '/daemon/stop') {
       sendJson(response, 503, { error: 'Daemon is shutting down' });
       return;

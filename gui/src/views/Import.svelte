@@ -11,7 +11,7 @@
   ];
 
   let kind = $state('mnemonic');
-  let walletType = $state('navcoin-js-v1');
+  let walletType = $state('navcoin-core');
   let phrase = $state('');
   let keysText = $state('');
   let busy = $state(false);

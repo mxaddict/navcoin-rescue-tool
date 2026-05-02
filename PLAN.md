@@ -42,8 +42,7 @@ discovers recoverable funds, and sweeps to a new destination. CLI command is
 ## Pending Work
 
 1. **CI release pipeline** — cross-platform artifact builds on version tags.
-2. **Test coverage gaps** — see Testing Strategy below.
-3. **Code-signing decision** — macOS notarization and Windows Authenticode are
+2. **Code-signing decision** — macOS notarization and Windows Authenticode are
    currently unsigned. Plan a budget/decision before public release.
 
 ## CI And Releases
@@ -295,32 +294,6 @@ Notes:
 
 Automated tests use mocked wallet and network behavior only. Do not depend on
 public mainnet or live Electrum infrastructure in the automated test suite.
-
-### Coverage Gaps
-
-The current suite covers daemon lifecycle, source registry, sweep
-prepare/confirm, and wallet-manager state. The following high-priority cases
-are not yet covered:
-
-1. Empty wallet import — scan completes, no balances, sweep blocked.
-2. Restart persistence — state and sync progress restore across daemon stop /
-   start.
-3. Sweep amount + fee handling — final sent equals total minus fee, no
-   leftover spendable balance.
-4. Multi-source sweep correctness — funds consumed from all sources, none
-   omitted or double-counted.
-5. xNAV sweep correctness — xNAV leg claimed, balances match expected.
-6. Sync state reporting — pre-sync, mid-sync, post-sync indicators flip only
-   when caught up to head.
-7. Address reporting — every derived/imported address listed, balances
-   attached correctly, totals match per-address sums.
-8. Import validation — invalid mnemonic, unsupported type, malformed key,
-   no broken persisted state after failure.
-9. Source isolation — addresses identified per source, remove/sweep respect
-   source boundaries.
-10. Idempotent status — repeated calls do not mutate state.
-11. Staked or non-sweepable funds — reported distinctly, sweep handles
-    correctly or explains why not.
 
 ### Mock Design
 

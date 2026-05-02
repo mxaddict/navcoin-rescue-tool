@@ -560,6 +560,14 @@ Notes:
   - final sweep preview showing NAV and xNAV legs separately plus combined
     total
   - required final phrase confirmation
+- `Logs`
+  - tails `<app-data>/logs/daemon.log` directly from disk via the Tauri fs
+    APIs — no daemon endpoint required
+  - monospace scrollable area capped at a fixed line count (e.g. 5000)
+  - auto-scrolls to the latest line with a pause toggle
+  - copy-to-clipboard and save-to-file actions for support handoff
+  - resilient to log rotation and daemon restarts (re-open the file when the
+    inode changes)
 
 ### GUI Safety Rules
 

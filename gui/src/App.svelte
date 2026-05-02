@@ -19,8 +19,9 @@
   <aside class="sidebar">
     <div class="bar-inner">
       <div class="brand">
-        <img src={navioLogo} alt="Navio" class="logo" />
-        <span class="brand-suffix">Navcoin Rescue Tool</span>
+        <span class="logo-circle">
+          <img src={navioLogo} alt="Navcoin" class="logo" />
+        </span>
       </div>
       <nav>
         {#each VIEWS as v}
@@ -81,24 +82,21 @@
     flex-shrink: 0;
   }
 
-  .logo {
-    height: 24px;
-    /* Browser-computed width from viewBox can be flaky in WebKitGTK
-       when the SVG has no intrinsic size; the explicit ratio guarantees
-       the right edge of the logo isn't clipped against the chip's
-       right padding. */
-    width: calc(24px * (817 / 664));
-    display: block;
+  .logo-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
     background: var(--deep);
-    padding: 8px 10px;
-    border-radius: 8px;
-    box-sizing: content-box;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 
-  .brand-suffix {
-    font-size: 14px;
-    font-weight: 600;
-    color: white;
+  .logo {
+    width: 24px;
+    height: auto;
+    display: block;
   }
 
   nav {

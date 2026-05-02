@@ -149,21 +149,21 @@
       <dl class="rows">
         <div class="row">
           <dt>NAV</dt>
-          <dd class="amounts">
+          <dd class="totals-line">
             <span class="num cyan mono">{fmt(t.navConf)}</span>
             <span class="dim">(+{fmt(t.navPend)} pending)</span>
           </dd>
         </div>
         <div class="row">
           <dt>xNAV</dt>
-          <dd class="amounts">
+          <dd class="totals-line">
             <span class="num indigo mono">{fmt(t.xnavConf)}</span>
             <span class="dim">(+{fmt(t.xnavPend)} pending)</span>
           </dd>
         </div>
         <div class="row">
           <dt>Total</dt>
-          <dd class="amounts">
+          <dd class="totals-line">
             <span class="num strong mono">{fmt(t.total)}</span>
           </dd>
         </div>
@@ -261,13 +261,15 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Lay out balance lines as a fixed grid so the NAV and xNAV numbers
-     align vertically across Confirmed / Pending / Total rows. */
+  /* Lay out source balance lines as a fixed grid so the NAV and xNAV
+     numbers align vertically across Confirmed / Pending / Total rows.
+     Column widths sized to the longest realistic value (NavCoin total
+     supply ~106M = 12 chars). */
   .amounts {
     display: grid;
-    grid-template-columns: 140px 36px 14px 140px auto;
+    grid-template-columns: 130px auto auto 130px auto;
     align-items: baseline;
-    column-gap: 6px;
+    column-gap: 8px;
   }
 
   .amounts .num {
@@ -282,6 +284,21 @@
   .amounts .plus {
     color: var(--muted);
     text-align: center;
+  }
+
+  /* Totals card has only one number per row plus an optional dim
+     trailing note — flex with right-aligned number, free-flowing
+     trailing text, no wrapping mid-clause. */
+  .totals-line {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .totals-line .num {
+    min-width: 130px;
+    text-align: right;
   }
 
   .mono {

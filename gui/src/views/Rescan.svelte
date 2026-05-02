@@ -1,16 +1,38 @@
 <script>
+  import { onMount, onDestroy } from 'svelte';
   import { rescanDaemon, fetchDaemonStatus } from '../lib/daemon.js';
 
   let busy = $state(false);
   let error = $state(null);
   let started = $state(null);
   let sourceCount = $state(null);
+  let anyScanning = $state(false);
+  let timer;
 
-  $effect(() => {
-    fetchDaemonStatus()
-      .then((s) => (sourceCount = s?.sourceCount ?? 0))
-      .catch(() => (sourceCount = null));
+  // States that mean the daemon is actively scanning and a new rescan
+  // would be ignored / queued. Mirrors rescanAllSources skip rules in
+  // src/wallet-manager.js.
+  const SCANNING = new Set(['syncing', 'connecting', 'opening']);
+
+  async function refresh() {
+    try {
+      const s = await fetchDaemonStatus();
+      sourceCount = s?.sourceCount ?? 0;
+      anyScanning = (s?.sources ?? []).some((src) =>
+        SCANNING.has(src.syncStatus),
+      );
+    } catch {
+      sourceCount = null;
+      anyScanning = false;
+    }
+  }
+
+  onMount(() => {
+    refresh();
+    timer = setInterval(refresh, 2000);
   });
+
+  onDestroy(() => clearInterval(timer));
 
   async function submit() {
     busy = true;
@@ -19,6 +41,8 @@
     try {
       const res = await rescanDaemon();
       started = res?.started ?? [];
+      // Refresh immediately so the button reflects the new syncing state.
+      await refresh();
     } catch (err) {
       error = err.message ?? String(err);
     } finally {
@@ -30,8 +54,11 @@
 <header class="page-header">
   <h2>Rescan</h2>
   <div class="actions">
-    <button onclick={submit} disabled={busy || sourceCount === 0}>
-      {busy ? 'Starting…' : 'Start rescan'}
+    <button
+      onclick={submit}
+      disabled={busy || sourceCount === 0 || anyScanning}
+    >
+      {busy ? 'Starting…' : anyScanning ? 'Scanning…' : 'Start rescan'}
     </button>
   </div>
 </header>
@@ -49,6 +76,8 @@
 
 {#if sourceCount === 0}
   <p class="muted">No imported sources to rescan.</p>
+{:else if anyScanning}
+  <p class="muted">A scan is already in progress — see Status for progress.</p>
 {/if}
 
 {#if error}

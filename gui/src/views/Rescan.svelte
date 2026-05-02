@@ -86,17 +86,22 @@
 
 {#if started}
   {#if started.length === 0}
-    <p class="muted">
-      No sources were eligible — they may already be syncing or in error state.
-    </p>
+    <div class="callout warn">
+      <p>
+        No sources were eligible — they may already be syncing or in error
+        state.
+      </p>
+    </div>
   {:else}
-    <p class="ok">Rescan started for {started.length} source(s):</p>
-    <ul class="mono">
-      {#each started as id}
-        <li>{id}</li>
-      {/each}
-    </ul>
-    <p class="muted">Watch the Status view for per-source progress.</p>
+    <div class="callout success">
+      <p>Rescan started for {started.length} source(s):</p>
+      <ul class="mono">
+        {#each started as id}
+          <li>{id}</li>
+        {/each}
+      </ul>
+      <p>Watch the Status view for per-source progress.</p>
+    </div>
   {/if}
 {/if}
 

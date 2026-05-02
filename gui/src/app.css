@@ -99,6 +99,10 @@ button:disabled {
   border-left-color: var(--pink);
 }
 
+.callout.success {
+  border-left-color: var(--teal);
+}
+
 .callout p {
   margin: 0;
 }

@@ -481,7 +481,12 @@ export async function purgeAllWallets() {
  * Validate that all sources are fully synced and return a sweep preview.
  *
  * Returns:
- *   { totalNav, sources: [{ sourceId, nav }] }
+ *   {
+ *     totalNav,
+ *     totalXNav,
+ *     totalCombined,
+ *     sources: [{ sourceId, nav, xnav }],
+ *   }
  *
  * Throws if any source is not synced or has an error.
  */
@@ -507,25 +512,35 @@ export function prepareSweep() {
   }
 
   let totalNav = 0;
+  let totalXNav = 0;
   const sources = [];
 
   for (const state of states) {
     const nav = state.balance.nav.confirmed;
+    const xnav = state.balance.xnav?.confirmed ?? 0;
     totalNav += nav;
-    sources.push({ sourceId: state.sourceId, nav });
+    totalXNav += xnav;
+    sources.push({ sourceId: state.sourceId, nav, xnav });
   }
 
-  return { totalNav, sources };
+  return {
+    totalNav,
+    totalXNav,
+    totalCombined: totalNav + totalXNav,
+    sources,
+  };
 }
 
 /**
- * Execute the sweep: create and broadcast a NAV transaction from each source
- * wallet that has a non-zero confirmed balance.
+ * Execute the sweep: for each source with a non-zero confirmed balance,
+ * broadcast a NAV leg and/or an xNAV leg to the destination.
  *
  * Returns:
  *   { hashes: string[], totalSent: number, totalFee: number }
  *
- * Throws if any broadcast fails.
+ * Throws if any broadcast fails. Already-broadcast legs from earlier sources
+ * cannot be undone — partial-success state is the responsibility of callers
+ * to surface.
  */
 export async function executeSweep(destination) {
   const states = [...walletState.values()];
@@ -534,42 +549,72 @@ export async function executeSweep(destination) {
   let totalFee = 0;
 
   for (const state of states) {
+    if (!state.wallet) continue;
+
     const nav = state.balance.nav.confirmed;
+    const xnav = state.balance.xnav?.confirmed ?? 0;
 
-    if (nav <= 0 || !state.wallet) {
-      continue;
-    }
-
-    const tx = await state.wallet.NavCreateTransaction(
-      destination,
-      nav,
-      '',
-      STATIC_WALLET_PASSWORD,
-      true, // subtractFee — fee comes out of the amount
-    );
-
-    if (!tx || !tx.tx) {
-      throw new Error(
-        `Failed to create transaction for source ${state.sourceId}`,
+    if (nav > 0) {
+      const navResult = await broadcastLeg(
+        state,
+        'NAV',
+        () =>
+          state.wallet.NavCreateTransaction(
+            destination,
+            nav,
+            '',
+            STATIC_WALLET_PASSWORD,
+            true,
+          ),
+        nav,
       );
+      hashes.push(...navResult.hashes);
+      totalSent += navResult.sent;
+      totalFee += navResult.fee;
     }
 
-    const result = await state.wallet.SendTransaction(tx.tx);
-
-    if (result.error) {
-      throw new Error(
-        `Broadcast failed for source ${state.sourceId}: ${result.error}`,
+    if (xnav > 0) {
+      const xnavResult = await broadcastLeg(
+        state,
+        'xNAV',
+        () =>
+          state.wallet.xNavCreateTransaction(
+            destination,
+            xnav,
+            '',
+            STATIC_WALLET_PASSWORD,
+            true,
+          ),
+        xnav,
       );
-    }
-
-    const fee = tx.fee ?? 0;
-    totalFee += fee;
-    totalSent += nav - fee;
-
-    if (result.hashes) {
-      hashes.push(...result.hashes);
+      hashes.push(...xnavResult.hashes);
+      totalSent += xnavResult.sent;
+      totalFee += xnavResult.fee;
     }
   }
 
   return { hashes, totalSent, totalFee };
+}
+
+async function broadcastLeg(state, label, createTx, amount) {
+  const tx = await createTx();
+  if (!tx || !tx.tx) {
+    throw new Error(
+      `Failed to create ${label} transaction for source ${state.sourceId}`,
+    );
+  }
+
+  const result = await state.wallet.SendTransaction(tx.tx);
+  if (result.error) {
+    throw new Error(
+      `${label} broadcast failed for source ${state.sourceId}: ${result.error}`,
+    );
+  }
+
+  const fee = tx.fee ?? 0;
+  return {
+    hashes: result.hashes ?? [],
+    sent: amount - fee,
+    fee,
+  };
 }

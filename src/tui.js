@@ -595,11 +595,17 @@ async function cmdSweep(C, root, log, ask) {
   log(SEP);
   log(C.gradient('  Sweep Preview'));
   log(
-    `  Total NAV: ${C.cyan(navStr(preview.totalNav))} NAV  ${C.muted('(confirmed, before fee)')}`,
+    `  NAV leg : ${C.cyan(navStr(preview.totalNav))} NAV` +
+      `   xNAV leg: ${C.indigo(navStr(preview.totalXNav))} xNAV`,
+  );
+  log(
+    `  Combined: ${C.bold(navStr(preview.totalCombined))}  ${C.muted('(confirmed, before fee)')}`,
   );
   log('  Sources:');
   for (const src of preview.sources) {
-    log(`    ${C.muted(src.sourceId)}  ${C.cyan(navStr(src.nav))} NAV`);
+    log(
+      `    ${C.muted(src.sourceId)}  ${C.cyan(navStr(src.nav))} NAV  +  ${C.indigo(navStr(src.xnav))} xNAV`,
+    );
   }
   log(SEP);
 

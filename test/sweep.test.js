@@ -249,7 +249,7 @@ test('executeSweep throws when SendTransaction returns error', async () => {
 
     await assert.rejects(
       () => executeSweep('NDestinationAddr1'),
-      /Broadcast failed/,
+      /broadcast failed/i,
     );
   } finally {
     global.WebSocket = OriginalWebSocket;

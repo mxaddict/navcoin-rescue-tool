@@ -468,17 +468,21 @@ async function handleSweep(argv) {
   }
 
   const totalNav = (preview.totalNav / 1e8).toFixed(8);
+  const totalXNav = (preview.totalXNav / 1e8).toFixed(8);
+  const totalCombined = (preview.totalCombined / 1e8).toFixed(8);
 
   process.stdout.write(`\nSweep preview\n`);
   process.stdout.write(`  Destination : ${destination}\n`);
+  process.stdout.write(`  NAV leg     : ${totalNav} NAV\n`);
+  process.stdout.write(`  xNAV leg    : ${totalXNav} xNAV\n`);
   process.stdout.write(
-    `  Total NAV   : ${totalNav} NAV (confirmed, before fee)\n`,
+    `  Combined    : ${totalCombined} (confirmed, before fee)\n`,
   );
   process.stdout.write(`\nSources:\n`);
 
   for (const src of preview.sources) {
     process.stdout.write(
-      `  ${src.sourceId}  ${(src.nav / 1e8).toFixed(8)} NAV\n`,
+      `  ${src.sourceId}  ${(src.nav / 1e8).toFixed(8)} NAV  +  ${(src.xnav / 1e8).toFixed(8)} xNAV\n`,
     );
   }
 

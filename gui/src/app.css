@@ -1,0 +1,73 @@
+/* Navio brand palette — see PLAN.md "Brand Colors". */
+:root {
+  --bg: #111827;
+  --panel: #1f2937;
+  --deep: #121827;
+  --magenta: #ec1ec6;
+  --blue: #1d8ff9;
+  --fuchsia: #d946ef;
+  --cyan: #06b6d4;
+  --indigo: #6366f1;
+  --pink: #be185d;
+  --teal: #0f766e;
+  --muted: #9ca3af;
+  --text: #e5e7eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#app {
+  height: 100%;
+}
+
+button {
+  background: linear-gradient(135deg, var(--indigo), var(--fuchsia));
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  background: var(--deep);
+  color: var(--text);
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--magenta);
+  outline-offset: -1px;
+}

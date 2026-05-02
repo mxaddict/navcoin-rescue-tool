@@ -50,18 +50,23 @@
   </p>
 </div>
 
-<div class="form">
-  <label class="row col">
-    <span>Type <code>{REQUIRED}</code> to confirm</span>
+<section class="card">
+  <div class="field">
+    <label for="confirm">
+      Type <code>{REQUIRED}</code> to confirm
+    </label>
     <input
+      id="confirm"
       type="text"
       bind:value={confirmText}
       placeholder={REQUIRED}
       disabled={busy}
     />
-  </label>
-
-</div>
+    <p class="hint">
+      Match the phrase exactly to enable the purge button.
+    </p>
+  </div>
+</section>
 
 {#if error}
   <p class="error">Purge failed: {error}</p>
@@ -72,23 +77,35 @@
 {/if}
 
 <style>
-  .form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-top: 16px;
+  .card {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-top: 14px;
   }
 
-  .row.col {
+  .field {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
   }
 
-  .row > span {
+  .field label {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+
+  .field input {
+    width: 100%;
+  }
+
+  .hint {
+    margin: 0;
     color: var(--muted);
     font-size: 12px;
-    text-transform: uppercase;
   }
 
   code {

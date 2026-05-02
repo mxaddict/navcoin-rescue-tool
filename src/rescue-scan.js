@@ -172,24 +172,32 @@ async function hydrateAndStore(wallet, utxos, cfg) {
 
   wallet.emit('utxo_phase', 'hydrate');
 
+  // Map txid → hint height from listunspent so wallet.GetTx can pick the
+  // right merkle proof on first fetch.
+  const heightHint = new Map();
+  for (const u of utxos) {
+    if (!heightHint.has(u.tx_hash)) heightHint.set(u.tx_hash, u.height);
+  }
+
   const txids = [...new Set(utxos.map((u) => u.tx_hash))];
   const txCache = new Map();
   let fetched = 0;
 
   await mapConcurrent(txids, cfg.concurrency, async (txid) => {
-    const cached = await wallet.db.GetTx(txid);
-    if (cached) {
-      txCache.set(txid, cached.hex);
-    } else {
-      try {
-        const hex = await wallet.client.blockchain_transaction_get(txid, false);
-        txCache.set(txid, hex);
-        await wallet.db.AddTx({ txid, hex });
-      } catch (err) {
-        console.error(
-          `[rescue-scan] transaction_get failed for ${txid}: ${err.message}`,
-        );
-      }
+    try {
+      // wallet.GetTx fetches the tx hex AND fetches the merkle proof to set
+      // tx.height + tx.pos in the db. GetBalance flags UTXOs as pending when
+      // tx.height is undefined, so this height-write is required for the
+      // confirmed balance to populate.
+      const tx = await wallet.GetTx(
+        txid,
+        undefined,
+        heightHint.get(txid),
+        false,
+      );
+      if (tx?.hex) txCache.set(txid, tx.hex);
+    } catch (err) {
+      console.error(`[rescue-scan] GetTx failed for ${txid}: ${err.message}`);
     }
     fetched++;
     if (fetched % cfg.progressInterval === 0 || fetched === txids.length) {
@@ -288,20 +296,16 @@ async function scanXNav(wallet, cfg) {
     }
 
     let hex;
-    const cachedTx = await wallet.db.GetTx(txid);
-    if (cachedTx) {
-      hex = cachedTx.hex;
-    } else {
-      try {
-        hex = await wallet.client.blockchain_transaction_get(txid, false);
-        await wallet.db.AddTx({ txid, hex });
-      } catch (err) {
-        console.error(
-          `[rescue-scan] xnav tx fetch failed ${txid}: ${err.message}`,
-        );
-        continue;
-      }
+    try {
+      // GetTx persists the merkle-proof height; required for GetBalance to
+      // return a confirmed (vs pending) xNAV balance.
+      const tx = await wallet.GetTx(txid, undefined, height, false);
+      hex = tx?.hex;
+    } catch (err) {
+      console.error(`[rescue-scan] xnav GetTx failed ${txid}: ${err.message}`);
+      continue;
     }
+    if (!hex) continue;
 
     let decoded;
     try {

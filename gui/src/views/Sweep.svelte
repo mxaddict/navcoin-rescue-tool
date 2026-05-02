@@ -57,6 +57,12 @@
       error = err.message ?? String(err);
     } finally {
       busy = false;
+      // If we stayed on the verify step (error path), keep focus on
+      // the re-entry input so the user can retry without clicking.
+      if (step === 'verify') {
+        await tick();
+        verifyInput?.focus();
+      }
     }
   }
 
@@ -141,10 +147,11 @@
         bind:value={destinationVerify}
         bind:this={verifyInput}
         placeholder="paste again"
-        disabled={busy}
+        readonly={busy}
         spellcheck="false"
         onkeydown={(e) => {
-          if (e.key === 'Enter' && destinationVerify.trim()) goToReview();
+          if (e.key === 'Enter' && !busy && destinationVerify.trim())
+            goToReview();
         }}
       />
     </div>

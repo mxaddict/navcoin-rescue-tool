@@ -293,6 +293,108 @@ test('executeSweep throws when SendTransaction returns error', async () => {
   }
 });
 
+test('executeSweep aggregates legs from multiple sources without double-counting', async () => {
+  const root = await makeProjectTempDir('sweep-multi');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const sourceA = { id: 'src-multi-a', type: 'mnemonic', label: 'WalletA' };
+    const navWalletA = makeNavWallet({
+      _balance: {
+        nav: { confirmed: 3_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _txResult: { tx: 'hexA', fee: 5_000 },
+      _sendResult: { hashes: ['hashA'], error: null },
+    });
+    await openSourceWallet(sourceA, root, navWalletA);
+
+    const sourceB = { id: 'src-multi-b', type: 'mnemonic', label: 'WalletB' };
+    const navWalletB = makeNavWallet({
+      _balance: {
+        nav: { confirmed: 7_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _txResult: { tx: 'hexB', fee: 8_000 },
+      _sendResult: { hashes: ['hashB'], error: null },
+    });
+    await openSourceWallet(sourceB, root, navWalletB);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const result = await executeSweep('NDestinationAddr1');
+
+    // 1. Both hashes present, no duplicates.
+    assert.equal(result.hashes.length, 2);
+    const hashSet = new Set(result.hashes);
+    assert.ok(hashSet.has('hashA'), 'hashA missing from result');
+    assert.ok(hashSet.has('hashB'), 'hashB missing from result');
+
+    // 2. totalSent is the sum of both legs minus their respective fees.
+    assert.equal(result.totalSent, 3_0000_0000 - 5_000 + (7_0000_0000 - 8_000));
+
+    // 3. totalFee is the sum of both fees.
+    assert.equal(result.totalFee, 5_000 + 8_000);
+
+    // 4. Each wallet received its own balance — no cross-contamination.
+    const argsA = getSourceState(sourceA.id).wallet._lastTxArgs;
+    assert.equal(argsA.amount, 3_0000_0000);
+
+    const argsB = getSourceState(sourceB.id).wallet._lastTxArgs;
+    assert.equal(argsB.amount, 7_0000_0000);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('staked balance is reported but excluded from sweep totals', async () => {
+  const root = await makeProjectTempDir('sweep-staked');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: 'src-staked', type: 'mnemonic', label: 'Staked' };
+    // nav = 2 NAV spendable, staked = 5 NAV cold-staked (not directly sweepable).
+    const navWallet = makeNavWallet({
+      _balance: {
+        nav: { confirmed: 2_0000_0000, pending: 0 },
+        staked: { confirmed: 5_0000_0000, pending: 0 },
+      },
+      _txResult: { tx: 'stakedtx', fee: 10_000 },
+      _sendResult: { hashes: ['stakedhash1'], error: null },
+    });
+    await openSourceWallet(source, root, navWallet);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const preview = prepareSweep();
+    assert.equal(preview.totalNav, 2_0000_0000);
+    assert.equal(preview.totalCombined, 2_0000_0000);
+    assert.equal(preview.sources[0].nav, 2_0000_0000);
+
+    const result = await executeSweep('NDestinationAddr1');
+    assert.equal(result.totalSent, 2_0000_0000 - 10_000);
+    assert.equal(
+      getSourceState(source.id).wallet._lastTxArgs.amount,
+      2_0000_0000,
+    );
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('executeSweep passes full confirmed balance with subtractFee=true', async () => {
   const root = await makeProjectTempDir('sweep-subtractfee');
   const OriginalWebSocket = global.WebSocket;

@@ -331,6 +331,126 @@ test('daemon survives purge then re-import of same private key', async () => {
   }
 });
 
+test('daemon status is idempotent across repeated reads', async () => {
+  const root = await makeProjectTempDir('daemon-idempotent-status');
+  const projectRoot = getProjectRoot();
+
+  await bootstrapAppData(root);
+
+  const child = spawnDaemon(projectRoot, root);
+
+  try {
+    await waitForReady(child);
+
+    await importDaemonSource(
+      {
+        type: 'private-key',
+        keys: ['PCbhgKMp6ym9MgtMQ3XYxqnMrG3yFwAuQgTmZznbLxWExwxXH2pM'],
+      },
+      root,
+    );
+
+    const s1 = await getDaemonStatus(root);
+    const s2 = await getDaemonStatus(root);
+    const s3 = await getDaemonStatus(root);
+
+    // Source-level state must be stable across consecutive reads.
+    assert.deepEqual(s1.sources, s2.sources);
+    assert.deepEqual(s2.sources, s3.sources);
+
+    // On-disk state must not have been mutated by the reads (no duplication).
+    const diskState = await readStatus(root);
+    assert.equal(diskState.sources.sources.length, 1);
+
+    await stopDaemon(root);
+    await waitForExit(child);
+  } finally {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('daemon rejects invalid imports without persisting broken state', async () => {
+  const root = await makeProjectTempDir('daemon-invalid-import');
+  const projectRoot = getProjectRoot();
+
+  await bootstrapAppData(root);
+
+  const child = spawnDaemon(projectRoot, root);
+
+  try {
+    await waitForReady(child);
+
+    // Unsupported source type.
+    await assert.rejects(
+      importDaemonSource(
+        {
+          type: 'wallet-dat',
+          walletType: 'navcoin-js-v1',
+          phrase:
+            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+        },
+        root,
+      ),
+      /Unsupported source type/,
+    );
+    let state = await readStatus(root);
+    assert.equal(state.sources.sources.length, 0);
+
+    // Unsupported wallet type.
+    await assert.rejects(
+      importDaemonSource(
+        {
+          type: 'mnemonic',
+          walletType: 'navcoin-blah',
+          phrase:
+            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+        },
+        root,
+      ),
+      /Unsupported wallet type/,
+    );
+    state = await readStatus(root);
+    assert.equal(state.sources.sources.length, 0);
+
+    // Empty private key list.
+    await assert.rejects(
+      importDaemonSource(
+        {
+          type: 'private-key',
+          keys: [],
+        },
+        root,
+      ),
+      /At least one private key is required/,
+    );
+    state = await readStatus(root);
+    assert.equal(state.sources.sources.length, 0);
+
+    // Recovery: a valid import must still work after all failures.
+    const imported = await importDaemonSource(
+      {
+        type: 'mnemonic',
+        walletType: 'navcoin-js-v1',
+        phrase:
+          'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      },
+      root,
+    );
+    assert.equal(imported.source.status, 'ready');
+    const finalState = await readStatus(root);
+    assert.equal(finalState.sources.sources.length, 1);
+
+    await stopDaemon(root);
+    await waitForExit(child);
+  } finally {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test(
   'daemon imports known mnemonic and discovers NAV balance from stub',
   { timeout: 180_000 },

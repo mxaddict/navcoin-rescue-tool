@@ -96,6 +96,8 @@ async function main() {
 
     const navcoinJs = await import('navcoin-js');
     const wallet = navcoinJs.wallet ?? navcoinJs.default?.wallet;
+    const xNavBootstrap =
+      wallet.xNavBootstrap ?? navcoinJs.default?.wallet?.xNavBootstrap;
     await wallet.Init();
     console.error('[worker] initialized');
 
@@ -124,6 +126,7 @@ async function main() {
     await w.Load({
       useP2p: false,
       minPoolSize: getWalletInitialPoolSize(source),
+      bootstrap: xNavBootstrap,
     });
     console.error('[worker] addresses derived');
     await prunePrivateKeyPool(w, source);

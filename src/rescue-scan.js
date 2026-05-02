@@ -14,6 +14,7 @@ const DEFAULT_OPTS = {
   xNavPoolSize: 100,
   concurrency: 25,
   progressInterval: 25,
+  deriveProgressInterval: 100,
 };
 
 export async function rescueScan(wallet, opts = {}) {
@@ -48,6 +49,11 @@ export async function rescueScan(wallet, opts = {}) {
 }
 
 async function derivePool(wallet, password, cfg) {
+  const target = cfg.maxReceive + cfg.maxChange + cfg.xNavPoolSize;
+
+  wallet.emit('utxo_phase', 'derive');
+  wallet.emit('scripthash_progress', 0, target);
+
   const wasFilled = wallet.poolFilled;
   wallet.poolFilled = false;
   try {
@@ -55,22 +61,38 @@ async function derivePool(wallet, password, cfg) {
     while (receiveIdx < cfg.maxReceive) {
       await wallet.NavCreateAddress(password, RECEIVE_BRANCH);
       receiveIdx++;
-      if (receiveIdx % 200 === 0) await yieldEventLoop();
+      if (receiveIdx % cfg.deriveProgressInterval === 0) {
+        wallet.emit('scripthash_progress', receiveIdx, target);
+        await yieldEventLoop();
+      }
     }
+    wallet.emit('scripthash_progress', receiveIdx, target);
 
     let changeIdx = (await wallet.db.GetCounter('NavChange')) ?? 0;
     while (changeIdx < cfg.maxChange) {
       await wallet.NavCreateAddress(password, CHANGE_BRANCH);
       changeIdx++;
-      if (changeIdx % 200 === 0) await yieldEventLoop();
+      if (changeIdx % cfg.deriveProgressInterval === 0) {
+        wallet.emit('scripthash_progress', receiveIdx + changeIdx, target);
+        await yieldEventLoop();
+      }
     }
+    wallet.emit('scripthash_progress', receiveIdx + changeIdx, target);
 
     if (cfg.xNavPoolSize > 0) {
       await wallet.xNavFillKeyPool(password, cfg.xNavPoolSize);
+      wallet.emit(
+        'scripthash_progress',
+        receiveIdx + changeIdx + cfg.xNavPoolSize,
+        target,
+      );
     }
   } finally {
     wallet.poolFilled = wasFilled;
   }
+
+  // Refresh address counts in wallet-manager state.
+  wallet.emit('new_tx');
 }
 
 async function scanNavBranches(wallet, cfg) {
@@ -147,45 +169,61 @@ async function scanStaking(wallet, cfg) {
 async function hydrateAndStore(wallet, utxos, cfg) {
   if (utxos.length === 0) return;
 
+  wallet.emit('utxo_phase', 'hydrate');
+
   const txids = [...new Set(utxos.map((u) => u.tx_hash))];
   const txCache = new Map();
+  let fetched = 0;
 
   await mapConcurrent(txids, cfg.concurrency, async (txid) => {
     const cached = await wallet.db.GetTx(txid);
     if (cached) {
       txCache.set(txid, cached.hex);
-      return;
+    } else {
+      try {
+        const hex = await wallet.client.blockchain_transaction_get(txid, false);
+        txCache.set(txid, hex);
+        await wallet.db.AddTx({ txid, hex });
+      } catch (err) {
+        console.error(
+          `[rescue-scan] transaction_get failed for ${txid}: ${err.message}`,
+        );
+      }
     }
-    try {
-      const hex = await wallet.client.blockchain_transaction_get(txid, false);
-      txCache.set(txid, hex);
-      await wallet.db.AddTx({ txid, hex });
-    } catch (err) {
-      console.error(
-        `[rescue-scan] transaction_get failed for ${txid}: ${err.message}`,
-      );
+    fetched++;
+    if (fetched % cfg.progressInterval === 0 || fetched === txids.length) {
+      wallet.emit('scripthash_progress', fetched, txids.length);
     }
   });
 
+  let written = 0;
   for (const u of utxos) {
     const hex = txCache.get(u.tx_hash);
-    if (!hex) continue;
-    let decoded;
-    try {
-      decoded = BitcoreTransaction(hex);
-    } catch {
-      continue;
+    if (hex) {
+      let decoded;
+      try {
+        decoded = BitcoreTransaction(hex);
+      } catch {
+        decoded = null;
+      }
+      const out = decoded?.outputs[u.tx_pos];
+      if (out) {
+        try {
+          await wallet.AddOutput(`${u.tx_hash}:${u.tx_pos}`, out, u.height);
+        } catch (err) {
+          console.error(
+            `[rescue-scan] AddOutput failed for ${u.tx_hash}:${u.tx_pos}: ${err.message}`,
+          );
+        }
+      }
     }
-    const out = decoded.outputs[u.tx_pos];
-    if (!out) continue;
-    try {
-      await wallet.AddOutput(`${u.tx_hash}:${u.tx_pos}`, out, u.height);
-    } catch (err) {
-      console.error(
-        `[rescue-scan] AddOutput failed for ${u.tx_hash}:${u.tx_pos}: ${err.message}`,
-      );
+    written++;
+    if (written % cfg.progressInterval === 0 || written === utxos.length) {
+      wallet.emit('scripthash_progress', written, utxos.length);
     }
   }
+
+  wallet.emit('new_tx');
 }
 
 async function scanXNav(wallet, cfg) {
@@ -212,32 +250,57 @@ async function scanXNav(wallet, cfg) {
   const entries = Array.isArray(history) ? history : history?.history || [];
   if (entries.length === 0) return;
 
-  const txCache = new Map();
-  let fetched = 0;
+  // Phase 1: txKeys cache pre-filter. Bootstrap pre-populates this; misses
+  // fall back to blockchain_transaction_getKeys (smaller than full tx).
+  // Only owned txs get a full tx fetch in phase 2.
+  const owned = [];
+  let scanned = 0;
 
   await mapConcurrent(entries, cfg.concurrency, async (entry) => {
     const txid = entry.tx_hash;
-    const cached = await wallet.db.GetTx(txid);
-    if (cached) {
-      txCache.set(txid, { hex: cached.hex, height: entry.height });
+    const txKeys = await loadTxKeys(wallet, txid);
+
+    if (!txKeys) {
+      // getKeys unavailable on this server — fall back to raw tx scan.
+      owned.push({ txid, height: entry.height, fallback: true });
+    } else if (await hasOwnedXNavOutput(wallet, txKeys)) {
+      owned.push({ txid, height: entry.height });
+    }
+
+    scanned++;
+    if (scanned % cfg.progressInterval === 0 || scanned === entries.length) {
+      wallet.emit('scripthash_progress', scanned, entries.length);
+    }
+  });
+
+  if (owned.length === 0) return;
+
+  // Phase 2: fetch raw tx for owned candidates and AddOutput.
+  wallet.emit('utxo_phase', 'xnav-claim');
+
+  let claimed = 0;
+  for (const { txid, height } of owned) {
+    claimed++;
+    if (claimed % cfg.progressInterval === 0 || claimed === owned.length) {
+      wallet.emit('scripthash_progress', claimed, owned.length);
+    }
+
+    let hex;
+    const cachedTx = await wallet.db.GetTx(txid);
+    if (cachedTx) {
+      hex = cachedTx.hex;
     } else {
       try {
-        const hex = await wallet.client.blockchain_transaction_get(txid, false);
-        txCache.set(txid, { hex, height: entry.height });
+        hex = await wallet.client.blockchain_transaction_get(txid, false);
         await wallet.db.AddTx({ txid, hex });
       } catch (err) {
         console.error(
           `[rescue-scan] xnav tx fetch failed ${txid}: ${err.message}`,
         );
+        continue;
       }
     }
-    fetched++;
-    if (fetched % cfg.progressInterval === 0 || fetched === entries.length) {
-      wallet.emit('scripthash_progress', fetched, entries.length);
-    }
-  });
 
-  for (const [txid, { hex, height }] of txCache) {
     let decoded;
     try {
       decoded = BitcoreTransaction(hex);
@@ -285,6 +348,53 @@ async function scanXNav(wallet, cfg) {
       }
     }
   }
+
+  wallet.emit('new_tx');
+}
+
+async function loadTxKeys(wallet, txid) {
+  try {
+    const cached = await wallet.db.GetTxKeys(txid);
+    if (cached) return cached;
+  } catch {
+    // Cache miss — fall through to remote.
+  }
+
+  try {
+    const remote = await wallet.client.blockchain_transaction_getKeys(txid);
+    if (!remote) return null;
+    remote.txidkeys = txid;
+    remote.hash = txid;
+    try {
+      await wallet.db.AddTxKeys(remote);
+    } catch {
+      // Cache write failure is non-fatal.
+    }
+    return remote;
+  } catch (err) {
+    console.error(
+      `[rescue-scan] transaction_getKeys failed for ${txid}: ${err.message}`,
+    );
+    return null;
+  }
+}
+
+async function hasOwnedXNavOutput(wallet, txKeys) {
+  for (const v of txKeys.vout || []) {
+    if (!v.outputKey || !v.spendingKey) continue;
+    try {
+      const hid = blsct.GetHashId(
+        { ok: v.outputKey, sk: v.spendingKey },
+        wallet.mvk,
+      );
+      if (!hid) continue;
+      const hashId = Buffer.from(hid).toString('hex');
+      if (await wallet.db.HaveKey(hashId)) return true;
+    } catch {
+      // Skip malformed entry.
+    }
+  }
+  return false;
 }
 
 async function mapConcurrent(items, concurrency, fn) {

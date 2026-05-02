@@ -184,7 +184,7 @@ Layout:
 
 Near-term:
 
-1. Electron GUI client (`ntr-gui`)
+1. Tauri GUI client (`ntr-gui`)
 2. Remove the temporary `navcoin-js` postinstall patch after an upstream npm
    release includes the reconnect fix
 

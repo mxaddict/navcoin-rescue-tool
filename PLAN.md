@@ -124,7 +124,7 @@ CLI invocation should be `ntr` for short, frequent use.
   - GitHub Actions CI workflow for format and test checks
   - real `navcoin-js` wallet DB creation for imported sources
 - Next slice:
-  - Electron GUI (`ntr-gui`)
+  - Tauri GUI (`ntr-gui`)
 - Deferred to later slices:
   - CI release pipeline (cross-platform artifacts on version tags)
 
@@ -163,7 +163,6 @@ Example:
 - Which exact legacy wallet types do we need to support first?
 - Do we need read-only balance inspection before requiring any spending
   password?
-- Do we sweep only NAV first, or also support xNAV later?
 - Should daemon mode track one wallet per process or all imported wallets in one
   process?
 - Should daemon state be controlled with pid files, a local socket, or a small
@@ -406,7 +405,7 @@ Notes:
 
 ## Brand Colors
 
-All visual surfaces — TUI, Electron GUI, and any future web UI — must use the
+All visual surfaces — TUI, Tauri GUI, and any future web UI — must use the
 Navio brand palette sourced from nav.io.
 
 ### Core Palette
@@ -457,7 +456,7 @@ Used for per-feature highlights, source type badges, or status indicators:
 - Muted / inactive text: `gray-400` (`#9ca3af`)
 - TUI must approximate these with the nearest terminal-safe equivalents using
   chalk and blessed color support
-- Electron GUI must use exact hex values via CSS
+- Tauri GUI must use exact hex values via CSS
 
 ## GUI Shape
 
@@ -468,7 +467,8 @@ ntr-gui
 Notes:
 
 - `ntr-gui` should be a thin client over the same daemon/API used by `ntr`.
-- Build `ntr-gui` with Electron.
+- Build `ntr-gui` with Tauri (Rust core + system webview frontend) for small
+  archive size and reduced attack surface compared to Electron.
 - `ntr-gui` should auto-start the daemon if it is not already running, then
   connect to it.
 - Plan packaging and launch behavior for Linux, macOS, and Windows.
@@ -488,7 +488,7 @@ Notes:
 - Target architectures for release artifacts:
   - `x86_64`
   - `arm64`
-- Package `ntr-gui` with Electron build tooling for those targets.
+- Package `ntr-gui` with Tauri build tooling (`tauri build`) for those targets.
 - Release outputs should be simple archives, not installers.
 - Release archives should be standalone and contain everything needed to run the
   app on the target platform.
@@ -557,7 +557,8 @@ Notes:
 - `Sweep`
   - destination entry
   - exact destination re-entry
-  - final sweep preview
+  - final sweep preview showing NAV and xNAV legs separately plus combined
+    total
   - required final phrase confirmation
 
 ### GUI Safety Rules
@@ -568,21 +569,25 @@ Notes:
   - explicit `SEND MY COINS` confirmation
 - The GUI should disable final sweep submission until all confirmations are
   satisfied.
+- The sweep must claim both NAV and xNAV outputs in the same flow. The GUI
+  must clearly label which legs are being broadcast and surface per-source
+  results so partial failures are visible.
 
 ## Sweep Confirmation
 
 - Step 1: user runs `ntr sweep <address>`.
 - Sweep should only be allowed when all imported sources are fully synced to the
   current known network head.
-- Sweep behavior should be simple: attempt to send the full movable balance.
+- Sweep behavior should be simple: attempt to send the full movable balance,
+  including both transparent NAV and private xNAV outputs.
 - The only balance left behind should be dust or funds that cannot be moved
   because they are insufficient to cover fees.
 - Step 2: tool requires the user to enter the exact same destination address on
   standard input.
 - Step 3: tool shows final sweep overview:
   - destination address
-  - total coins to be sent
-  - fee
+  - NAV leg total, xNAV leg total, combined total to be sent
+  - fee per leg
   - final net amount
 - Step 4: tool requires the user to type `SEND MY COINS` exactly before
   broadcasting.

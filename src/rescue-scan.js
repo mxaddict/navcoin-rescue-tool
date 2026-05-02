@@ -349,6 +349,25 @@ async function scanXNav(wallet, cfg, outpointsSeen) {
   const entries = Array.isArray(history) ? history : history?.history || [];
   if (entries.length === 0) return;
 
+  // Build set of currently-unspent xNAV outpoints from the anchor scripthash.
+  // Without this, scanXNav would re-add owned outputs that have since been
+  // spent (e.g., by our own sweep tx) because it walks history not utxos.
+  // listunspent on anchor returns all OP_TRUE outputs network-wide; we only
+  // care about the subset we own, but the set lets us cheaply filter.
+  let anchorUnspent = null;
+  try {
+    const list = await wallet.client.blockchain_scripthash_listunspent(anchor);
+    anchorUnspent = new Set(
+      (list ?? []).map((u) => `${u.tx_hash}:${u.tx_pos}`),
+    );
+  } catch (err) {
+    console.error(
+      `[rescue-scan] xnav anchor listunspent failed: ${err.message}`,
+    );
+    // Fall through with anchorUnspent = null; we'll add all owned outputs
+    // and rely on the next scan after a confirmed listunspent to clean up.
+  }
+
   wallet.emit('utxo_phase', 'xnav');
   wallet.emit('scripthash_progress', 0, entries.length);
 
@@ -436,6 +455,10 @@ async function scanXNav(wallet, cfg, outpointsSeen) {
       }
 
       const outpoint = `${txid}:${i}`;
+      // Skip outputs already spent on chain. Without this filter, owned
+      // xNAV outputs spent by a later tx (e.g., our own sweep) get re-added
+      // as unspent every rescan and double-count the balance.
+      if (anchorUnspent && !anchorUnspent.has(outpoint)) continue;
       outpointsSeen.add(outpoint);
       try {
         await wallet.AddOutput(outpoint, out, height);

@@ -63,16 +63,18 @@
   </div>
 </header>
 
-<p class="muted">
-  Wipes UTXO + transaction state for every imported source and rebuilds it
-  from the chain. Keys, mnemonic, and master wallet data are preserved.
-</p>
-
-<p class="warn">
-  Useful after a sweep, or when reconciliation drifts from
-  <code>navcoin-cli</code>. Each rescan re-runs the full receive / change /
-  staking / xNAV scan — expect minutes per source.
-</p>
+<div class="callout">
+  <p>
+    Rescan wipes UTXO + transaction state for every imported source and
+    rebuilds it from the chain. Keys, mnemonic, and master wallet data are
+    preserved.
+  </p>
+  <p>
+    Useful after a sweep, or when reconciliation drifts from
+    <code>navcoin-cli</code>. Each rescan re-runs the full receive / change /
+    staking / xNAV scan — expect minutes per source.
+  </p>
+</div>
 
 {#if sourceCount === 0}
   <p class="muted">No imported sources to rescan.</p>
@@ -103,13 +105,6 @@
 <style>
   .muted {
     color: var(--muted);
-  }
-
-  .warn {
-    background: var(--panel);
-    border-left: 3px solid var(--warn);
-    padding: 12px;
-    border-radius: 6px;
   }
 
   code {

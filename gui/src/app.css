@@ -80,6 +80,33 @@ button:disabled {
   min-width: 180px;
 }
 
+/* Info / warn / error callouts. Same shape, different border + accent
+   color. Use .info for neutral context, .warn for caution, .error for
+   destructive or failure paths. */
+.callout {
+  background: var(--panel);
+  padding: 12px 14px;
+  border-radius: 6px;
+  border-left: 3px solid var(--cyan);
+}
+
+.callout.warn {
+  border-left-color: var(--warn);
+}
+
+.callout.error {
+  border-left-color: var(--pink);
+}
+
+.callout p {
+  margin: 0;
+}
+
+.callout p + p {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
 input,
 select,
 textarea {

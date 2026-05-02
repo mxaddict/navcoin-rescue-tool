@@ -22,9 +22,13 @@
 </div>
 
 <style>
+  /* Wide: sidebar on the left. Narrow: bar across the top.
+     Threshold tuned so a single nav button + brand fits the bar
+     without wrap on most laptop widths. */
   .layout {
     display: grid;
     grid-template-columns: 220px 1fr;
+    grid-template-rows: 1fr;
     height: 100%;
   }
 
@@ -67,5 +71,37 @@
   .main {
     padding: 20px;
     overflow: auto;
+  }
+
+  @media (max-width: 720px) {
+    .layout {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+    }
+
+    .sidebar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 14px;
+      border-right: 0;
+      border-bottom: 1px solid #1f2937;
+    }
+
+    .brand {
+      margin: 0;
+      flex-shrink: 0;
+    }
+
+    nav {
+      flex-direction: row;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .nav-btn {
+      text-align: center;
+      padding: 6px 12px;
+    }
   }
 </style>

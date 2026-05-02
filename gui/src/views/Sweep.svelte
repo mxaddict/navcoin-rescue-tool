@@ -70,16 +70,6 @@
     }
   }
 
-  function reset() {
-    step = 'entry';
-    destination = '';
-    destinationVerify = '';
-    phrase = '';
-    preview = null;
-    result = null;
-    error = null;
-  }
-
   function back() {
     error = null;
     if (step === 'verify') step = 'entry';
@@ -231,10 +221,6 @@
       </ul>
     </section>
   {/if}
-
-  <div class="form-actions">
-    <button onclick={reset}>Sweep another</button>
-  </div>
 {/if}
 
 <style>

@@ -10,6 +10,7 @@ import {
   closeAllWallets,
   prepareSweep,
   executeSweep,
+  getSourceState,
   resetElectrumNodeSelectionCache,
 } from '../src/wallet-manager.js';
 import { makeProjectTempDir } from './test-helpers.js';
@@ -284,6 +285,47 @@ test('executeSweep throws when SendTransaction returns error', async () => {
       () => executeSweep('NDestinationAddr1'),
       /broadcast failed/i,
     );
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('executeSweep passes full confirmed balance with subtractFee=true', async () => {
+  const root = await makeProjectTempDir('sweep-subtractfee');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: 'src-subtractfee', type: 'mnemonic', label: 'Test' };
+    const navWallet = makeNavWallet({
+      _balance: {
+        nav: { confirmed: 10_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _txResult: { tx: 'fakehex', fee: 25_000 },
+      _sendResult: { hashes: ['tx1'], error: null },
+    });
+    await openSourceWallet(source, root, navWallet);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const result = await executeSweep('NDestinationAddr1');
+
+    // Inspect the args passed to NavCreateTransaction.
+    const lastTxArgs = getSourceState(source.id).wallet._lastTxArgs;
+    assert.equal(lastTxArgs.destination, 'NDestinationAddr1');
+    assert.equal(lastTxArgs.amount, 10_0000_0000);
+    assert.equal(lastTxArgs.subtractFee, true);
+
+    // Verify totals: fee subtracted from the full balance, nothing left over.
+    assert.equal(result.totalSent, 10_0000_0000 - 25_000);
+    assert.equal(result.totalFee, 25_000);
+    assert.equal(result.hashes.length, 1);
   } finally {
     global.WebSocket = OriginalWebSocket;
     await closeAllWallets();

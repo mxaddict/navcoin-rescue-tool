@@ -231,6 +231,39 @@ test('executeSweep skips zero-balance sources', async () => {
   }
 });
 
+test('prepareSweep returns zero-total preview for empty synced wallet', async () => {
+  const root = await makeProjectTempDir('sweep-zero-preview');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: 'src-zero-preview', type: 'mnemonic', label: 'Empty' };
+    const navWallet = makeNavWallet({
+      _balance: {
+        nav: { confirmed: 0, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+    });
+    await openSourceWallet(source, root, navWallet);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const preview = prepareSweep();
+    assert.equal(preview.sources.length, 1);
+    assert.equal(preview.sources[0].sourceId, source.id);
+    assert.equal(preview.totalNav, 0);
+    assert.equal(preview.totalXNav, 0);
+    assert.equal(preview.totalCombined, 0);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('executeSweep throws when SendTransaction returns error', async () => {
   const root = await makeProjectTempDir('sweep-err');
   const OriginalWebSocket = global.WebSocket;

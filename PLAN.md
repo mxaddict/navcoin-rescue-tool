@@ -42,14 +42,29 @@ discovers recoverable funds, and sweeps to a new destination. CLI command is
 ## Pending Work
 
 1. **Tauri GUI** (`ntr-gui`) — primary next slice.
-2. **xNAV in sweep flow** — `executeSweep` currently sweeps NAV only; extend to
-   claim xNAV outputs in the same flow.
+2. **Atomic / per-source-result sweep** — `executeSweep` is non-atomic across
+   sources and across NAV/xNAV legs. A failed broadcast mid-flight leaves
+   earlier broadcasts already on chain. Surface per-source results so partial
+   success is visible; consider an "all-or-nothing" build-then-broadcast.
 3. **CI release pipeline** — cross-platform artifact builds on version tags.
 4. **Local-storage warning on import** — show platform path + static password +
    sensitivity disclaimer after every successful import (not yet wired up).
 5. **Test coverage gaps** — see Testing Strategy below.
 6. **Code-signing decision** — macOS notarization and Windows Authenticode are
    currently unsigned. Plan a budget/decision before public release.
+
+## Recently Completed
+
+- Replaced the patched `navcoin-js` SyncUtxos with `src/rescue-scan.js`
+  (adaptive gap-walker + inline hydrate, named per-phase progress, stale-UTXO
+  reap pass).
+- xNAV recovery wired in (txKeys cache + bootstrap, OP_TRUE anchor scan).
+- Sweep claims both NAV and xNAV in one flow.
+- Manual `rescan` command (CLI + TUI + daemon `POST /rescan`) that wipes
+  wallet UTXO state via `ZapWalletTxes` and rebuilds.
+- Persisted `lastSyncedAt` per source so daemon restart skips the auto-rescan.
+- Status display shows confirmed and pending separately, with totals.
+- WebSocket frame-size patch (64MB) for large electrum responses.
 
 ## CI And Releases
 
@@ -247,6 +262,10 @@ Notes:
   - source list
   - remove preview
   - confirmation action
+- `Rescan`
+  - trigger the daemon `/rescan` endpoint (wipes wallet UTXO state and
+    rebuilds from chain — keys preserved)
+  - per-source progress feedback while the scan runs
 - `Sweep`
   - destination entry
   - exact destination re-entry

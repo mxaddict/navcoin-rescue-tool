@@ -8,7 +8,9 @@ balances, and sweeps funds to a new destination address. The CLI command is
 
 ## Status
 
-This repository is still early-stage and is not ready for real funds yet.
+The CLI/TUI/daemon path is functional and has reconciled real wallet
+balances against `navcoin-cli` to the satoshi. Treat as beta — verify on a
+test wallet before sweeping anything irreplaceable.
 
 What works now:
 
@@ -16,24 +18,33 @@ What works now:
 - daemon lifecycle: `ntr start`, `ntr status`, `ntr stop`
 - mnemonic and private-key import backed by `navcoin-js`
 - source removal and duplicate-source rejection
-- live Electrum sync with per-source address and balance reporting
-- compact status output via `status` and full per-source address dumps via `show`
-- sweep to a destination address with two-step confirmation (`ntr sweep <address>`)
-- purge of imported wallet data via `ntr purge`
+- live Electrum sync with per-source phase progress and balance updates
+- adaptive BIP44 gap-walk discovery (no fixed address cap)
+- xNAV recovery via OP_TRUE anchor + bundled `xNavBootstrap` cache
+- staking-partner discovery for cold-stake outputs
+- `status` (per-source confirmed/pending/total + aggregate)
+- `show` (addresses with non-zero balance, sorted)
+- `sweep` claiming both NAV and xNAV in one flow with two-step confirmation
+- `rescan` to wipe wallet state and re-discover from chain
+- `purge` to delete all imported wallet data
+- daemon skips re-scan on restart for sources already marked synced
 
 What does not work yet:
 
-- no GUI yet
+- no GUI yet (Tauri client planned)
+- non-atomic sweep — partial broadcast failure leaves earlier legs on chain
 
 ## Safety Warning
 
-- Do not use this tool with real recovery material or real coins yet.
+- Verify against a test wallet before sweeping anything irreplaceable.
 - Importing a source creates local wallet DB files that should be treated as
   sensitive state.
 - The recovery workflow is intended for one-time rescue and sweep, not daily
   wallet use.
 - All imported wallet state is encrypted with the static password
   `ObsidianSweepKey`.
+- The sweep broadcast loop is **not atomic**: if a later broadcast fails,
+  earlier ones are already on chain.
 
 ## After Sweeping — Purge Your Wallet Data
 
@@ -71,20 +82,21 @@ ntr
 
 The TUI auto-starts the daemon if it is not already running. Commands:
 
-| Command              | Description                                                |
-| -------------------- | ---------------------------------------------------------- |
-| `status`             | Show daemon and per-source sync, address, and balance info |
-| `show`               | Show all derived/imported addresses for each source        |
-| `import mnemonic`    | Import a mnemonic source interactively                     |
-| `import private-key` | Import one or more WIF private keys interactively          |
-| `remove`             | Remove an imported source                                  |
-| `sweep`              | Sweep all confirmed NAV to a destination address           |
-| `purge`              | Delete all imported wallet data from disk                  |
-| `stop`               | Stop the daemon and exit the TUI                           |
-| `help`               | Show command reference                                     |
-| `quit`               | Exit the TUI (daemon keeps running)                        |
+| Command  | Description                                                  |
+| -------- | ------------------------------------------------------------ |
+| `status` | Daemon and per-source confirmed/pending balance + sync phase |
+| `show`   | Addresses with non-zero balance, sorted                      |
+| `import` | Interactive import (chooses mnemonic / private-key)          |
+| `remove` | Remove an imported source                                    |
+| `rescan` | Wipe wallet state and re-scan all sources from chain         |
+| `sweep`  | Sweep NAV + xNAV to a destination address                    |
+| `purge`  | Delete all imported wallet data from disk                    |
+| `stop`   | Stop the daemon and exit the TUI                             |
+| `help`   | Show command reference                                       |
+| `quit`   | Exit the TUI (daemon keeps running)                          |
 
 - Tab auto-completes commands.
+- ↑/↓ recall previous commands; PgUp/PgDn scroll output.
 - Press Ctrl+C twice to quit.
 - Adapts to dark and light terminal backgrounds automatically.
 
@@ -102,10 +114,17 @@ Show daemon and source status:
 ntr status
 ```
 
-Show all derived or imported addresses for each source:
+Show addresses with non-zero balance per source:
 
 ```bash
 ntr show
+```
+
+Re-scan all sources (wipes wallet state and rebuilds from chain — keeps
+mnemonic/keys):
+
+```bash
+ntr rescan
 ```
 
 Stop the daemon:
@@ -142,17 +161,25 @@ Remove an imported source:
 ntr remove <source-id>
 ```
 
-Sweep all confirmed NAV to a destination address:
+Sweep both NAV and xNAV to a destination address:
 
 ```bash
 ntr sweep <destination-address>
 ```
+
+Per source, the tool broadcasts up to two legs: a NAV leg via
+`NavCreateTransaction` (when nav.confirmed > 0) and an xNAV leg via
+`xNavCreateTransaction` (when xnav.confirmed > 0). Fees are subtracted
+from the swept amount.
 
 The sweep flow requires:
 
 1. All sources to be fully synced
 2. Re-entry of the exact destination address
 3. Typing `SEND MY COINS` to confirm broadcast
+
+Note: the broadcast loop is not atomic across sources or legs. If a later
+broadcast fails, earlier ones are already on chain and cannot be undone.
 
 Purge all imported wallet data after sweeping:
 
@@ -184,11 +211,11 @@ Layout:
 
 Near-term:
 
-1. Tauri GUI client (`ntr-gui`)
-2. Remove the temporary `navcoin-js` postinstall patch after an upstream npm
-   release includes the reconnect fix
+1. Tauri GUI client (`ntr-gui`) — see `PLAN.md`
+2. Atomic / per-source-result sweep so partial broadcast failure is visible
 
 Longer-term:
 
-1. cross-platform release artifacts
-2. broader wallet-type fixture coverage
+1. CI release pipeline + cross-platform archives (Linux/macOS/Windows × x86_64/arm64)
+2. Broader wallet-type fixture coverage in the test suite
+3. Code-signing for macOS/Windows release artifacts

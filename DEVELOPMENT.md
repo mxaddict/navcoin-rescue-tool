@@ -33,13 +33,15 @@ npm run format:check
 
 - Daemon listens on `127.0.0.1:46117`
 - Daemon owns all local state and persistence
-- CLI, TUI, and planned GUI all share the same daemon backend via HTTP
+- CLI, TUI, and planned Tauri GUI all share the same daemon backend via HTTP
 
 Daemon API:
 
 - `GET /status`
 - `POST /import`
 - `POST /remove`
+- `POST /purge`
+- `POST /rescan`
 - `POST /sweep/prepare`
 - `POST /sweep/confirm`
 - `POST /daemon/stop`
@@ -48,13 +50,15 @@ Source layout:
 
 ```text
 src/
-  constants.js          shared constants (port, password, wallet types)
+  constants.js          shared constants (port, password, wallet types, phase labels)
   app-data.js           platform paths, bootstrap, auth cookie, daemon state
   daemon.js             HTTP daemon entrypoint
   daemon-client.js      typed client wrappers for the daemon API
-  navcoin-js-adapter.js isolated navcoin-js boundary (wallet DB creation/deletion)
-  wallet-manager.js     in-memory per-source sync state, sweep logic
+  navcoin-js-adapter.js isolated navcoin-js boundary; patches WS frame size
+  wallet-manager.js     in-memory per-source sync state, sweep logic, rescan
+  rescue-scan.js        adaptive gap-walk + inline hydrate scan engine
   source-registry.js    source CRUD, fingerprinting, dedup, sources.json
+  wallet-worker.js      child-process wallet creation (avoids blocking daemon)
   cli.js                ntr CLI entrypoint and command handlers
   tui.js                blessed TUI launched by ntr with no arguments
   gui.js                ntr-gui placeholder
@@ -92,6 +96,38 @@ ntr
   if unsupported. Uses WCAG relative luminance to decide dark vs light.
 - `blessed` screen must set `terminal: 'xterm-256color'` to suppress terminfo
   parse errors on Alacritty and similar terminals.
+
+### Rescue scan (`rescue-scan.js`)
+
+- Replaces upstream `wallet.Sync` / `SyncUtxos` for the recovery-only
+  workflow. Drops history sync; only finds spendable UTXOs.
+- Phases (in order, each with named progress):
+  - xNAV pool fill
+  - `receive` — adaptive BIP44 gap walk + inline hydrate via `wallet.GetTx`
+  - `change` — same walker on the change branch
+  - `stake-discover` — explicit `blockchain_staking_getKeys` per derived addr
+    so cold-stake partners beyond the default NavCash pool are found
+  - `stake` — listunspent over (partner × addr) cold-stake scripthashes
+  - `xnav-history` then `xnav` — anchor `getHistory` + txKeys-cache filter
+  - `xnav-claim` — full tx fetch + blsct recovery for owned candidates
+  - reap pass — marks any UTXO in db not seen this scan as spent so stake
+    inputs consumed since the last scan stop counting toward confirmed
+- Uses `wallet.GetTx(txid, undefined, height, false)` for all parent-tx
+  fetches so `tx.height` and `tx.pos` are persisted via `getMerkle`.
+  Without it, GetBalance categorises every UTXO as pending.
+- `lastSyncedAt` per source persisted to `sources.json` via
+  `markSourceSynced`. On daemon restart, sources with that field skip the
+  auto-rescan and rely on the user-triggered `rescan` command instead.
+
+### WebSocket frame size patch
+
+- `navcoin-js-adapter.js` patches `websocket` package's `w3cwebsocket`
+  before the dynamic `import('navcoin-js')` so electrum-client-js
+  captures the patched constructor when it does
+  `require('websocket').w3cwebsocket`.
+- Default 64KB / 1MB limits cause connection close (code 1009) on big
+  frames: consensus subscribe, dao subscribe, OP_TRUE anchor history.
+  Bumped to 64MB.
 
 ## Contributing
 

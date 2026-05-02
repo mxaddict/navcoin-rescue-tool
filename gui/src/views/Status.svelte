@@ -113,21 +113,29 @@
 
           <div class="row">
             <dt>Confirmed</dt>
-            <dd>
-              <span class="cyan mono">{fmt(navConf)}</span> NAV &nbsp;+&nbsp;
-              <span class="indigo mono">{fmt(xnavConf)}</span> xNAV
+            <dd class="amounts">
+              <span class="num cyan mono">{fmt(navConf)}</span>
+              <span class="unit">NAV</span>
+              <span class="plus">+</span>
+              <span class="num indigo mono">{fmt(xnavConf)}</span>
+              <span class="unit">xNAV</span>
             </dd>
           </div>
           <div class="row">
             <dt>Pending</dt>
-            <dd>
-              <span class="cyan mono">{fmt(navPend)}</span> NAV &nbsp;+&nbsp;
-              <span class="indigo mono">{fmt(xnavPend)}</span> xNAV
+            <dd class="amounts">
+              <span class="num cyan mono">{fmt(navPend)}</span>
+              <span class="unit">NAV</span>
+              <span class="plus">+</span>
+              <span class="num indigo mono">{fmt(xnavPend)}</span>
+              <span class="unit">xNAV</span>
             </dd>
           </div>
           <div class="row">
             <dt>Total</dt>
-            <dd class="strong mono">{fmt(total)}</dd>
+            <dd class="amounts">
+              <span class="num strong mono">{fmt(total)}</span>
+            </dd>
           </div>
         </dl>
       </article>
@@ -141,21 +149,23 @@
       <dl class="rows">
         <div class="row">
           <dt>NAV</dt>
-          <dd>
-            <span class="cyan mono">{fmt(t.navConf)}</span>
+          <dd class="amounts">
+            <span class="num cyan mono">{fmt(t.navConf)}</span>
             <span class="dim">(+{fmt(t.navPend)} pending)</span>
           </dd>
         </div>
         <div class="row">
           <dt>xNAV</dt>
-          <dd>
-            <span class="indigo mono">{fmt(t.xnavConf)}</span>
+          <dd class="amounts">
+            <span class="num indigo mono">{fmt(t.xnavConf)}</span>
             <span class="dim">(+{fmt(t.xnavPend)} pending)</span>
           </dd>
         </div>
         <div class="row">
           <dt>Total</dt>
-          <dd class="strong mono">{fmt(t.total)}</dd>
+          <dd class="amounts">
+            <span class="num strong mono">{fmt(t.total)}</span>
+          </dd>
         </div>
       </dl>
     </article>
@@ -249,6 +259,29 @@
     margin: 0;
     color: var(--text);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Lay out balance lines as a fixed grid so the NAV and xNAV numbers
+     align vertically across Confirmed / Pending / Total rows. */
+  .amounts {
+    display: grid;
+    grid-template-columns: 140px 36px 14px 140px auto;
+    align-items: baseline;
+    column-gap: 6px;
+  }
+
+  .amounts .num {
+    text-align: right;
+  }
+
+  .amounts .unit {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .amounts .plus {
+    color: var(--muted);
+    text-align: center;
   }
 
   .mono {

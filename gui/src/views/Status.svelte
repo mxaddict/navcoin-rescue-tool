@@ -47,6 +47,7 @@
 {:else if !status?.sources?.length}
   <p class="muted">No imported sources yet.</p>
 {:else}
+  <div class="table-wrap">
   <table>
     <thead>
       <tr>
@@ -69,6 +70,7 @@
       {/each}
     </tbody>
   </table>
+  </div>
 {/if}
 
 <style>
@@ -82,6 +84,10 @@
 
   .error {
     color: var(--pink);
+  }
+
+  .table-wrap {
+    overflow-x: auto;
   }
 
   table {

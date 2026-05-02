@@ -136,7 +136,6 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-width: 560px;
   }
 
   .row {
@@ -203,7 +202,6 @@
     padding: 16px;
     background: var(--panel);
     border-radius: 8px;
-    max-width: 560px;
   }
 
   .warning {

@@ -16,30 +16,34 @@
 
 <div class="layout">
   <aside class="sidebar">
-    <h1 class="brand">navcoin-rescue-tool</h1>
-    <nav>
-      {#each VIEWS as v}
-        <button
-          class="nav-btn"
-          class:active={view === v.id}
-          onclick={() => (view = v.id)}
-        >
-          {v.label}
-        </button>
-      {/each}
-    </nav>
+    <div class="bar-inner">
+      <h1 class="brand">navcoin-rescue-tool</h1>
+      <nav>
+        {#each VIEWS as v}
+          <button
+            class="nav-btn"
+            class:active={view === v.id}
+            onclick={() => (view = v.id)}
+          >
+            {v.label}
+          </button>
+        {/each}
+      </nav>
+    </div>
   </aside>
 
   <main class="main">
-    {#if view === 'status'}
-      <Status />
-    {:else if view === 'import'}
-      <Import />
-    {:else if view === 'rescan'}
-      <Rescan />
-    {:else if view === 'purge'}
-      <Purge />
-    {/if}
+    <div class="container">
+      {#if view === 'status'}
+        <Status />
+      {:else if view === 'import'}
+        <Import />
+      {:else if view === 'rescan'}
+        <Rescan />
+      {:else if view === 'purge'}
+        <Purge />
+      {/if}
+    </div>
   </main>
 </div>
 
@@ -52,12 +56,18 @@
   }
 
   .sidebar {
-    display: flex;
-    align-items: center;
-    gap: 16px;
     background: var(--panel);
     padding: 10px 14px;
     border-bottom: 1px solid #1f2937;
+  }
+
+  .bar-inner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: 900px;
+    margin: 0 auto;
+    flex-wrap: wrap;
   }
 
   .brand {
@@ -96,5 +106,10 @@
     padding: 20px;
     overflow: auto;
     min-width: 0;
+  }
+
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
   }
 </style>

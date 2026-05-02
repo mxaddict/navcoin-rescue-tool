@@ -78,19 +78,16 @@
     border-left: 3px solid var(--pink);
     padding: 12px;
     border-radius: 6px;
-    max-width: 560px;
   }
 
   .muted {
     color: var(--muted);
-    max-width: 560px;
   }
 
   .form {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-width: 560px;
     margin-top: 16px;
   }
 

@@ -29,12 +29,12 @@
 
 <h2>Rescan</h2>
 
-<p class="muted" style="max-width: 640px">
+<p class="muted">
   Wipes UTXO + transaction state for every imported source and rebuilds it
   from the chain. Keys, mnemonic, and master wallet data are preserved.
 </p>
 
-<p class="warn" style="max-width: 640px">
+<p class="warn">
   Useful after a sweep, or when reconciliation drifts from
   <code>navcoin-cli</code>. Each rescan re-runs the full receive / change /
   staking / xNAV scan — expect minutes per source.

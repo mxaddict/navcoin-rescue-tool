@@ -29,21 +29,22 @@ let stubPort = 0;
 let stubClose = null;
 
 // Kill anything still holding the test daemon port from a previous run
-// (interrupted test, leaked process, stale CI worker). Without this, the
-// first spawnDaemon hits EADDRINUSE and the whole file fails.
-// Also start the stub electrum server once for the whole file.
+// (interrupted test, leaked process, stale local worker). lsof isn't
+// available on Windows and isn't needed on a fresh CI worker — skip
+// silently when it's missing.  Then start the stub electrum server
+// once for the whole file.
 before(async () => {
-  const pids = spawnSync('lsof', ['-ti', `tcp:${TEST_PORT}`], {
+  const result = spawnSync('lsof', ['-ti', `tcp:${TEST_PORT}`], {
     encoding: 'utf8',
-  })
-    .stdout.trim()
-    .split('\n')
-    .filter(Boolean);
-  for (const pid of pids) {
-    try {
-      process.kill(Number(pid), 'SIGKILL');
-    } catch {
-      // already gone
+  });
+  if (!result.error) {
+    const pids = result.stdout.trim().split('\n').filter(Boolean);
+    for (const pid of pids) {
+      try {
+        process.kill(Number(pid), 'SIGKILL');
+      } catch {
+        // already gone
+      }
     }
   }
 

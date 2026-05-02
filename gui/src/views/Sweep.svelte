@@ -51,18 +51,15 @@
       preview = res?.preview ?? null;
       step = 'review';
       phrase = '';
-      await tick();
-      phraseInput?.focus();
     } catch (err) {
       error = err.message ?? String(err);
     } finally {
       busy = false;
-      // If we stayed on the verify step (error path), keep focus on
-      // the re-entry input so the user can retry without clicking.
-      if (step === 'verify') {
-        await tick();
-        verifyInput?.focus();
-      }
+      await tick();
+      // Focus the input that's now live: phrase on review (success),
+      // verify on the verify step (error path).
+      if (step === 'review') phraseInput?.focus();
+      else if (step === 'verify') verifyInput?.focus();
     }
   }
 
@@ -81,6 +78,10 @@
       error = err.message ?? String(err);
     } finally {
       busy = false;
+      if (step === 'review') {
+        await tick();
+        phraseInput?.focus();
+      }
     }
   }
 
@@ -208,10 +209,11 @@
         bind:value={phrase}
         bind:this={phraseInput}
         placeholder={REQUIRED_PHRASE}
-        disabled={busy}
+        readonly={busy}
         spellcheck="false"
         onkeydown={(e) => {
-          if (e.key === 'Enter' && phrase === REQUIRED_PHRASE) broadcast();
+          if (e.key === 'Enter' && !busy && phrase === REQUIRED_PHRASE)
+            broadcast();
         }}
       />
     </div>

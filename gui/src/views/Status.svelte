@@ -185,6 +185,7 @@
       {@const xnavConf = s.balance?.xnav?.confirmed ?? 0}
       {@const xnavPend = s.balance?.xnav?.pending ?? 0}
       {@const total = navConf + navPend + xnavConf + xnavPend}
+      {@const funded = fundedAddresses(s)}
 
       <article class="card">
         <header class="card-header">
@@ -265,7 +266,6 @@
           </div>
         </dl>
 
-        {@const funded = fundedAddresses(s)}
         {#if funded.length > 0}
           <button
             class="expand-toggle"

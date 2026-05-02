@@ -3,6 +3,7 @@
   import Import from './views/Import.svelte';
   import Rescan from './views/Rescan.svelte';
   import Purge from './views/Purge.svelte';
+  import navioLogo from './assets/navio-logo.svg';
 
   const VIEWS = [
     { id: 'status', label: 'Status' },
@@ -17,7 +18,10 @@
 <div class="layout">
   <aside class="sidebar">
     <div class="bar-inner">
-      <h1 class="brand">navcoin-rescue-tool</h1>
+      <div class="brand">
+        <img src={navioLogo} alt="Navio" class="logo" />
+        <span class="brand-suffix">Rescue Tool</span>
+      </div>
       <nav>
         {#each VIEWS as v}
           <button
@@ -71,10 +75,21 @@
   }
 
   .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .logo {
+    height: 22px;
+    width: auto;
+    display: block;
+  }
+
+  .brand-suffix {
     font-size: 14px;
     font-weight: 600;
-    margin: 0;
-    flex-shrink: 0;
     background: linear-gradient(135deg, var(--fuchsia), var(--cyan));
     -webkit-background-clip: text;
     background-clip: text;

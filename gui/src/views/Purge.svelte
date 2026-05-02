@@ -38,15 +38,17 @@
   </div>
 </header>
 
-<p class="warn">
-  This deletes <strong>every</strong> imported wallet from disk: keys, address
-  history, balances. Use this after a successful sweep, or when starting fresh.
-</p>
-
-<p class="muted">
-  This is irreversible. Recovery material (mnemonic / WIF) is your only
-  fallback.
-</p>
+<div class="callout error">
+  <p>
+    This deletes <strong>every</strong> imported wallet from disk: keys,
+    address history, balances. Use this after a successful sweep, or when
+    starting fresh.
+  </p>
+  <p>
+    This is irreversible. Recovery material (mnemonic / WIF) is your only
+    fallback.
+  </p>
+</div>
 
 <div class="form">
   <label class="row col">
@@ -70,18 +72,6 @@
 {/if}
 
 <style>
-  .warn {
-    color: var(--text);
-    background: var(--panel);
-    border-left: 3px solid var(--pink);
-    padding: 12px;
-    border-radius: 6px;
-  }
-
-  .muted {
-    color: var(--muted);
-  }
-
   .form {
     display: flex;
     flex-direction: column;

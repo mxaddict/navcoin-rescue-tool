@@ -75,6 +75,12 @@ async function walkBranch(wallet, password, branch, cfg) {
   let scannedIdx = 0;
   let derivedIdx = (await wallet.db.GetCounter(counterName)) ?? 0;
 
+  wallet.emit(
+    'scripthash_progress',
+    0,
+    Math.max(cfg.walkBatchSize, derivedIdx),
+  );
+
   const wasFilled = wallet.poolFilled;
   wallet.poolFilled = false;
 
@@ -94,17 +100,24 @@ async function walkBranch(wallet, password, branch, cfg) {
       );
       if (batch.length === 0) break;
 
+      let inBatchScanned = 0;
       await mapConcurrent(batch, cfg.concurrency, async (addr) => {
         const found = await scanAndHydrateAddr(wallet, addr.address);
         if (found > 0 && addr.idx > lastUsedIdx) lastUsedIdx = addr.idx;
+        inBatchScanned++;
+        if (
+          inBatchScanned % cfg.progressInterval === 0 ||
+          inBatchScanned === batch.length
+        ) {
+          wallet.emit(
+            'scripthash_progress',
+            scannedIdx + inBatchScanned,
+            Math.max(scannedIdx + inBatchScanned, derivedIdx),
+          );
+        }
       });
 
       scannedIdx += batch.length;
-      wallet.emit(
-        'scripthash_progress',
-        scannedIdx,
-        Math.max(scannedIdx, derivedIdx),
-      );
       await yieldEventLoop();
 
       // Termination: scanned past last-used by gap.

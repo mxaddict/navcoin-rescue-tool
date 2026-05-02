@@ -93,11 +93,14 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
 
-      - name: Install root prod dependencies
-        run: npm install --omit=dev
+      - name: Install root dependencies (with dev for build tools)
+        run: npm install
 
       - name: Build GUI bundle
         run: npm run gui:build
+
+      - name: Prune to production dependencies
+        run: npm prune --omit=dev
 
       - name: Stage archive layout
         id: stage

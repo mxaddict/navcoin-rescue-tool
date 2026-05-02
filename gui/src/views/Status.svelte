@@ -177,24 +177,24 @@
           <span class="mono dim">{s.id}</span>
           <span class="card-actions">
             {#if confirmRemoveId === s.id}
-              <span class="confirm-text">Remove this source?</span>
+              <span class="confirm-text">Remove?</span>
               <button
-                class="ghost-pink"
-                onclick={() => doRemove(s.id)}
-                disabled={removeBusy}
-              >
-                {removeBusy ? 'Removing…' : 'Yes'}
-              </button>
-              <button
-                class="ghost"
+                class="danger-outline"
                 onclick={() => (confirmRemoveId = null)}
                 disabled={removeBusy}
               >
                 No
               </button>
+              <button
+                class="danger"
+                onclick={() => doRemove(s.id)}
+                disabled={removeBusy}
+              >
+                {removeBusy ? 'Removing…' : 'Yes'}
+              </button>
             {:else}
               <button
-                class="ghost"
+                class="danger"
                 onclick={() => {
                   confirmRemoveId = s.id;
                   removeError = null;
@@ -248,6 +248,7 @@
             </dd>
           </div>
         </dl>
+
       </article>
     {/each}
 
@@ -328,32 +329,31 @@
     font-size: 12px;
   }
 
-  button.ghost {
+  button.danger {
+    background: var(--pink);
+    color: white;
+    padding: 6px 14px;
+    font-size: 12px;
+    min-width: 0;
+    border: 0;
+  }
+
+  button.danger:hover:not(:disabled) {
+    background: #9d164d;
+  }
+
+  button.danger-outline {
     background: transparent;
     color: var(--muted);
     border: 1px solid #374151;
-    padding: 4px 12px;
+    padding: 6px 14px;
     font-size: 12px;
     min-width: 0;
   }
 
-  button.ghost:hover:not(:disabled) {
+  button.danger-outline:hover:not(:disabled) {
     color: var(--text);
     border-color: var(--muted);
-  }
-
-  button.ghost-pink {
-    background: transparent;
-    color: var(--pink);
-    border: 1px solid var(--pink);
-    padding: 4px 12px;
-    font-size: 12px;
-    min-width: 0;
-  }
-
-  button.ghost-pink:hover:not(:disabled) {
-    background: var(--pink);
-    color: white;
   }
 
   .error-inline {

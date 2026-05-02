@@ -85,6 +85,10 @@
     height: 22px;
     width: auto;
     display: block;
+    background: var(--deep);
+    padding: 6px 8px;
+    border-radius: 8px;
+    box-sizing: content-box;
   }
 
   .brand-suffix {

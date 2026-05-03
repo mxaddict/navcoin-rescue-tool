@@ -97,11 +97,32 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
 
+      - name: Cache root node_modules
+        id: nm-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: build-nm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
+
       - name: Install root dependencies (with dev for build tools)
+        if: steps.nm-cache.outputs.cache-hit != 'true'
         run: npm install
 
+      - name: Cache GUI node_modules
+        id: gui-nm-cache
+        uses: actions/cache@v4
+        with:
+          path: gui/node_modules
+          key: gui-nm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('gui/package-lock.json') }}
+
       - name: Install GUI frontend dependencies
+        if: steps.gui-nm-cache.outputs.cache-hit != 'true'
         run: npm --prefix gui install
+
+      - name: Cache Tauri Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
 
       - name: Build GUI bundle
         run: npm run gui:build

@@ -99,7 +99,7 @@ jobs:
 
       - name: Cache root node_modules
         id: nm-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: node_modules
           key: build-nm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
@@ -110,7 +110,7 @@ jobs:
 
       - name: Cache GUI node_modules
         id: gui-nm-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: gui/node_modules
           key: gui-nm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('gui/package-lock.json') }}
@@ -346,7 +346,7 @@ jobs:
           "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.stage.outputs.name }}
           path: |
@@ -372,7 +372,7 @@ jobs:
           fi
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 

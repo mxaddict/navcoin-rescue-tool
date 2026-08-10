@@ -36,6 +36,28 @@ entry when it ships — `git log` is the history.
   function's comment; noted here because it surprises anyone comparing against
   `navcoin-cli` output.
 
+## Windows CI is pinned to the VS2022 image
+
+The npm jobs and the Windows release build run on `windows-2022`, not
+`windows-latest`. `windows-latest` is now `windows-2025-vs2026`, and the
+toolchain fails there in two independent ways:
+
+- The node-gyp npm bundles (11.5.0) reports
+  `unknown version "undefined" found at C:\Program Files\Microsoft Visual
+Studio\18\Enterprise`. Only node-gyp 12+ recognises VS2026, and
+  node-pre-gyp (sqlite3's installer) ignores `npm_config_node_gyp` and runs
+  npm's bundled copy, so the only way to change it is to upgrade npm.
+- npm 12, which bundles node-gyp 13, then installs nested copies of native
+  packages without running their build scripts: `bcrypto` under
+  `@aguycalled/bitcore-lib` and `sqlite3` under `websql-configurable` both
+  end up without bindings, and every wallet test fails on load.
+
+Re-check when npm ships a fix for the nested build scripts, or when the
+image gains a node-gyp-compatible VS. Until then `windows-2022` retiring is
+the thing that will force this open. The Rust `daemon-launch` job and the
+release archive smoke test do run on `windows-latest`, so the artifact
+users actually run is still covered on the current OS.
+
 ## Decisions
 
 - Daemon-launch logic lives in its own crate (`src-tauri/daemon-launch`) with

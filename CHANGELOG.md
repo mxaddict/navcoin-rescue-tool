@@ -23,6 +23,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transient `getHistory`/`listunspent` error used to hide coins from the sweep,
   and the db kept them marked spent. The reap is now skipped when any lookup in
   the scan failed.
+- `ntr start` could hang forever. It held the detached daemon's handle on the
+  failure path, so once readiness timed out the CLI printed its error and never
+  exited — reproducible on any machine where the daemon takes more than a
+  moment to boot. The handle is released up front now.
+- `ntr start` and the TUI gave the daemon 3s and 5s respectively to come up,
+  and the TUI killed it after that. Booting loads navcoin-js and its native
+  dependencies, which regularly takes longer on a cold machine; both now wait
+  `DAEMON_READY_TIMEOUT_MS` (60s).
 - `sources.json`, which stores imported mnemonics and WIF keys verbatim, is now
   written `0600` like `auth.cookie` instead of inheriting the default umask.
 - The daemon's `EADDRINUSE` message and the TUI's port-in-use hint print the

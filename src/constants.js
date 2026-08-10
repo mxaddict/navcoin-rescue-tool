@@ -5,6 +5,13 @@ export const DAEMON_HOST = '127.0.0.1';
 export const DAEMON_PORT = Number(process.env.NTR_DAEMON_PORT) || 46117;
 export const STATIC_WALLET_PASSWORD = 'ObsidianSweepKey';
 
+// How long `ntr start` and the TUI wait for a freshly spawned daemon to
+// answer on its port. Booting it loads navcoin-js and its native
+// dependencies, which takes well over a second on a warm machine and tens
+// of seconds on a cold or loaded one — a short wait reports a daemon that
+// is merely slow as a daemon that failed.
+export const DAEMON_READY_TIMEOUT_MS = 60_000;
+
 // Recovery tool uses a large address pool so we don't miss funds on wallets
 // that have activity beyond the default navcoin-js pool size of 10.
 // BIP44 standard gap limit is 20 — we use 100 to be safe for recovery.

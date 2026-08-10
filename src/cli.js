@@ -27,6 +27,7 @@ import {
   CLI_NAME,
   DAEMON_HOST,
   DAEMON_PORT,
+  DAEMON_READY_TIMEOUT_MS,
   formatSyncPhase,
   getStorageWarningLines,
   STATIC_WALLET_PASSWORD,
@@ -114,6 +115,12 @@ async function handleStart() {
   });
   fs.closeSync(logFd);
 
+  // Unref before waiting, not after: the daemon is detached and writes to
+  // its own log, so nothing here needs its handle. Holding it on the
+  // failure path kept this process alive for as long as the daemon ran —
+  // `ntr start` printed its error and then never exited.
+  daemon.unref();
+
   const ready = await waitForDaemonReady(daemon, root);
 
   if (!ready.ok) {
@@ -121,8 +128,6 @@ async function handleStart() {
     process.exitCode = 1;
     return;
   }
-
-  daemon.unref();
 
   process.stdout.write(`Started ${CLI_NAME} daemon.\n`);
   process.stdout.write(`App data: ${layout.root}\n`);
@@ -455,7 +460,7 @@ async function waitForDaemonReady(daemon, root) {
         await getDaemonStatus(root);
         finish({ ok: true });
       } catch {
-        if (Date.now() - start >= 3000) {
+        if (Date.now() - start >= DAEMON_READY_TIMEOUT_MS) {
           const daemonStatePath = getLayout(root).daemonFile;
           finish({
             ok: false,

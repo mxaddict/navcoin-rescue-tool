@@ -496,7 +496,10 @@ jobs:
           & "$root\ntr.cmd" start
           if ($LASTEXITCODE -ne 0) { throw "ntr start exited $LASTEXITCODE" }
 
-          $status = & "$root\ntr.cmd" status
+          # -join: PowerShell hands back multi-line output as an array, and
+          # -notmatch over an array filters it instead of testing it, so a
+          # matching line still leaves a truthy result.
+          $status = (& "$root\ntr.cmd" status) -join "`n"
           if ($LASTEXITCODE -ne 0) { throw "ntr status exited $LASTEXITCODE" }
           if ($status -notmatch 'Daemon status: running') { throw "unexpected status output: $status" }
           & "$root\ntr.cmd" stop
@@ -512,7 +515,7 @@ jobs:
             throw "ntr-gui --daemon-check exited $($gui.ExitCode)"
           }
 
-          $status = & "$root\ntr.cmd" status
+          $status = (& "$root\ntr.cmd" status) -join "`n"
           if ($status -notmatch 'Daemon status: running') { throw "daemon not running after GUI check: $status" }
           & "$root\ntr.cmd" stop
 

@@ -460,6 +460,15 @@ jobs:
             fi
           done
 
+          # The daemon detaches, so its own failures land in the log rather
+          # than on this console. Print it if anything below fails.
+          if [ "$(uname)" = "Darwin" ]; then
+            daemon_log="$HOME/Library/Application Support/navcoin-rescue-tool/logs/daemon.log"
+          else
+            daemon_log="${XDG_DATA_HOME:-$HOME/.local/share}/navcoin-rescue-tool/logs/daemon.log"
+          fi
+          trap 'echo "--- daemon.log ---"; tail -n 100 "$daemon_log" 2>/dev/null || echo "(no daemon.log at $daemon_log)"' ERR
+
           "$root/ntr" start
           "$root/ntr" status | tee status.txt
           grep -q 'Daemon status: running' status.txt
@@ -489,15 +498,27 @@ jobs:
             if (-not (Test-Path (Join-Path $root $entry))) { throw "archive is missing $entry" }
           }
 
+          # The daemon detaches, so its own failures land in the log rather
+          # than on this console. Print it whenever a step below fails.
+          $daemonLog = Join-Path $env:APPDATA 'navcoin-rescue-tool\logs\daemon.log'
+          function Show-DaemonLog {
+            if (Test-Path $daemonLog) {
+              Write-Host "--- daemon.log ---"
+              Get-Content $daemonLog -Tail 100
+            } else {
+              Write-Host "--- no daemon.log at $daemonLog ---"
+            }
+          }
+
           & "$root\ntr.cmd" start
-          if ($LASTEXITCODE -ne 0) { throw "ntr start exited $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { Show-DaemonLog; throw "ntr start exited $LASTEXITCODE" }
 
           # -join: PowerShell hands back multi-line output as an array, and
           # -notmatch over an array filters it instead of testing it, so a
           # matching line still leaves a truthy result.
           $status = (& "$root\ntr.cmd" status) -join "`n"
-          if ($LASTEXITCODE -ne 0) { throw "ntr status exited $LASTEXITCODE" }
-          if ($status -notmatch 'Daemon status: running') { throw "unexpected status output: $status" }
+          if ($LASTEXITCODE -ne 0) { Show-DaemonLog; throw "ntr status exited $LASTEXITCODE" }
+          if ($status -notmatch 'Daemon status: running') { Show-DaemonLog; throw "unexpected status output: $status" }
           & "$root\ntr.cmd" stop
 
           # The failure users hit: the GUI starting the daemon with no
@@ -508,11 +529,12 @@ jobs:
           if ($gui.ExitCode -ne 0) {
             $errorFile = Join-Path $env:APPDATA 'navcoin-rescue-tool\daemon-check.error'
             if (Test-Path $errorFile) { Get-Content $errorFile }
+            Show-DaemonLog
             throw "ntr-gui --daemon-check exited $($gui.ExitCode)"
           }
 
           $status = (& "$root\ntr.cmd" status) -join "`n"
-          if ($status -notmatch 'Daemon status: running') { throw "daemon not running after GUI check: $status" }
+          if ($status -notmatch 'Daemon status: running') { Show-DaemonLog; throw "daemon not running after GUI check: $status" }
           & "$root\ntr.cmd" stop
 
   release:

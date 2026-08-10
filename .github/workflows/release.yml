@@ -123,10 +123,6 @@ jobs:
           set -euo pipefail
           npm install -g npm@12
           npm --version
-          # npm 12 refuses git-protocol dependencies by default, and
-          # indexeddbshim pins sync-promise to a commit on GitHub. The
-          # lockfile fixes that commit, so allow it.
-          echo "npm_config_allow_git=true" >> "$GITHUB_ENV"
 
       - name: Install root dependencies (with dev for build tools)
         if: steps.nm-cache.outputs.cache-hit != 'true'

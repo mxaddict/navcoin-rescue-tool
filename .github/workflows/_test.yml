@@ -44,3 +44,45 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # How the GUI finds and starts the daemon is platform-specific (batch
+  # shims, .exe suffixes, the bundled runtime's location) and a mistake
+  # there only shows up in a released archive, so it gets its own tests on
+  # every platform we ship. ntr-daemon-launch has no GUI dependencies, so
+  # this needs no webview toolkit.
+  daemon-launch:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --all --check
+
+      - name: Lint
+        working-directory: src-tauri
+        run: cargo clippy -p ntr-daemon-launch --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test -p ntr-daemon-launch

@@ -415,9 +415,11 @@ async function ensureDaemonRunning(root, layout, log) {
     // Auth may have failed (missing/stale cookie) — check port directly.
     if (await isPortInUse()) {
       log(
-        '  A process is already using port 46117 but the auth cookie is missing or stale.',
+        `  A process is already using port ${DAEMON_PORT} but the auth cookie is missing or stale.`,
       );
-      log('  Stop the existing daemon first: kill the process on port 46117.');
+      log(
+        `  Stop the existing daemon first: kill the process on port ${DAEMON_PORT}.`,
+      );
       return false;
     }
     // Nothing listening — fall through to start daemon.

@@ -112,6 +112,12 @@ The GUI auto-starts the daemon if it is not already running and is a thin
 client over the same `127.0.0.1:46117` API as `ntr` and the TUI. Views:
 Status, Import, Sweep, Logs, Purge.
 
+Release archives are self-contained — they carry their own Node runtime, so
+nothing needs to be installed to run `ntr`, `ntr-daemon` or `ntr-gui` from the
+extracted directory. The one exception is Linux, where the GUI links against
+the system webview: install `libwebkit2gtk-4.1` and GTK 3 from your
+distribution (the CLI and TUI need neither).
+
 ### Window decorations
 
 GTK on Wayland always draws client-side titlebars, which look foreign on

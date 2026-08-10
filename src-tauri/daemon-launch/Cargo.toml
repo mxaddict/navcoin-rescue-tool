@@ -1,0 +1,12 @@
+[package]
+name = "ntr-daemon-launch"
+version = "0.1.0"
+description = "Locating and starting the navcoin-rescue-tool daemon from the GUI"
+edition = "2021"
+rust-version = "1.77"
+
+# Deliberately free of GUI dependencies: this is the part of the GUI that
+# has to be right on every platform we ship, so its tests must run
+# anywhere, including machines and CI jobs with no webview toolkit
+# installed.
+[dependencies]

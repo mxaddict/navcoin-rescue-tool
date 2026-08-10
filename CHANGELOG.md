@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-10
+
 ### Fixed
 
 - GUI: released builds could not start the daemon. `ensure_daemon` tried `ntr`
@@ -49,4 +51,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Release` can be dispatched with no tag to build and smoke-test a ref without
   publishing anything.
 
-[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.1.0...v0.1.1

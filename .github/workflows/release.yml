@@ -49,7 +49,12 @@ jobs:
             node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-darwin-arm64.tar.gz
             ext: tar.gz
             prebuild_dir: darwin-arm64
-          - os: windows-latest
+          # windows-2022, not windows-latest: the current image ships
+          # Visual Studio 2026, which only node-gyp 12+ finds, and the npm
+          # 12 that bundles it skips build scripts for nested copies of
+          # native packages. The archive built here is smoke-tested on
+          # windows-latest below.
+          - os: windows-2022
             platform: windows
             arch: x86_64
             node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip
@@ -111,18 +116,6 @@ jobs:
         with:
           path: node_modules
           key: build-nm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
-
-      # windows-latest now ships Visual Studio 2026, which node-gyp only
-      # learned to find in v12. node-pre-gyp (sqlite3) ignores
-      # npm_config_node_gyp and runs the copy npm bundles, so the only way
-      # to change it is to upgrade npm itself: npm 12 bundles node-gyp 13.
-      - name: Upgrade npm for VS2026 support (windows)
-        if: matrix.platform == 'windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install -g npm@12
-          npm --version
 
       - name: Install root dependencies (with dev for build tools)
         if: steps.nm-cache.outputs.cache-hit != 'true'

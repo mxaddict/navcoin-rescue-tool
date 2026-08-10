@@ -47,9 +47,11 @@ jobs:
           npm install -g npm@12
           npm --version
 
+      # No --ignore-platform: it was never an npm flag (older npm ignored
+      # unknown flags, npm 12 rejects them), so it never did anything.
       - name: Install dependencies
         if: steps.nm-cache.outputs.cache-hit != 'true'
-        run: npm install --ignore-platform
+        run: npm install
 
       - name: Check formatting
         run: npm run format:check

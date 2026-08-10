@@ -393,6 +393,8 @@ jobs:
             arch: x86_64
             ext: zip
     runs-on: ${{ matrix.os }}
+    # A hung daemon should fail the job, not sit for hours.
+    timeout-minutes: 20
 
     steps:
       - name: Resolve archive name
@@ -501,6 +503,20 @@ jobs:
           # The daemon detaches, so its own failures land in the log rather
           # than on this console. Print it whenever a step below fails.
           $daemonLog = Join-Path $env:APPDATA 'navcoin-rescue-tool\logs\daemon.log'
+          # Run the wrappers through Start-Process: `& cmd` waits for every
+          # process that inherited its console, and the daemon detaches
+          # into that console, so capturing output directly hangs.
+          function Invoke-Ntr {
+            param([string]$Command)
+            $out = Join-Path $PWD "ntr-$Command.out"
+            $err = Join-Path $PWD "ntr-$Command.err"
+            $p = Start-Process -FilePath "$root\ntr.cmd" -ArgumentList $Command -Wait -PassThru `
+              -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+            $text = ((Get-Content $out -Raw -ErrorAction SilentlyContinue) + "`n" +
+                     (Get-Content $err -Raw -ErrorAction SilentlyContinue))
+            Write-Host $text
+            return [pscustomobject]@{ ExitCode = $p.ExitCode; Output = $text }
+          }
           function Show-DaemonLog {
             if (Test-Path $daemonLog) {
               Write-Host "--- daemon.log ---"
@@ -510,16 +526,13 @@ jobs:
             }
           }
 
-          & "$root\ntr.cmd" start
-          if ($LASTEXITCODE -ne 0) { Show-DaemonLog; throw "ntr start exited $LASTEXITCODE" }
+          $start = Invoke-Ntr 'start'
+          if ($start.ExitCode -ne 0) { Show-DaemonLog; throw "ntr start exited $($start.ExitCode)" }
 
-          # -join: PowerShell hands back multi-line output as an array, and
-          # -notmatch over an array filters it instead of testing it, so a
-          # matching line still leaves a truthy result.
-          $status = (& "$root\ntr.cmd" status) -join "`n"
-          if ($LASTEXITCODE -ne 0) { Show-DaemonLog; throw "ntr status exited $LASTEXITCODE" }
-          if ($status -notmatch 'Daemon status: running') { Show-DaemonLog; throw "unexpected status output: $status" }
-          & "$root\ntr.cmd" stop
+          $status = Invoke-Ntr 'status'
+          if ($status.ExitCode -ne 0) { Show-DaemonLog; throw "ntr status exited $($status.ExitCode)" }
+          if ($status.Output -notmatch 'Daemon status: running') { Show-DaemonLog; throw "unexpected status output" }
+          Invoke-Ntr 'stop' | Out-Null
 
           # The failure users hit: the GUI starting the daemon with no
           # Node, no `ntr` on PATH and no build checkout. The GUI binary is
@@ -533,9 +546,9 @@ jobs:
             throw "ntr-gui --daemon-check exited $($gui.ExitCode)"
           }
 
-          $status = (& "$root\ntr.cmd" status) -join "`n"
-          if ($status -notmatch 'Daemon status: running') { Show-DaemonLog; throw "daemon not running after GUI check: $status" }
-          & "$root\ntr.cmd" stop
+          $status = Invoke-Ntr 'status'
+          if ($status.Output -notmatch 'Daemon status: running') { Show-DaemonLog; throw "daemon not running after GUI check" }
+          Invoke-Ntr 'stop' | Out-Null
 
   release:
     needs: [build, smoke]

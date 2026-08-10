@@ -52,6 +52,11 @@ toolchain fails there in two independent ways:
   `@aguycalled/bitcore-lib` and `sqlite3` under `websql-configurable` both
   end up without bindings, and every wallet test fails on load.
 
+A third npm 12 change matters for anyone who upgrades locally: it refuses
+git-protocol dependencies by default (`EALLOWGIT`), and indexeddbshim pulls
+sync-promise from GitHub. `allow-git=all` in `.npmrc` fixes that, but npm 11
+warns about the unknown key on every command, so it is not committed.
+
 Re-check when npm ships a fix for the nested build scripts, or when the
 image gains a node-gyp-compatible VS. Until then `windows-2022` retiring is
 the thing that will force this open. The Rust `daemon-launch` job and the

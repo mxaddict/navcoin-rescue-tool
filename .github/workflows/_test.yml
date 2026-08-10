@@ -35,6 +35,18 @@ jobs:
           path: node_modules
           key: test-nm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
 
+      # node-pre-gyp (sqlite3) runs the node-gyp that npm bundles rather
+      # than the one in devDependencies, and that copy only detects Visual
+      # Studio up to 2022 — windows-latest now ships VS2026. Point npm at a
+      # node-gyp that knows about it.
+      - name: Use a node-gyp that finds VS2026 (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g node-gyp@12
+          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         if: steps.nm-cache.outputs.cache-hit != 'true'
         run: npm install --ignore-platform

@@ -503,19 +503,17 @@ jobs:
           # The daemon detaches, so its own failures land in the log rather
           # than on this console. Print it whenever a step below fails.
           $daemonLog = Join-Path $env:APPDATA 'navcoin-rescue-tool\logs\daemon.log'
-          # Run the wrappers through Start-Process: `& cmd` waits for every
-          # process that inherited its console, and the daemon detaches
-          # into that console, so capturing output directly hangs.
+          # Call the wrappers directly. Start-Process -Wait is wrong here:
+          # it waits for the process *and its descendants*, and `ntr start`
+          # deliberately leaves the daemon running, so it never returns.
+          # -join because PowerShell hands back multi-line output as an
+          # array, and -match over an array filters instead of testing.
           function Invoke-Ntr {
             param([string]$Command)
-            $out = Join-Path $PWD "ntr-$Command.out"
-            $err = Join-Path $PWD "ntr-$Command.err"
-            $p = Start-Process -FilePath "$root\ntr.cmd" -ArgumentList $Command -Wait -PassThru `
-              -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
-            $text = ((Get-Content $out -Raw -ErrorAction SilentlyContinue) + "`n" +
-                     (Get-Content $err -Raw -ErrorAction SilentlyContinue))
+            $text = (& "$root\ntr.cmd" $Command 2>&1 | Out-String)
+            $code = $LASTEXITCODE
             Write-Host $text
-            return [pscustomobject]@{ ExitCode = $p.ExitCode; Output = $text }
+            return [pscustomobject]@{ ExitCode = $code; Output = $text }
           }
           function Show-DaemonLog {
             if (Test-Path $daemonLog) {
@@ -538,7 +536,10 @@ jobs:
           # Node, no `ntr` on PATH and no build checkout. The GUI binary is
           # built for the Windows GUI subsystem and has no console, so the
           # verdict comes back as an exit code plus an error file.
-          $gui = Start-Process -FilePath "$root\ntr-gui.exe" -ArgumentList '--daemon-check' -Wait -PassThru
+          # -PassThru plus WaitForExit(), not -Wait: the GUI starts the
+          # daemon as a child, and -Wait would block on it too.
+          $gui = Start-Process -FilePath "$root\ntr-gui.exe" -ArgumentList '--daemon-check' -PassThru
+          $gui.WaitForExit()
           if ($gui.ExitCode -ne 0) {
             $errorFile = Join-Path $env:APPDATA 'navcoin-rescue-tool\daemon-check.error'
             if (Test-Path $errorFile) { Get-Content $errorFile }

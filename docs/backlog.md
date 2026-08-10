@@ -42,9 +42,9 @@ The npm jobs and the Windows release build run on `windows-2022`, not
 `windows-latest`. `windows-latest` is now `windows-2025-vs2026`, and the
 toolchain fails there in two independent ways:
 
-- The node-gyp npm bundles (11.5.0) reports
-  `unknown version "undefined" found at C:\Program Files\Microsoft Visual
-Studio\18\Enterprise`. Only node-gyp 12+ recognises VS2026, and
+- The node-gyp npm bundles (11.5.0) calls the installed Visual Studio an
+  "unknown version" — it finds VS18 in Program Files and does not recognise
+  it. Only node-gyp 12+ recognises VS2026, and
   node-pre-gyp (sqlite3's installer) ignores `npm_config_node_gyp` and runs
   npm's bundled copy, so the only way to change it is to upgrade npm.
 - npm 12, which bundles node-gyp 13, then installs nested copies of native

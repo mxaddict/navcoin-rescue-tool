@@ -45,7 +45,12 @@ jobs:
         run: |
           set -euo pipefail
           npm install -g node-gyp@12
-          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >> "$GITHUB_ENV"
+          # npm on Windows ends its output with CRLF; a stray CR here makes
+          # the path unusable and npm silently falls back to its own copy.
+          gyp="$(npm root -g | tr -d '\r')/node-gyp/bin/node-gyp.js"
+          test -f "$gyp"
+          node "$gyp" --version
+          echo "npm_config_node_gyp=$gyp" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         if: steps.nm-cache.outputs.cache-hit != 'true'

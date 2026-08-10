@@ -57,12 +57,17 @@ after(async () => {
   if (stubClose) await stubClose();
 });
 
+// Generous: booting the daemon pulls in navcoin-js and its native deps,
+// which takes seconds on a cold CI runner (3s flaked on Windows). The
+// test still fails if 'ready' never arrives — this only bounds the wait.
+const READY_TIMEOUT_MS = 30_000;
+
 async function waitForReady(child) {
   return new Promise((resolve, reject) => {
     let stdout = '';
     const timeout = setTimeout(
       () => reject(new Error('daemon ready timeout')),
-      3000,
+      READY_TIMEOUT_MS,
     );
 
     child.stdout.on('data', (chunk) => {

@@ -55,9 +55,15 @@ async function ensureFile(filePath, content, mode) {
   }
 }
 
+// Written 0600 (owner only, like auth.cookie): sources.json holds the
+// imported mnemonics and WIF keys verbatim, and rename() carries the
+// temp file's mode across, so the mode has to be set at creation.
+// Ignored on Windows, where the app-data dir is already per-user.
 export async function writeJsonFileAtomic(filePath, value) {
   const tempPath = `${filePath}.${process.pid}.tmp`;
-  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`);
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, {
+    mode: 0o600,
+  });
   await fs.rename(tempPath, filePath);
 }
 
@@ -105,6 +111,7 @@ export async function bootstrapAppData(root = getAppDataRoot()) {
   await ensureFile(
     layout.sourcesFile,
     JSON.stringify({ sources: [] }, null, 2) + '\n',
+    0o600,
   );
   await ensureAuthCookie(root);
   await ensureFile(layout.daemonLogFile, '');

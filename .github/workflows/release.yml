@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v0.0.1). Tag must already exist.'
-        required: true
+        description: 'Tag to release (e.g. v0.0.1). Tag must already exist. Leave empty to build and smoke-test the current ref without publishing.'
+        required: false
         type: string
 
 concurrency:
@@ -49,7 +49,12 @@ jobs:
             node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-darwin-arm64.tar.gz
             ext: tar.gz
             prebuild_dir: darwin-arm64
-          - os: windows-latest
+          # windows-2022, not windows-latest: the current image ships
+          # Visual Studio 2026, which only node-gyp 12+ finds, and the npm
+          # 12 that bundles it skips build scripts for nested copies of
+          # native packages. The archive built here is smoke-tested on
+          # windows-latest below.
+          - os: windows-2022
             platform: windows
             arch: x86_64
             node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip
@@ -60,18 +65,26 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      # A dispatch with no tag builds whatever ref it was started from, so
+      # the archives and their smoke tests can be exercised without
+      # cutting a release.
       - name: Resolve tag
         id: tag
         shell: bash
         run: |
+          set -euo pipefail
           if [ -n "${{ inputs.tag }}" ]; then
-            echo "ref=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
+            ref="${{ inputs.tag }}"
+            version="${{ inputs.tag }}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             ref="${GITHUB_REF#refs/tags/}"
-            echo "ref=$ref" >> "$GITHUB_OUTPUT"
-            echo "version=$ref" >> "$GITHUB_OUTPUT"
+            version="$ref"
+          else
+            ref="$GITHUB_SHA"
+            version="v0.0.0-dev"
           fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Check out repository
         uses: actions/checkout@v6
@@ -97,15 +110,11 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
 
-      - name: Cache root node_modules
-        id: nm-cache
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: build-nm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
-
+      # node_modules is deliberately not cached here: later steps prune
+      # dev dependencies and delete files inside the tree, and the cache is
+      # saved at the end of the job — so a cache hit would restore a
+      # stripped tree, skip the install and leave the Tauri CLI missing.
       - name: Install root dependencies (with dev for build tools)
-        if: steps.nm-cache.outputs.cache-hit != 'true'
         run: npm install
 
       - name: Cache GUI node_modules
@@ -355,8 +364,198 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  release:
+  # Run the archive the way a user does: unpack it on a machine with no
+  # Node, no checkout and nothing installed, then drive both entry points
+  # — the CLI wrappers and the GUI binary's headless daemon check. This is
+  # the only test that covers the shipped bits end to end; a GUI that
+  # cannot find its own daemon (or a wrapper pointing at a path that only
+  # exists on the build runner) fails here instead of on a user's machine.
+  smoke:
     needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+            ext: tar.gz
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            ext: tar.gz
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+            ext: tar.gz
+          - os: windows-latest
+            platform: windows
+            arch: x86_64
+            ext: zip
+    runs-on: ${{ matrix.os }}
+    # A hung daemon should fail the job, not sit for hours.
+    timeout-minutes: 20
+
+    steps:
+      - name: Resolve archive name
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.tag }}" ]; then
+            version="${{ inputs.tag }}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="${GITHUB_REF#refs/tags/}"
+          else
+            version="v0.0.0-dev"
+          fi
+          echo "name=navcoin-rescue-tool-${version}-${{ matrix.platform }}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+
+      - name: Download archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.name }}
+          path: download
+
+      # The GUI binary links against the system webview, so a Linux user
+      # needs these too — the archive bundles Node, not GTK.
+      - name: Install GUI runtime libraries (linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0
+
+      - name: Unpack archive (unix)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p extract
+          tar -C extract -xzf "download/${{ steps.archive.outputs.name }}.tar.gz"
+
+      - name: Unpack archive (windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Expand-Archive -Path "download/${{ steps.archive.outputs.name }}.zip" -DestinationPath extract
+
+      - name: Smoke test archive (unix)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$PWD/extract/${{ steps.archive.outputs.name }}"
+
+          # Drop every Node install from PATH: whatever runs from here on
+          # can only be using the runtime inside the archive.
+          export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          if command -v node >/dev/null 2>&1; then
+            echo "node is still on PATH, so this would not prove the archive is self-contained" >&2
+            exit 1
+          fi
+
+          for entry in ntr ntr-daemon ntr-gui runtime/bin/node app/src/cli.js app/node_modules; do
+            if [ ! -e "$root/$entry" ]; then
+              echo "archive is missing $entry" >&2
+              exit 1
+            fi
+          done
+
+          # The daemon detaches, so its own failures land in the log rather
+          # than on this console. Print it if anything below fails.
+          if [ "$(uname)" = "Darwin" ]; then
+            daemon_log="$HOME/Library/Application Support/navcoin-rescue-tool/logs/daemon.log"
+          else
+            daemon_log="${XDG_DATA_HOME:-$HOME/.local/share}/navcoin-rescue-tool/logs/daemon.log"
+          fi
+          trap 'echo "--- daemon.log ---"; tail -n 100 "$daemon_log" 2>/dev/null || echo "(no daemon.log at $daemon_log)"' ERR
+
+          "$root/ntr" start
+          "$root/ntr" status | tee status.txt
+          grep -q 'Daemon status: running' status.txt
+          "$root/ntr" stop
+
+          # The failure users hit: the GUI starting the daemon with no
+          # Node, no `ntr` on PATH and no build checkout.
+          "$root/ntr-gui" --daemon-check
+          "$root/ntr" status | grep -q 'Daemon status: running'
+          "$root/ntr" stop
+
+      - name: Smoke test archive (windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD "extract/${{ steps.archive.outputs.name }}"
+
+          # Drop every Node install from PATH: whatever runs from here on
+          # can only be using the runtime inside the archive.
+          $env:PATH = "C:\Windows\system32;C:\Windows"
+          if (Get-Command node -ErrorAction SilentlyContinue) {
+            throw "node is still on PATH, so this would not prove the archive is self-contained"
+          }
+
+          foreach ($entry in @('ntr.cmd', 'ntr-daemon.cmd', 'ntr-gui.exe', 'runtime\node.exe', 'app\src\cli.js', 'app\node_modules')) {
+            if (-not (Test-Path (Join-Path $root $entry))) { throw "archive is missing $entry" }
+          }
+
+          # The daemon detaches, so its own failures land in the log rather
+          # than on this console. Print it whenever a step below fails.
+          $daemonLog = Join-Path $env:APPDATA 'navcoin-rescue-tool\logs\daemon.log'
+          # Call the wrappers directly. Start-Process -Wait is wrong here:
+          # it waits for the process *and its descendants*, and `ntr start`
+          # deliberately leaves the daemon running, so it never returns.
+          # -join because PowerShell hands back multi-line output as an
+          # array, and -match over an array filters instead of testing.
+          function Invoke-Ntr {
+            param([string]$Command)
+            $text = (& "$root\ntr.cmd" $Command 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            Write-Host $text
+            return [pscustomobject]@{ ExitCode = $code; Output = $text }
+          }
+          function Show-DaemonLog {
+            if (Test-Path $daemonLog) {
+              Write-Host "--- daemon.log ---"
+              Get-Content $daemonLog -Tail 100
+            } else {
+              Write-Host "--- no daemon.log at $daemonLog ---"
+            }
+          }
+
+          $start = Invoke-Ntr 'start'
+          if ($start.ExitCode -ne 0) { Show-DaemonLog; throw "ntr start exited $($start.ExitCode)" }
+
+          $status = Invoke-Ntr 'status'
+          if ($status.ExitCode -ne 0) { Show-DaemonLog; throw "ntr status exited $($status.ExitCode)" }
+          if ($status.Output -notmatch 'Daemon status: running') { Show-DaemonLog; throw "unexpected status output" }
+          Invoke-Ntr 'stop' | Out-Null
+
+          # The failure users hit: the GUI starting the daemon with no
+          # Node, no `ntr` on PATH and no build checkout. The GUI binary is
+          # built for the Windows GUI subsystem and has no console, so the
+          # verdict comes back as an exit code plus an error file.
+          # -PassThru plus WaitForExit(), not -Wait: the GUI starts the
+          # daemon as a child, and -Wait would block on it too.
+          $gui = Start-Process -FilePath "$root\ntr-gui.exe" -ArgumentList '--daemon-check' -PassThru
+          $gui.WaitForExit()
+          if ($gui.ExitCode -ne 0) {
+            $errorFile = Join-Path $env:APPDATA 'navcoin-rescue-tool\daemon-check.error'
+            if (Test-Path $errorFile) { Get-Content $errorFile }
+            Show-DaemonLog
+            throw "ntr-gui --daemon-check exited $($gui.ExitCode)"
+          }
+
+          $status = Invoke-Ntr 'status'
+          if ($status.Output -notmatch 'Daemon status: running') { Show-DaemonLog; throw "daemon not running after GUI check" }
+          Invoke-Ntr 'stop' | Out-Null
+
+  release:
+    needs: [build, smoke]
+    # Nothing is published for a tagless dispatch — that mode exists to
+    # exercise the archives and their smoke tests.
+    if: inputs.tag != '' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write

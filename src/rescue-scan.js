@@ -20,6 +20,25 @@ const DEFAULT_OPTS = {
   progressInterval: 25,
 };
 
+/**
+ * Scan bookkeeping shared by every pass.
+ *
+ * `outpointsSeen` collects every unspent outpoint observed this scan.
+ * After scanning, a UTXO in our db that wasn't seen has been spent on
+ * chain since the last scan (typically: a stake input consumed by a
+ * stake reward tx), and reapStaleUtxos marks it spent so the balance
+ * stops counting it — otherwise confirmed balance accumulates the spent
+ * inputs while pending shows the new stake outputs, double-counting the
+ * rotated value.
+ *
+ * `failures` counts lookups that came back as an error rather than an
+ * answer. Not seeing an outpoint then means "we don't know", not "it was
+ * spent", so the reap has to be held back — see rescueScan.
+ */
+function createScan() {
+  return { outpointsSeen: new Set(), failures: 0 };
+}
+
 export async function rescueScan(wallet, opts = {}) {
   if (!wallet.client) {
     return;
@@ -28,13 +47,7 @@ export async function rescueScan(wallet, opts = {}) {
   const cfg = { ...DEFAULT_OPTS, ...opts };
   const password = wallet.spendingPassword;
 
-  // Track every unspent outpoint observed this scan. After scanning, any
-  // UTXO in our db that wasn't seen has been spent on chain since the
-  // last scan (typically: stake input consumed by a stake reward tx). We
-  // mark those as spent so GetBalance stops counting them — otherwise
-  // confirmed balance accumulates the spent inputs while pending shows
-  // the new stake outputs, double-counting the rotated value.
-  const outpointsSeen = new Set();
+  const scan = createScan();
 
   // Reset the staking-partner discovery cache so each scan re-queries
   // blockchain_staking_getKeys for every address. Without this, partners
@@ -55,19 +68,29 @@ export async function rescueScan(wallet, opts = {}) {
   }
 
   if (cfg.skipDerive) {
-    await scanExistingNavAddrs(wallet, cfg, outpointsSeen);
+    await scanExistingNavAddrs(wallet, cfg, scan);
   } else {
-    await walkBranch(wallet, password, RECEIVE_BRANCH, cfg, outpointsSeen);
-    await walkBranch(wallet, password, CHANGE_BRANCH, cfg, outpointsSeen);
+    await walkBranch(wallet, password, RECEIVE_BRANCH, cfg, scan);
+    await walkBranch(wallet, password, CHANGE_BRANCH, cfg, scan);
   }
 
-  await scanStaking(wallet, cfg, outpointsSeen);
+  await scanStaking(wallet, cfg, scan);
 
   if (cfg.skipXNav !== true) {
-    await scanXNav(wallet, cfg, outpointsSeen);
+    await scanXNav(wallet, cfg, scan);
   }
 
-  await reapStaleUtxos(wallet, outpointsSeen);
+  // Reaping on an incomplete scan would mark coins spent that we simply
+  // failed to look up, and a UTXO marked spent stays that way in the db.
+  // Overcounting until the next clean scan is recoverable; hiding a live
+  // UTXO from the sweep is not.
+  if (scan.failures > 0) {
+    console.error(
+      `[rescue-scan] ${scan.failures} lookup(s) failed — skipping stale-UTXO reap`,
+    );
+  } else {
+    await reapStaleUtxos(wallet, scan.outpointsSeen);
+  }
 
   wallet.emit('bootstrap_finished');
   wallet.emit('sync_finished');
@@ -82,7 +105,7 @@ export async function rescueScan(wallet, opts = {}) {
 // each batch via history + listunspent + GetTx + AddOutput inline. The
 // confirmed balance climbs during the scan instead of only at the end.
 // Walks until scannedIdx - 1 - lastUsedIdx >= gapLimit.
-async function walkBranch(wallet, password, branch, cfg, outpointsSeen) {
+async function walkBranch(wallet, password, branch, cfg, scan) {
   const counterName = branch === CHANGE_BRANCH ? 'NavChange' : 'Nav';
   const phase = branch === CHANGE_BRANCH ? 'change' : 'receive';
 
@@ -126,11 +149,7 @@ async function walkBranch(wallet, password, branch, cfg, outpointsSeen) {
 
       let inBatchScanned = 0;
       await mapConcurrent(batch, cfg.concurrency, async (addr) => {
-        const found = await scanAndHydrateAddr(
-          wallet,
-          addr.address,
-          outpointsSeen,
-        );
+        const found = await scanAndHydrateAddr(wallet, addr.address, scan);
         if (found > 0 && addr.idx > lastUsedIdx) lastUsedIdx = addr.idx;
         inBatchScanned++;
         if (
@@ -158,14 +177,14 @@ async function walkBranch(wallet, password, branch, cfg, outpointsSeen) {
 
 // One-shot scan of existing NAV addrs for skipDerive sources (private-key
 // imports). No walking — just iterate the imported keys once.
-async function scanExistingNavAddrs(wallet, cfg, outpointsSeen) {
+async function scanExistingNavAddrs(wallet, cfg, scan) {
   wallet.emit('utxo_phase', 'receive');
 
   const all = await wallet.db.GetNavReceivingAddresses(true);
   let scanned = 0;
 
   await mapConcurrent(all, cfg.concurrency, async (addr) => {
-    await scanAndHydrateAddr(wallet, addr.address, outpointsSeen);
+    await scanAndHydrateAddr(wallet, addr.address, scan);
     scanned++;
     if (scanned % cfg.progressInterval === 0 || scanned === all.length) {
       wallet.emit('scripthash_progress', scanned, all.length);
@@ -177,7 +196,7 @@ async function scanExistingNavAddrs(wallet, cfg, outpointsSeen) {
 // wallet.GetTx fetches the merkle proof so tx.height is set in the db,
 // which is required for GetBalance to return a confirmed (vs pending)
 // balance. Returns the number of UTXOs added.
-async function scanAndHydrateAddr(wallet, address, outpointsSeen) {
+async function scanAndHydrateAddr(wallet, address, scan) {
   const sh = wallet.AddressToScriptHash(address);
 
   let history;
@@ -186,6 +205,7 @@ async function scanAndHydrateAddr(wallet, address, outpointsSeen) {
     history = result?.history ?? (Array.isArray(result) ? result : []);
   } catch (err) {
     console.error(`[rescue-scan] history failed ${address}: ${err.message}`);
+    scan.failures += 1;
     return 0;
   }
   if (history.length === 0) return 0;
@@ -197,6 +217,7 @@ async function scanAndHydrateAddr(wallet, address, outpointsSeen) {
     console.error(
       `[rescue-scan] listunspent failed ${address}: ${err.message}`,
     );
+    scan.failures += 1;
     return 0;
   }
   if (list.length === 0) return 0;
@@ -204,7 +225,7 @@ async function scanAndHydrateAddr(wallet, address, outpointsSeen) {
   let added = 0;
   for (const u of list) {
     const outpoint = `${u.tx_hash}:${u.tx_pos}`;
-    outpointsSeen.add(outpoint);
+    scan.outpointsSeen.add(outpoint);
     try {
       const tx = await wallet.GetTx(u.tx_hash, undefined, u.height, false);
       if (!tx?.hex) continue;
@@ -283,7 +304,7 @@ async function discoverStakingPartners(wallet, cfg) {
   wallet.requestedStakingKeys = true;
 }
 
-async function scanStaking(wallet, cfg, outpointsSeen) {
+async function scanStaking(wallet, cfg, scan) {
   await discoverStakingPartners(wallet, cfg);
 
   wallet.emit('utxo_phase', 'stake');
@@ -303,11 +324,12 @@ async function scanStaking(wallet, cfg, outpointsSeen) {
       list = await wallet.client.blockchain_scripthash_listunspent(sh);
     } catch (err) {
       console.error(`[rescue-scan] staking listunspent failed: ${err.message}`);
+      scan.failures += 1;
       list = [];
     }
     for (const u of list) {
       const outpoint = `${u.tx_hash}:${u.tx_pos}`;
-      outpointsSeen.add(outpoint);
+      scan.outpointsSeen.add(outpoint);
       try {
         const tx = await wallet.GetTx(u.tx_hash, undefined, u.height, false);
         if (!tx?.hex) continue;
@@ -329,7 +351,7 @@ async function scanStaking(wallet, cfg, outpointsSeen) {
   });
 }
 
-async function scanXNav(wallet, cfg, outpointsSeen) {
+async function scanXNav(wallet, cfg, scan) {
   if (!wallet.mvk) return;
 
   // Anchor-history fetch can take seconds on a busy network. Mark the
@@ -349,6 +371,7 @@ async function scanXNav(wallet, cfg, outpointsSeen) {
     );
   } catch (err) {
     console.error(`[rescue-scan] xnav anchor history failed: ${err.message}`);
+    scan.failures += 1;
     return;
   }
 
@@ -370,6 +393,7 @@ async function scanXNav(wallet, cfg, outpointsSeen) {
     console.error(
       `[rescue-scan] xnav anchor listunspent failed: ${err.message}`,
     );
+    scan.failures += 1;
     // Fall through with anchorUnspent = null; we'll add all owned outputs
     // and rely on the next scan after a confirmed listunspent to clean up.
   }
@@ -418,6 +442,7 @@ async function scanXNav(wallet, cfg, outpointsSeen) {
       hex = tx?.hex;
     } catch (err) {
       console.error(`[rescue-scan] xnav GetTx failed ${txid}: ${err.message}`);
+      scan.failures += 1;
       continue;
     }
     if (!hex) continue;
@@ -465,7 +490,7 @@ async function scanXNav(wallet, cfg, outpointsSeen) {
       // xNAV outputs spent by a later tx (e.g., our own sweep) get re-added
       // as unspent every rescan and double-count the balance.
       if (anchorUnspent && !anchorUnspent.has(outpoint)) continue;
-      outpointsSeen.add(outpoint);
+      scan.outpointsSeen.add(outpoint);
       try {
         await wallet.AddOutput(outpoint, out, height);
         wallet.emit('balance_changed');

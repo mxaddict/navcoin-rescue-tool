@@ -78,11 +78,6 @@ async function main() {
     .catch(() => {});
 
   const logStream = fs.createWriteStream(layout.daemonLogFile, { flags: 'a' });
-  function log(msg) {
-    const timestamp = new Date().toISOString();
-    logStream.write(`${timestamp} ${msg}\n`);
-    console.log(`[daemon] ${msg}`);
-  }
 
   console.log(`[daemon] log file: ${layout.daemonLogFile}`);
 
@@ -331,7 +326,7 @@ async function main() {
         pid: null,
         error:
           error.code === 'EADDRINUSE'
-            ? 'Port 46117 already in use'
+            ? `Port ${DAEMON_PORT} already in use`
             : error.message,
       },
       root,

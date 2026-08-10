@@ -18,6 +18,7 @@ import {
 import {
   DAEMON_HOST,
   DAEMON_PORT,
+  DAEMON_READY_TIMEOUT_MS,
   formatSyncPhase,
   getStorageWarningLines,
   SUPPORTED_MNEMONIC_WALLET_TYPES,
@@ -415,9 +416,11 @@ async function ensureDaemonRunning(root, layout, log) {
     // Auth may have failed (missing/stale cookie) — check port directly.
     if (await isPortInUse()) {
       log(
-        '  A process is already using port 46117 but the auth cookie is missing or stale.',
+        `  A process is already using port ${DAEMON_PORT} but the auth cookie is missing or stale.`,
       );
-      log('  Stop the existing daemon first: kill the process on port 46117.');
+      log(
+        `  Stop the existing daemon first: kill the process on port ${DAEMON_PORT}.`,
+      );
       return false;
     }
     // Nothing listening — fall through to start daemon.
@@ -433,12 +436,15 @@ async function ensureDaemonRunning(root, layout, log) {
   });
   fs.closeSync(logFd);
 
-  const deadline = Date.now() + 5000;
+  // Unref up front: the daemon is detached and logs to its own file, so
+  // holding its handle only keeps the TUI's event loop alive.
+  child.unref();
+
+  const deadline = Date.now() + DAEMON_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 200));
     try {
       await getDaemonStatus(root);
-      child.unref();
       return true;
     } catch {
       // keep waiting

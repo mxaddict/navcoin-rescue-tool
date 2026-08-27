@@ -3,6 +3,13 @@
 Work raised but not finished, and what was deliberately left alone. Delete an
 entry when it ships — `git log` is the history.
 
+## Rust migration
+
+- Full plan in `docs/rust-migration.md` (2026-08-27). Open decisions it needs
+  before phase 1: GUI frontend (static JS vs Rust-native), whether to keep the
+  `ObsidianSweepKey` encryption claim, embed vs drop the xNAV bootstrap cache,
+  and sign-off on the proposed crate list. Not started.
+
 ## Coverage gaps
 
 - The release smoke tests drive daemon start/stop through the CLI wrappers and

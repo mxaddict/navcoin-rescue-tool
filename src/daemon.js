@@ -12,7 +12,7 @@ import {
   readStatus,
   writeDaemonState,
 } from './app-data.js';
-import { DAEMON_HOST, DAEMON_PORT } from './constants.js';
+import { APP_VERSION, DAEMON_HOST, DAEMON_PORT } from './constants.js';
 import {
   createImportedWallet,
   getNavWallet,
@@ -187,6 +187,7 @@ async function main() {
       });
 
       sendJson(response, 200, {
+        version: APP_VERSION,
         daemon: status.daemon,
         sourceCount: sources.length,
         appData: status.layout.root,
@@ -355,7 +356,7 @@ async function main() {
       root,
     );
     logStream.write(
-      `${new Date().toISOString()} daemon started pid=${process.pid}\n`,
+      `${new Date().toISOString()} daemon started pid=${process.pid} version=${APP_VERSION}\n`,
     );
     process.stdout.write('ready\n');
   });

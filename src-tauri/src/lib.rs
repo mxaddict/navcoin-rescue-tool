@@ -5,12 +5,25 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use ntr_daemon_launch::{find_on_path, spawn_daemon, NTR_PATH_NAMES};
+use ntr_daemon_launch::{
+    find_on_path, probe_daemon, spawn_daemon, stop_daemon, wait_for_daemon_gone, DaemonProbe,
+    NTR_PATH_NAMES,
+};
 
 const APP_NAME: &str = "navcoin-rescue-tool";
 const DEFAULT_DAEMON_PORT: u16 = 46117;
 const DAEMON_BOOT_WAIT_MS: u64 = 200;
 const DAEMON_BOOT_ATTEMPTS: u32 = 75;
+
+/// The version this GUI was built from. The daemon reports the version of
+/// the code it was started from on `/status`, and the two are bumped
+/// together, so a daemon reporting anything else was started from a
+/// different build and is replaced. `test/version.test.js` is what keeps
+/// the manifests they are read from in step.
+const GUI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// How long a daemon gets to close its wallets and release the port.
+const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Serialize)]
 struct DaemonAuth {
@@ -88,19 +101,26 @@ fn read_log_tail() -> Result<String, String> {
     Ok(buf)
 }
 
+/// The daemon's auth cookie, or None when there is no readable one — a
+/// first run, or a daemon whose app-data belongs to another user.
+fn auth_cookie() -> Option<String> {
+    let cookie = fs::read_to_string(app_data_dir().join("auth.cookie")).ok()?;
+    let cookie = cookie.trim();
+    match cookie.is_empty() {
+        true => None,
+        false => Some(cookie.to_string()),
+    }
+}
+
 #[tauri::command]
 fn daemon_auth() -> Result<DaemonAuth, String> {
     let cookie_path = app_data_dir().join("auth.cookie");
-    let cookie = fs::read_to_string(&cookie_path)
-        .map_err(|e| {
-            format!(
-                "auth.cookie read failed at {}: {}",
-                cookie_path.display(),
-                e
-            )
-        })?
-        .trim()
-        .to_string();
+    let cookie = auth_cookie().ok_or_else(|| {
+        format!(
+            "auth.cookie is missing or empty at {}",
+            cookie_path.display()
+        )
+    })?;
     Ok(DaemonAuth {
         url: format!("http://127.0.0.1:{}", daemon_port()),
         cookie,
@@ -117,15 +137,38 @@ fn dev_cli_path() -> Option<PathBuf> {
         .map(|repo| repo.join("src").join("cli.js"))
 }
 
-// Start the daemon if it's not already listening on its port and wait
-// up to ~15s for the port to come up. The daemon detaches and writes
-// its own auth.cookie on boot. See the ntr-daemon-launch crate for where
-// the daemon is looked for.
+// Make sure the daemon answering on the port is this build's daemon,
+// starting one if nothing is there and replacing one left behind by
+// another build.
+//
+// A daemon outlives the app that started it: it detaches, and nothing
+// stops it on upgrade. Reusing whatever holds the port therefore serves
+// the previous version's behaviour indefinitely — a wallet type this
+// build supports comes back "unsupported" because the daemon answering
+// has never heard of it. A daemon that cannot be identified is left
+// alone: it may not be ours to stop.
 #[tauri::command]
 fn ensure_daemon() -> Result<(), String> {
     let port = daemon_port();
-    if daemon_listening(port) {
-        return Ok(());
+    let cookie = auth_cookie();
+
+    match probe_daemon(port, cookie.as_deref()) {
+        DaemonProbe::Version(version) if version == GUI_VERSION => return Ok(()),
+        DaemonProbe::Version(_) | DaemonProbe::NoVersion => {
+            let cookie = cookie.ok_or_else(|| {
+                "the daemon reported another version but there is no auth cookie to stop it with"
+                    .to_string()
+            })?;
+            stop_daemon(port, &cookie)
+                .map_err(|e| format!("stopping the daemon already on port {port}: {e}"))?;
+            if !wait_for_daemon_gone(port, DAEMON_STOP_TIMEOUT) {
+                return Err(format!(
+                    "the daemon on port {port} did not shut down; stop it and start the app again"
+                ));
+            }
+        }
+        DaemonProbe::Unidentified(_) => return Ok(()),
+        DaemonProbe::NotRunning => {}
     }
 
     let exe =

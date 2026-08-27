@@ -8,5 +8,6 @@ rust-version = "1.77"
 # Deliberately free of GUI dependencies: this is the part of the GUI that
 # has to be right on every platform we ship, so its tests must run
 # anywhere, including machines and CI jobs with no webview toolkit
-# installed.
+# installed. serde_json is not one — it parses the daemon's own reply.
 [dependencies]
+serde_json = "1"

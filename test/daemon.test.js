@@ -16,6 +16,7 @@ import {
   purgeDaemon,
   stopDaemon,
 } from '../src/daemon-client.js';
+import { APP_VERSION } from '../src/constants.js';
 import {
   getProjectRoot,
   makeProjectTempDir,
@@ -125,6 +126,12 @@ test('daemon status requires auth cookie and supports stop', async () => {
       headers: { Authorization: authCookie },
     });
     assert.equal(authorized.status, 200);
+
+    // The GUI reads this field off the wire to decide whether the daemon
+    // holding the port came from the same build it ships with, so it has
+    // to sit at the top level of the reply and carry the real version.
+    const reply = await authorized.json();
+    assert.equal(reply.version, APP_VERSION);
 
     const status = await getDaemonStatus(root);
     assert.equal(status.daemon.status, 'running');

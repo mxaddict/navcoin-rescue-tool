@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The daemon reports the version it was started from as `version` on `/status`,
+  and writes it to the log on startup (`daemon started pid=… version=…`).
+
+### Fixed
+
+- GUI: a daemon left running from an older build is now replaced instead of
+  reused. The daemon detaches and outlives the app that started it, so after an
+  upgrade the port was still held by the previous version and the GUI kept
+  talking to it — a wallet type added in the new release came back as
+  "Unsupported wallet type" with nothing to say why. `ensure_daemon` now reads
+  the daemon's version from `/status`, and on a mismatch stops it, waits for the
+  port, and starts its own. A daemon that does not answer or that refuses the
+  auth cookie is left alone rather than assumed stale.
+
 ## [0.1.2] - 2026-08-27
 
 ### Added

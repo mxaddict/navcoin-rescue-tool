@@ -1,3 +1,14 @@
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+
+// Reported on /status so a client can tell whether the daemon it found on
+// the port was started from the same code it ships with — a daemon that
+// keeps running across an upgrade otherwise serves the old behaviour with
+// no sign that it is doing so. Read from the manifest rather than
+// duplicated here, so a version bump stays a one-file change.
+export const APP_VERSION = require('../package.json').version;
+
 export const APP_NAME = 'navcoin-rescue-tool';
 export const CLI_NAME = 'ntr';
 export const GUI_NAME = 'ntr-gui';

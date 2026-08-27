@@ -10,15 +10,16 @@ entry when it ships — `git log` is the history.
   `ObsidianSweepKey` encryption claim, embed vs drop the xNAV bootstrap cache,
   and sign-off on the proposed crate list. Not started.
 
-## Stale daemon after upgrade
+## Stale daemon after upgrade, CLI and TUI halves
 
-- Every client reuses whatever daemon is listening on `46117`, so a daemon
-  started from older code keeps serving after `git pull`, a `tauri dev`
-  restart, or a release upgrade. Seen 2026-08-27: GUI reported
-  `Unsupported wallet type: coinomi` from a daemon started before the type
-  was added. Fix: `/status` (`daemon.js`) reports the daemon's version;
-  `daemon-client.js`, the TUI's `ensureDaemonRunning`, and the GUI's
-  `ensure_daemon` compare it to their own and offer a restart on mismatch.
+- The GUI half shipped: `/status` reports `version` and `ensure_daemon`
+  replaces a daemon that reports a different one. `daemon-client.js` and the
+  TUI's `ensureDaemonRunning` still reuse whatever is on the port without
+  looking at the version, so `ntr` run from a checkout that has moved on keeps
+  driving the old daemon. Same fix shape: compare against `APP_VERSION` from
+  `src/constants.js` and offer a restart. Left out of the GUI change to keep it
+  reviewable — the CLI can prompt, which the GUI's headless `--daemon-check`
+  path cannot.
 
 ## Coverage gaps
 

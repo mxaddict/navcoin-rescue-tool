@@ -200,6 +200,53 @@ test('daemon import persists sources and rejects duplicates', async () => {
   }
 });
 
+test('daemon accepts coinomi and dedupes it against navcoin-js-v1', async () => {
+  const root = await makeProjectTempDir('daemon');
+  const projectRoot = getProjectRoot();
+  const phrase =
+    'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+
+  await bootstrapAppData(root);
+
+  const child = spawnDaemon(projectRoot, root);
+
+  try {
+    await waitForReady(child);
+
+    const imported = await importDaemonSource(
+      { type: 'mnemonic', walletType: 'coinomi', phrase },
+      root,
+    );
+
+    assert.equal(imported.source.status, 'ready');
+    assert.equal(imported.source.walletType, 'coinomi');
+
+    const status = await getDaemonStatus(root);
+    assert.equal(status.sourceCount, 1);
+    assert.equal(status.sources[0].walletType, 'coinomi');
+
+    // Coinomi derives at the navcoin-js-v1 path, so the same phrase under
+    // that type is the same keys and must not become a second source.
+    await assert.rejects(
+      importDaemonSource(
+        { type: 'mnemonic', walletType: 'navcoin-js-v1', phrase },
+        root,
+      ),
+      /Duplicate source/,
+    );
+
+    const reloaded = await readStatus(root);
+    assert.equal(reloaded.sources.sources.length, 1);
+
+    await stopDaemon(root);
+    await waitForExit(child);
+  } finally {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('daemon private-key import works', async () => {
   const root = await makeProjectTempDir('daemon');
   const projectRoot = getProjectRoot();

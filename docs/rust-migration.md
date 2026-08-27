@@ -126,6 +126,7 @@ and the traps found while reading the library. File references are into
 | Type            | Seed                                                                 | Address path                  |
 | --------------- | -------------------------------------------------------------------- | ----------------------------- |
 | `navcoin-js-v1` | BIP39 pbkdf2 → HMAC-SHA512("Bitcoin seed")                           | `m/44'/130'/0'/{c}/{i}`       |
+| `coinomi`       | same (alias: Coinomi uses SLIP-44 130 at BIP44 account 0)            | `m/44'/130'/0'/{c}/{i}`       |
 | `navpay`        | same                                                                 | `m/44'/0'/0'/{c}/{i}`         |
 | `navcash`       | Electrum seed: pbkdf2(nfkd(m), "electrum"), version prefix `01`      | `m/{c}/{i}`                   |
 | `navcoin-core`  | **BIP39 entropy bytes used directly as the BIP32 seed** (no pbkdf2)  | `m/0'/{c}'/{i}'` all hardened |

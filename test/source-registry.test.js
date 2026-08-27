@@ -73,3 +73,39 @@ test('importSource does not persist failed wallet creation', async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('coinomi imports as an alias of the navcoin-js-v1 derivation', async () => {
+  const root = await makeProjectTempDir('source');
+  const phrase =
+    'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+
+  try {
+    await bootstrapAppData(root);
+
+    const source = await importSource(
+      { type: 'mnemonic', walletType: 'coinomi', phrase },
+      root,
+    );
+
+    // The label the user picked is what gets stored and shown.
+    assert.equal(source.walletType, 'coinomi');
+    assert.equal(source.status, 'ready');
+    await fs.access(source.wallet.dataFile);
+
+    // Same phrase under the type it aliases derives the same keys, so it
+    // must be rejected as the same source rather than double-counted.
+    await assert.rejects(
+      importSource(
+        { type: 'mnemonic', walletType: 'navcoin-js-v1', phrase },
+        root,
+      ),
+      /Duplicate source/,
+    );
+
+    const stored = await readSources(root);
+    assert.equal(stored.sources.length, 1);
+    assert.equal(stored.sources[0].walletType, 'coinomi');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

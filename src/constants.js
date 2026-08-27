@@ -22,7 +22,22 @@ export const SUPPORTED_MNEMONIC_WALLET_TYPES = [
   'next',
   'navpay',
   'navcoin-js-v1',
+  'coinomi',
 ];
+
+// User-facing wallet types that navcoin-js has no branch for, mapped to
+// the navcoin-js type with the same derivation. Coinomi derives NavCoin
+// from a standard BIP39 seed at BIP44 m/44'/130'/0' (SLIP-44 coin 130),
+// which is exactly the navcoin-js-v1 scheme — the alias exists so users
+// can pick the app they actually used.
+const WALLET_TYPE_ALIASES = {
+  coinomi: 'navcoin-js-v1',
+};
+
+// The navcoin-js wallet type that derives keys for a user-facing type.
+export function getDerivationWalletType(walletType) {
+  return WALLET_TYPE_ALIASES[walletType] ?? walletType;
+}
 export const SUPPORTED_SOURCE_TYPES = ['mnemonic', 'private-key'];
 
 export const FILE_LAYOUT = {

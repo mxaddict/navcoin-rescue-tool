@@ -175,6 +175,7 @@ Supported mnemonic wallet types:
 - `next`
 - `navpay`
 - `navcoin-js-v1`
+- `coinomi` (same derivation as `navcoin-js-v1`: BIP44 `m/44'/130'/0'`)
 
 Import private-key source:
 

@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `coinomi` mnemonic wallet type for `import` in the CLI, TUI, GUI and daemon.
+  Coinomi derives NavCoin from a standard BIP39 seed at BIP44 `m/44'/130'/0'`,
+  the same scheme as `navcoin-js-v1`, so the type is an alias:
+  `getDerivationWalletType` in `src/constants.js` maps it before the wallet is
+  created, and the source fingerprint uses the derivation type so the same
+  phrase cannot be imported twice under both names.
+
 ## [0.1.1] - 2026-08-10
 
 ### Fixed

@@ -45,7 +45,8 @@ discovers recoverable funds, and sweeps to a new destination. CLI command is
 ## Expected Inputs
 
 - Mnemonic phrases for `navcoin-js` wallet types: `navcoin-js-v1`, `navcash`,
-  `next`, `navcoin-core`, `navpay`.
+  `next`, `navcoin-core`, `navpay`, plus `coinomi` as an alias for the
+  `navcoin-js-v1` derivation.
 - Private keys (WIF) imported into `navcoin-js`.
 
 ## Out Of Scope

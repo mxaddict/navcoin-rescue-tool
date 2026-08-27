@@ -11,6 +11,8 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
+import { getDerivationWalletType } from './constants.js';
+
 process.on('uncaughtException', (error) => {
   try {
     process.stdout.write(
@@ -114,7 +116,7 @@ async function main() {
 
     if (source.type === 'mnemonic') {
       options.mnemonic = source.normalizedDetails.replaceAll('\n', ' ');
-      options.type = source.walletType;
+      options.type = getDerivationWalletType(source.walletType);
     } else {
       options.mnemonic = PRIVATE_KEY_CONTAINER_MNEMONIC;
       options.type = 'navcoin-js-v1';

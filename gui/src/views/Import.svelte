@@ -8,6 +8,7 @@
     'next',
     'navpay',
     'navcoin-js-v1',
+    'coinomi',
   ];
 
   let kind = $state('mnemonic');

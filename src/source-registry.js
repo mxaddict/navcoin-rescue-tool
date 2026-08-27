@@ -8,6 +8,7 @@ import {
   resetNavcoinJs,
 } from './navcoin-js-adapter.js';
 import {
+  getDerivationWalletType,
   SUPPORTED_MNEMONIC_WALLET_TYPES,
   SUPPORTED_SOURCE_TYPES,
 } from './constants.js';
@@ -91,9 +92,14 @@ export async function importSource(
   },
 ) {
   const validated = validateImportInput(input);
+  // Fingerprint the derivation scheme rather than the label, so a phrase
+  // imported under an alias and again under the type it aliases is one
+  // source — two would derive the same keys and double-count every UTXO.
   const fingerprint = buildFingerprint([
     validated.type,
-    validated.walletType || 'private-key',
+    validated.walletType
+      ? getDerivationWalletType(validated.walletType)
+      : 'private-key',
     validated.normalizedDetails,
   ]);
   const sourceId = fingerprint.slice(0, 16);

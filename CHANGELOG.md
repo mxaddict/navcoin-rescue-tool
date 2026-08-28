@@ -11,6 +11,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The daemon reports the version it was started from as `version` on `/status`,
   and writes it to the log on startup (`daemon started pid=… version=…`).
 
+- Mnemonics are checked before they are accepted. `assertMnemonicAccepted`
+  in the new `src/mnemonic.js` runs from `validateImportInput`, which every
+  front end reaches through the daemon, so the CLI, TUI and GUI all reject
+  the same phrases. Types that derive through a bitcore Mnemonic
+  (`navcoin-js-v1`, `coinomi`, `navpay`, `next`) require a valid BIP39
+  checksum; `navcash` is checked against the Electrum seed scheme instead.
+  Previously a phrase with a mistyped word was accepted, written to
+  `sources.json`, and only failed later in a background worker.
+- `navcoin-core` requires the BIP39 checksum too, because it derives from
+  the raw entropy without reading the checksum and so would silently derive
+  a different wallet from a phrase with a wrong word. Because that is also
+  the only type that can import a genuinely non-BIP39 phrase, the check is
+  waivable there: `ntr import mnemonic --allow-unchecked-mnemonic`, a
+  confirm prompt in the TUI, and a checkbox in the GUI shown only after a
+  waivable rejection.
+- Import failures carry a `code` (and `waivable`) alongside the message, so
+  a client can recognise a checksum rejection without matching on text.
+
+### Changed
+
+- Rejection messages no longer repeat the phrase. bitcore-mnemonic's
+  `InvalidMnemonic` embeds the whole mnemonic in its message, which the
+  daemon wrote to `logs/daemon.log`.
+
 ### Fixed
 
 - GUI: a daemon left running from an older build is now replaced instead of

@@ -33,6 +33,10 @@ import {
   STATIC_WALLET_PASSWORD,
   SUPPORTED_MNEMONIC_WALLET_TYPES,
 } from './constants.js';
+import {
+  isWaivableMnemonicError,
+  MNEMONIC_CHECKSUM_ERROR,
+} from './mnemonic-error.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -228,6 +232,11 @@ async function handleShow() {
   }
 }
 
+// Options that stand alone rather than taking a value. Without this a
+// bare `--allow-unchecked-mnemonic` consumes the next token as its value,
+// which silently swallows whatever followed it.
+const BOOLEAN_OPTIONS = new Set(['allow-unchecked-mnemonic']);
+
 function parseOptions(argv) {
   const options = {};
 
@@ -236,6 +245,12 @@ function parseOptions(argv) {
     if (!token.startsWith('--')) continue;
 
     const key = token.slice(2);
+
+    if (BOOLEAN_OPTIONS.has(key)) {
+      options[key] = true;
+      continue;
+    }
+
     const value = argv[index + 1];
     if (!value || value.startsWith('--')) {
       throw new Error(`Missing value for --${key}`);
@@ -276,6 +291,7 @@ async function handleImport(argv) {
           type: 'mnemonic',
           walletType: options['wallet-type'],
           phrase: options.phrase,
+          allowUncheckedMnemonic: options['allow-unchecked-mnemonic'] === true,
         },
         root,
       );
@@ -321,9 +337,14 @@ async function handleImport(argv) {
       process.stderr.write(
         `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
       );
+    } else if (isWaivableMnemonicError(error)) {
+      process.stderr.write(`${error.message}\n`);
+      process.stderr.write(
+        `To import it anyway, add --allow-unchecked-mnemonic.\n`,
+      );
     } else {
       process.stderr.write(`${error.message}\n`);
-      if (sourceType === 'mnemonic') {
+      if (sourceType === 'mnemonic' && error.code !== MNEMONIC_CHECKSUM_ERROR) {
         process.stderr.write(
           `Supported wallet types: ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}\n`,
         );

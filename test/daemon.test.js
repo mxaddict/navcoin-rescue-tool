@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
@@ -18,9 +17,12 @@ import {
 } from '../src/daemon-client.js';
 import { APP_VERSION } from '../src/constants.js';
 import {
-  getProjectRoot,
+  killPortHolders,
   makeProjectTempDir,
+  spawnDaemon,
   startStubElectrumServer,
+  waitForDaemonReady as waitForReady,
+  waitForExit,
 } from './test-helpers.js';
 
 const TEST_PORT = 46199;
@@ -35,19 +37,7 @@ let stubClose = null;
 // silently when it's missing.  Then start the stub electrum server
 // once for the whole file.
 before(async () => {
-  const result = spawnSync('lsof', ['-ti', `tcp:${TEST_PORT}`], {
-    encoding: 'utf8',
-  });
-  if (!result.error) {
-    const pids = result.stdout.trim().split('\n').filter(Boolean);
-    for (const pid of pids) {
-      try {
-        process.kill(Number(pid), 'SIGKILL');
-      } catch {
-        // already gone
-      }
-    }
-  }
+  killPortHolders(TEST_PORT);
 
   const stub = await startStubElectrumServer();
   stubPort = stub.port;
@@ -58,62 +48,11 @@ after(async () => {
   if (stubClose) await stubClose();
 });
 
-// Generous: booting the daemon pulls in navcoin-js and its native deps,
-// which takes seconds on a cold CI runner (3s flaked on Windows). The
-// test still fails if 'ready' never arrives — this only bounds the wait.
-const READY_TIMEOUT_MS = 30_000;
-
-async function waitForReady(child) {
-  return new Promise((resolve, reject) => {
-    let stdout = '';
-    const timeout = setTimeout(
-      () => reject(new Error('daemon ready timeout')),
-      READY_TIMEOUT_MS,
-    );
-
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-      if (stdout.includes('ready')) {
-        clearTimeout(timeout);
-        resolve();
-      }
-    });
-
-    child.on('exit', (code) => {
-      clearTimeout(timeout);
-      reject(new Error(`daemon exited early: ${code}`));
-    });
-  });
-}
-
-function waitForExit(child) {
-  // If already exited, resolve immediately.
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => child.once('exit', resolve));
-}
-
-function spawnDaemon(projectRoot, root) {
-  return spawn(process.execPath, ['src/daemon.js'], {
-    cwd: projectRoot,
-    env: {
-      ...process.env,
-      NTR_APP_DATA: root,
-      NTR_DAEMON_PORT: String(TEST_PORT),
-      NTR_ELECTRUM_NODES: `127.0.0.1:${stubPort}:ws`,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
-
 test('daemon status requires auth cookie and supports stop', async () => {
   const root = await makeProjectTempDir('daemon');
-  const projectRoot = getProjectRoot();
-
   await bootstrapAppData(root);
 
-  const child = spawnDaemon(projectRoot, root);
+  const child = spawnDaemon({ root: root, stubPort });
 
   try {
     await waitForReady(child);
@@ -150,11 +89,9 @@ test('daemon status requires auth cookie and supports stop', async () => {
 
 test('daemon import persists sources and rejects duplicates', async () => {
   const root = await makeProjectTempDir('daemon');
-  const projectRoot = getProjectRoot();
-
   await bootstrapAppData(root);
 
-  const child = spawnDaemon(projectRoot, root);
+  const child = spawnDaemon({ root: root, stubPort });
 
   try {
     await waitForReady(child);
@@ -209,13 +146,12 @@ test('daemon import persists sources and rejects duplicates', async () => {
 
 test('daemon accepts coinomi and dedupes it against navcoin-js-v1', async () => {
   const root = await makeProjectTempDir('daemon');
-  const projectRoot = getProjectRoot();
   const phrase =
     'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
   await bootstrapAppData(root);
 
-  const child = spawnDaemon(projectRoot, root);
+  const child = spawnDaemon({ root: root, stubPort });
 
   try {
     await waitForReady(child);
@@ -256,11 +192,9 @@ test('daemon accepts coinomi and dedupes it against navcoin-js-v1', async () => 
 
 test('daemon private-key import works', async () => {
   const root = await makeProjectTempDir('daemon');
-  const projectRoot = getProjectRoot();
-
   await bootstrapAppData(root);
 
-  const child = spawnDaemon(projectRoot, root);
+  const child = spawnDaemon({ root: root, stubPort });
 
   try {
     await waitForReady(child);
@@ -287,11 +221,9 @@ test('daemon private-key import works', async () => {
 
 test('daemon restart restores imported sources from disk', async () => {
   const root = await makeProjectTempDir('daemon-restart-persist');
-  const projectRoot = getProjectRoot();
-
   await bootstrapAppData(root);
 
-  let child = spawnDaemon(projectRoot, root);
+  let child = spawnDaemon({ root: root, stubPort });
 
   try {
     // 1. Import a private-key source.
@@ -317,7 +249,7 @@ test('daemon restart restores imported sources from disk', async () => {
     assert.equal(sourcesOnDisk.sources[0].id, sourceId);
 
     // 4. Respawn daemon on the same root.
-    child = spawnDaemon(projectRoot, root);
+    child = spawnDaemon({ root: root, stubPort });
     await waitForReady(child);
 
     // 5. Assert state restored from disk.
@@ -337,11 +269,9 @@ test('daemon restart restores imported sources from disk', async () => {
 
 test('daemon survives purge then re-import of same private key', async () => {
   const root = await makeProjectTempDir('daemon-purge-reimport');
-  const projectRoot = getProjectRoot();
-
   await bootstrapAppData(root);
 
-  let child = spawnDaemon(projectRoot, root);
+  let child = spawnDaemon({ root: root, stubPort });
 
   try {
     // 1. Import a private key.
@@ -364,7 +294,7 @@ test('daemon survives purge then re-import of same private key', async () => {
 
     // 3. Restart — purge now stops the daemon after deleting data.
 
-    child = spawnDaemon(projectRoot, root);
+    child = spawnDaemon({ root: root, stubPort });
     await waitForReady(child);
 
     // 4. Re-import the same private key — this was crashing with ConstraintError.
@@ -393,11 +323,9 @@ test('daemon survives purge then re-import of same private key', async () => {
 
 test('daemon status is idempotent across repeated reads', async () => {
   const root = await makeProjectTempDir('daemon-idempotent-status');
-  const projectRoot = getProjectRoot();
-
   await bootstrapAppData(root);
 
-  const child = spawnDaemon(projectRoot, root);
+  const child = spawnDaemon({ root: root, stubPort });
 
   try {
     await waitForReady(child);
@@ -433,11 +361,9 @@ test('daemon status is idempotent across repeated reads', async () => {
 
 test('daemon rejects invalid imports without persisting broken state', async () => {
   const root = await makeProjectTempDir('daemon-invalid-import');
-  const projectRoot = getProjectRoot();
-
   await bootstrapAppData(root);
 
-  const child = spawnDaemon(projectRoot, root);
+  const child = spawnDaemon({ root: root, stubPort });
 
   try {
     await waitForReady(child);
@@ -528,20 +454,10 @@ test(
     const fixtureStub = await startStubElectrumServer(fixture);
 
     const root = await makeProjectTempDir('daemon-nav-balance');
-    const pRoot = getProjectRoot();
 
     await bootstrapAppData(root);
 
-    const child = spawn(process.execPath, ['src/daemon.js'], {
-      cwd: pRoot,
-      env: {
-        ...process.env,
-        NTR_APP_DATA: root,
-        NTR_DAEMON_PORT: String(TEST_PORT),
-        NTR_ELECTRUM_NODES: `127.0.0.1:${fixtureStub.port}:ws`,
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = spawnDaemon({ root, stubPort: fixtureStub.port });
 
     try {
       await waitForReady(child);

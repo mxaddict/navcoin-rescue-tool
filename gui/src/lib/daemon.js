@@ -36,7 +36,14 @@ async function daemonRequest(path, init = {}) {
   }
   if (!res.ok) {
     const msg = body?.error ?? body ?? `status ${res.status}`;
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    const error = new Error(
+      typeof msg === 'string' ? msg : JSON.stringify(msg),
+    );
+    // Carry the daemon's classification through so the view can branch on
+    // it rather than matching on message text.
+    if (body?.code) error.code = body.code;
+    if (body?.waivable === true) error.waivable = true;
+    throw error;
   }
   return body;
 }

@@ -23,6 +23,7 @@ import {
   getStorageWarningLines,
   SUPPORTED_MNEMONIC_WALLET_TYPES,
 } from './constants.js';
+import { isWaivableMnemonicError } from './mnemonic-error.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -478,7 +479,17 @@ async function cmdShow(C, root, log) {
   }
 }
 
-async function cmdImportMnemonic(C, root, log, ask, startSpinner, stopSpinner) {
+// Exported for tests: every collaborator it needs is a parameter, so the
+// import flow — including the retry after a waivable checksum rejection —
+// can be driven without a terminal.
+export async function cmdImportMnemonic(
+  C,
+  root,
+  log,
+  ask,
+  startSpinner,
+  stopSpinner,
+) {
   const walletType = await ask(
     `Wallet type (${SUPPORTED_MNEMONIC_WALLET_TYPES.join('/')}):`,
     SUPPORTED_MNEMONIC_WALLET_TYPES,
@@ -502,19 +513,51 @@ async function cmdImportMnemonic(C, root, log, ask, startSpinner, stopSpinner) {
   );
   const spinner = startSpinner('Importing... deriving address pool');
   try {
-    const result = await importDaemonSource(
-      { type: 'mnemonic', walletType, phrase },
-      root,
-    );
+    const result = await runImport(root, walletType, phrase, false);
     stopSpinner(spinner);
-    log(C.teal(`  Imported: ${result.source.id}`));
-    log(`  Wallet type: ${result.source.walletType}`);
-    log(C.muted('  Syncing in the background — check `status` for progress.'));
-    logStorageWarning(C, root, log);
+    logImported(C, root, log, result);
   } catch (error) {
     stopSpinner(spinner);
-    log(C.pink(`  Import failed: ${error.message}`));
+
+    if (!isWaivableMnemonicError(error)) {
+      log(C.pink(`  Import failed: ${error.message}`));
+      return;
+    }
+
+    // Only navcoin-core can derive from a phrase that fails the checksum,
+    // and doing so is a deliberate choice: offer it here rather than
+    // making the user retype the phrase behind a flag.
+    log(C.pink(`  ${error.message}`));
+    const answer = await ask('Import it anyway? (yes/no):', ['yes', 'no']);
+    if (answer !== 'yes') {
+      log(C.muted('  Import cancelled.'));
+      return;
+    }
+
+    const retry = startSpinner('Importing... deriving address pool');
+    try {
+      const result = await runImport(root, walletType, phrase, true);
+      stopSpinner(retry);
+      logImported(C, root, log, result);
+    } catch (retryError) {
+      stopSpinner(retry);
+      log(C.pink(`  Import failed: ${retryError.message}`));
+    }
   }
+}
+
+function runImport(root, walletType, phrase, allowUncheckedMnemonic) {
+  return importDaemonSource(
+    { type: 'mnemonic', walletType, phrase, allowUncheckedMnemonic },
+    root,
+  );
+}
+
+function logImported(C, root, log, result) {
+  log(C.teal(`  Imported: ${result.source.id}`));
+  log(`  Wallet type: ${result.source.walletType}`);
+  log(C.muted('  Syncing in the background — check `status` for progress.'));
+  logStorageWarning(C, root, log);
 }
 
 function logStorageWarning(C, root, log) {

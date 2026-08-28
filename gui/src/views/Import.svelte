@@ -1,6 +1,7 @@
 <script>
   import { importSource, fetchDaemonStatus } from '../lib/daemon.js';
   import { getStorageWarningLines } from '../lib/storage-warning.js';
+  import { isWaivableMnemonicError } from '../lib/mnemonic-error.js';
 
   const WALLET_TYPES = [
     'navcoin-core',
@@ -17,6 +18,11 @@
   let keysText = $state('');
   let busy = $state(false);
   let error = $state(null);
+  // Set when the daemon rejected the phrase for a checksum the user is
+  // allowed to waive. Offering the checkbox only then keeps it out of the
+  // way of everyone whose phrase is fine.
+  let checksumWaivable = $state(false);
+  let allowUncheckedMnemonic = $state(false);
   let result = $state(null);
   let warningLines = $state([]);
 
@@ -29,7 +35,12 @@
       let payload;
       if (kind === 'mnemonic') {
         if (!phrase.trim()) throw new Error('Mnemonic phrase required.');
-        payload = { type: 'mnemonic', walletType, phrase: phrase.trim() };
+        payload = {
+          type: 'mnemonic',
+          walletType,
+          phrase: phrase.trim(),
+          allowUncheckedMnemonic,
+        };
       } else {
         const keys = keysText
           .split(/\s+/)
@@ -53,8 +64,12 @@
 
       phrase = '';
       keysText = '';
+      allowUncheckedMnemonic = false;
+      checksumWaivable = false;
     } catch (err) {
       error = err.message ?? String(err);
+      checksumWaivable = isWaivableMnemonicError(err);
+      if (!checksumWaivable) allowUncheckedMnemonic = false;
     } finally {
       busy = false;
     }
@@ -106,7 +121,11 @@
             role="tab"
             class:active={walletType === t}
             aria-selected={walletType === t}
-            onclick={() => (walletType = t)}
+            onclick={() => {
+            walletType = t;
+            allowUncheckedMnemonic = false;
+            checksumWaivable = false;
+          }}
             disabled={busy}
           >
             {t}
@@ -129,6 +148,24 @@
       ></textarea>
       <p class="hint">12 or 24 words, separated by spaces.</p>
     </div>
+
+    {#if checksumWaivable}
+      <div class="field">
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            bind:checked={allowUncheckedMnemonic}
+            disabled={busy}
+          />
+          Import without the checksum check
+        </label>
+        <p class="hint">
+          Only for a wallet that really was created from a phrase failing
+          BIP39. A mistyped word derives a different wallet, which will
+          look empty.
+        </p>
+      </div>
+    {/if}
   {:else}
     <div class="field">
       <label for="keys">WIF private keys</label>
@@ -243,6 +280,18 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-weight: 600;
+  }
+
+  /* The waiver opt-in reads as a sentence, not as a field label. */
+  .field label.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
   }
 
   .field textarea,

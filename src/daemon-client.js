@@ -22,15 +22,21 @@ export async function daemonRequest(
   if (!response.ok) {
     const text = await response.text();
     let message;
+    let body;
     try {
-      const json = JSON.parse(text);
-      message = json.error ?? text;
+      body = JSON.parse(text);
+      message = body.error ?? text;
     } catch {
       message = text;
     }
-    throw new Error(
+    const error = new Error(
       message || `Daemon request failed with status ${response.status}`,
     );
+    // Carry the daemon's classification onto the thrown error so callers
+    // can branch on it instead of parsing the message.
+    if (body?.code) error.code = body.code;
+    if (body?.waivable === true) error.waivable = true;
+    throw error;
   }
 
   return response.json();

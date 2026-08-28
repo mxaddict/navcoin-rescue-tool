@@ -36,52 +36,6 @@ entry when it ships — `git log` is the history.
   Svelte views under `gui/src` — their daemon wiring was read, their UI logic
   was not.
 
-## Mnemonic checksum is never validated at import
-
-Investigated 2026-08-27 after a 24-word phrase failed with
-`navcoin-js import failed: Mnemonic string is invalid: <phrase>`.
-
-What was verified:
-
-- The phrase's BIP39 checksum is genuinely wrong. Recomputing it by hand
-  from the wordlist indices gives an expected checksum byte that does not
-  match the one the words encode. All 24 words are in the English list, so
-  the failure is a checksum, not an unknown word.
-- Exactly one word is off: swapping the last word for its neighbour two
-  entries along in the wordlist makes `Mnemonic.isValid` return true. Eight
-  of the 2048 words complete that 23-word prefix validly; the one adjacent
-  to the typed word is the obvious candidate. A single-letter transcription
-  slip fits.
-- Which types reject it and which do not, read from `wallet.js` in
-  navcoin-js and confirmed by running them: `navcoin-js-v1`, `coinomi`,
-  `navpay` and `next` all go through `new Mnemonic(phrase)`, whose
-  constructor calls `Mnemonic.isValid` and throws. `navcoin-core` goes
-  through `Mnemonic.mnemonicToData`, which slices the checksum bits off and
-  never compares them, so it accepts any wordlist-valid phrase.
-  `navcash` uses Electrum's own scheme and never sees a BIP39 checksum.
-- That is why the same phrase "works" in navio-core and in this tool's
-  `navcoin-core` type: neither validates. It is not evidence the phrase is
-  right.
-- The types do not derive the same keys. Loading one 24-word phrase under
-  `navcoin-js-v1`, `navpay` and `navcoin-core` gives three different sets of
-  receiving addresses. Importing under `navcoin-core` to get past the
-  checksum error therefore scans the wrong wallet and will report no funds,
-  which reads as "the phrase is wrong" rather than "the type is wrong".
-
-Not fixed, needs a decision:
-
-- `validateImportInput` in `source-registry.js` checks the source type, the
-  wallet type and a word count of at least 12. It does not check the BIP39
-  checksum, so a bad phrase is accepted, written to `sources.json`, and only
-  fails later in the background worker. Validating at the boundary would
-  catch the typo at the point the user can still fix it — but it has to be
-  conditional on the wallet type, because `navcoin-core` and `navcash`
-  legitimately accept phrases that fail a BIP39 check. A blanket check would
-  lock out the Core users this tool exists for.
-- Worth considering alongside it: when a phrase fails the checksum, the
-  words are all valid and usually only one is wrong, so the single-word
-  correction can be computed and offered.
-
 ## The daemon log records mnemonics in cleartext
 
 - `createImportedWallet` in `navcoin-js-adapter.js` translates the
@@ -93,10 +47,22 @@ Not fixed, needs a decision:
 - The log file is created mode 644, unlike `sources.json` and `auth.cookie`
   which are 600. Confirmed on this machine 2026-08-27: the log was
   world-readable and held the phrase on 12 lines.
-- Two separate fixes: redact the phrase before logging (the adapter knows it
-  is handling a mnemonic), and create the log 600 like the other files.
-  Neither is done. Existing logs stay readable until wiped by hand, so the
-  fix does not clean up after itself.
+- Partly fixed: import-time validation now rejects a bad phrase with a
+  message that never contains it, so the reported case no longer reaches
+  the log. Still open: any other failure from `createImportedWallet` falls
+  through to `navcoin-js import failed: ${raw}`, and a waived
+  `navcoin-core` import can still reach that path. The log is also still
+  created 644 while `sources.json` and `auth.cookie` are 600. Existing logs
+  stay readable until wiped by hand.
+
+## Dependency majors not taken
+
+- Held back on 2026-08-28 because each is a breaking change across build
+  tooling that CI exercises on four platforms, and the Windows toolchain is
+  already pinned (see below): `chalk` 5 -> 6, `cross-env` 7 -> 10,
+  `@babel/runtime` 7 -> 8 (root), `vite` 5 -> 8 and
+  `@sveltejs/vite-plugin-svelte` 4 -> 7 (gui). The two gui ones have to move
+  together. Everything within range was updated.
 
 ## Findings not fixed
 

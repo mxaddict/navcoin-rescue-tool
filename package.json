@@ -9,7 +9,7 @@
     "ntr-daemon": "./src/daemon.js"
   },
   "scripts": {
-    "test": "cross-env NTR_DAEMON_PORT=46199 node --test",
+    "test": "cross-env NTR_DAEMON_PORT=46199 node --test --test-concurrency=1",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "gui:dev": "tauri dev",

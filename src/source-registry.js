@@ -12,6 +12,7 @@ import {
   SUPPORTED_MNEMONIC_WALLET_TYPES,
   SUPPORTED_SOURCE_TYPES,
 } from './constants.js';
+import { assertMnemonicAccepted } from './mnemonic.js';
 
 function normalizeMnemonic(phrase) {
   return phrase.trim().split(/\s+/).filter(Boolean).join('\n');
@@ -52,6 +53,15 @@ export function validateImportInput(input) {
     if (wordCount < 12) {
       throw new Error('Mnemonic phrase must contain at least 12 words.');
     }
+
+    // Every client — CLI, TUI and GUI — imports through the daemon, which
+    // imports through here, so this is the one place the check has to be
+    // for all three to behave the same way.
+    assertMnemonicAccepted(
+      normalizedMnemonic.replaceAll('\n', ' '),
+      input.walletType,
+      { allowUnchecked: input.allowUncheckedMnemonic === true },
+    );
 
     return {
       type: 'mnemonic',

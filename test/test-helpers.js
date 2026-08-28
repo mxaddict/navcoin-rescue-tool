@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
@@ -294,4 +295,83 @@ export function startStubElectrumServer(fixture = null) {
       resolve({ port, close });
     });
   });
+}
+
+// Daemon process lifecycle, shared by every test that needs a live daemon
+// rather than a stub. Booting one pulls in navcoin-js and its native
+// dependencies, which is why the ready wait is generous — the test still
+// fails if 'ready' never arrives, this only bounds how long it waits.
+// Every test that needs a live daemon binds this one port, and
+// daemon-client.js reads its port from the environment once at import, so
+// they cannot be given one each. `npm test` therefore runs test files
+// serially (--test-concurrency=1); dropping that makes two files race for
+// the port and fail in whichever one loses.
+export const TEST_DAEMON_PORT = 46199;
+const DAEMON_READY_TIMEOUT_MS = 30_000;
+
+// Kill anything still holding the test daemon port from a previous run
+// (interrupted test, leaked process, stale local worker). lsof isn't
+// available on Windows and isn't needed on a fresh CI worker — skip
+// silently when it's missing.
+export function killPortHolders(port = TEST_DAEMON_PORT) {
+  const result = spawnSync('lsof', ['-ti', `tcp:${port}`], {
+    encoding: 'utf8',
+  });
+  if (result.error) return;
+
+  for (const pid of result.stdout.trim().split('\n').filter(Boolean)) {
+    try {
+      process.kill(Number(pid), 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
+}
+
+export function spawnDaemon({
+  root,
+  stubPort,
+  port = TEST_DAEMON_PORT,
+  projectRoot: cwd = getProjectRoot(),
+}) {
+  return spawn(process.execPath, ['src/daemon.js'], {
+    cwd,
+    env: {
+      ...process.env,
+      NTR_APP_DATA: root,
+      NTR_DAEMON_PORT: String(port),
+      NTR_ELECTRUM_NODES: `127.0.0.1:${stubPort}:ws`,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+export function waitForDaemonReady(child) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    const timeout = setTimeout(
+      () => reject(new Error('daemon ready timeout')),
+      DAEMON_READY_TIMEOUT_MS,
+    );
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+      if (stdout.includes('ready')) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+
+    child.on('exit', (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`daemon exited early: ${code}`));
+    });
+  });
+}
+
+export function waitForExit(child) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => child.once('exit', resolve));
 }

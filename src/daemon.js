@@ -232,7 +232,13 @@ async function main() {
         sendJson(response, 200, { source });
       } catch (error) {
         console.log(`[daemon] import failed: ${error.message}`);
-        sendJson(response, 400, { error: error.message });
+        // `code` lets a client recognise a checksum rejection it may offer
+        // to override without matching on the message text.
+        sendJson(response, 400, {
+          error: error.message,
+          ...(error.code ? { code: error.code } : {}),
+          ...(error.waivable === true ? { waivable: true } : {}),
+        });
       }
       return;
     }

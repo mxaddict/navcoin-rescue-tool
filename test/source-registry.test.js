@@ -1,15 +1,27 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import { bootstrapAppData } from '../src/app-data.js';
-import { MNEMONIC_DERIVATION_TYPES } from '../src/constants.js';
+import {
+  MNEMONIC_DERIVATION_TYPES,
+  STATIC_WALLET_PASSWORD,
+} from '../src/constants.js';
 import {
   importSources,
+  markSourceFailed,
   readSources,
+  removeSource,
   validateImportInput,
 } from '../src/source-registry.js';
-import { makeProjectTempDir } from './test-helpers.js';
+import { getProjectRoot, makeProjectTempDir } from './test-helpers.js';
+
+const ADAPTER_URL = pathToFileURL(
+  path.join(getProjectRoot(), 'src', 'navcoin-js-adapter.js'),
+).href;
 
 // A valid BIP39 phrase that fails no checksum, so every derivation except
 // navcoin-core (which needs 24 words) accepts it.
@@ -294,4 +306,151 @@ test('a failed wallet creation is not persisted', async () => {
     console.warn = originalConsoleWarn;
     console.error = originalConsoleError;
   }
+});
+
+// Opens the wallet the way the daemon does on startup and reports what
+// went wrong, or null.
+//
+// In a child process on purpose. The registry damage this guards against
+// only shows on a fresh open, and that is what the daemon does: surviving
+// wallets stay open in memory after a removal and are re-opened on the
+// next start. The indexeddb shim also cannot be re-initialised inside one
+// process — `resetNavcoinJs` clears the module promises but the shim's own
+// state persists, and a second open in-process hangs retrying.
+function tryOpenWallet(sourceId, root) {
+  const script = `
+    const { getNavWallet } = await import(${JSON.stringify(ADAPTER_URL)});
+    const navWallet = await getNavWallet(${JSON.stringify(root)});
+    const wallet = new navWallet.WalletFile({
+      file: ${JSON.stringify(`${sourceId}.db`)},
+      password: ${JSON.stringify(STATIC_WALLET_PASSWORD)},
+      spendingPassword: ${JSON.stringify(STATIC_WALLET_PASSWORD)},
+      network: 'mainnet',
+      log: false,
+    });
+    let loadError = null;
+    wallet.on('db_load_error', (error) => (loadError = String(error)));
+    try {
+      await wallet.Load({
+        useP2p: false,
+        minPoolSize: 5,
+        skipInitialHistorySync: true,
+      });
+    } catch (error) {
+      loadError = loadError ?? error.message;
+    }
+    process.stdout.write('RESULT:' + (loadError ?? '') + '\\n');
+    process.exit(0);
+  `;
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      {
+        cwd: getProjectRoot(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+
+    let stdout = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', () => {});
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`Opening ${sourceId} did not finish`));
+    }, 120_000);
+
+    child.on('exit', () => {
+      clearTimeout(timer);
+      const line = stdout.split('\n').find((l) => l.startsWith('RESULT:'));
+      if (line === undefined) {
+        reject(new Error(`Opening ${sourceId} produced no result`));
+        return;
+      }
+      resolve(line.slice('RESULT:'.length) || null);
+    });
+  });
+}
+
+test('removing one source leaves the rest of the group openable', async () => {
+  await withRoot(async (root) => {
+    // The indexeddb registry holds a version per wallet and is shared by
+    // the whole directory. Deleting the file to forget one wallet took
+    // every sibling's version with it, and each then failed to open with
+    // "Object store keys already exists" — losing the recovered wallet on
+    // a tool whose whole job is recovering it. With a group import this
+    // is the ordinary flow: import a phrase, drop the empty derivations.
+    const { sources } = await importSources(
+      { type: 'mnemonic', phrase: VALID_12 },
+      root,
+    );
+    assert.equal(sources.length, 3);
+
+    await removeSource(sources[0].id, root);
+
+    for (const survivor of sources.slice(1)) {
+      assert.equal(
+        await tryOpenWallet(survivor.id, root),
+        null,
+        `${survivor.walletType} must still open after a sibling was removed`,
+      );
+    }
+  });
+});
+
+test('a removed source can be imported again', async () => {
+  await withRoot(async (root) => {
+    // The other half of the same registry problem: a source id is derived
+    // from the phrase, so re-importing reuses it. Leaving the old version
+    // behind would make the shim skip the upgrade that creates the object
+    // stores, and the new wallet would never load.
+    const first = await importSources(
+      { type: 'mnemonic', phrase: VALID_12 },
+      root,
+    );
+    await removeSource(first.sources[0].id, root);
+
+    const second = await importSources(
+      { type: 'mnemonic', phrase: VALID_12 },
+      root,
+    );
+
+    assert.deepEqual(
+      second.sources.map((source) => source.walletType),
+      [first.sources[0].walletType],
+      'only the removed derivation is missing, so only it is recreated',
+    );
+    assert.equal(await tryOpenWallet(second.sources[0].id, root), null);
+  });
+});
+
+test('a derivation whose wallet never built is recorded as failed', async () => {
+  await withRoot(async (root) => {
+    // Wallet creation finishes after the import has been answered, so a
+    // failure has nowhere to go. Left unrecorded the source stays
+    // `ready`/`wallet-created` at a zero balance for good — the "empty
+    // wallet or no wallet?" ambiguity the group import exists to remove.
+    const { sources } = await importSources(
+      { type: 'mnemonic', phrase: VALID_12 },
+      root,
+      fakeAdapter(),
+    );
+
+    await markSourceFailed(sources[1].id, 'navcoin-js refused it', root);
+
+    const stored = await readSources(root);
+    const failed = stored.sources.find((s) => s.id === sources[1].id);
+    assert.equal(failed.status, 'error');
+    assert.equal(failed.syncStatus, 'error');
+    assert.equal(failed.error, 'navcoin-js refused it');
+
+    // Its siblings are untouched.
+    for (const id of [sources[0].id, sources[2].id]) {
+      const sibling = stored.sources.find((s) => s.id === id);
+      assert.equal(sibling.syncStatus, 'wallet-created');
+      assert.equal(sibling.error, null);
+    }
+  });
 });

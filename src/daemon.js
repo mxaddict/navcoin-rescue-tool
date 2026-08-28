@@ -20,6 +20,7 @@ import {
 } from './navcoin-js-adapter.js';
 import {
   importSources,
+  markSourceFailed,
   removeSource,
   readSources,
   purgeAllSources,
@@ -182,7 +183,10 @@ async function main() {
             xnav: { confirmed: 0, pending: 0 },
             staked: { confirmed: 0, pending: 0 },
           },
-          liveError: live?.error ?? null,
+          // Falls back to the persisted error so a wallet that failed
+          // to build in the background — and so has no live state at
+          // all — still reports why instead of looking empty.
+          liveError: live?.error ?? source.error ?? null,
         };
       });
 
@@ -231,10 +235,20 @@ async function main() {
                 );
               });
             })
-            .catch((err) => {
+            .catch(async (err) => {
               console.log(
                 `[daemon] background wallet creation failed for ` +
                   `${source.id}: ${err.message}`,
+              );
+              // Persisted so /status can report it. Without this the
+              // source reads as a wallet that synced to zero.
+              await markSourceFailed(source.id, err.message, root).catch(
+                (writeError) => {
+                  console.log(
+                    `[daemon] could not record the failure of ` +
+                      `${source.id}: ${writeError.message}`,
+                  );
+                },
               );
             });
         }

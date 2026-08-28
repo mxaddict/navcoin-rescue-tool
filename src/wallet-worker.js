@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Wallet creation worker — runs in a child process so wallet.Load() cannot
- * block the daemon's HTTP server or the main process event loop.
+ * Wallet worker — runs in a child process so wallet.Load() cannot block
+ * the daemon's HTTP server or the main process event loop, and so the
+ * indexeddb shim is always initialised against the right directory. The
+ * shim keeps its registry handle in a module-level variable that nothing
+ * resets, so a process that has already opened one wallets directory
+ * cannot be repointed at another.
  *
  * Input:  JSON on stdin  { source, walletsDir, password }
+ *                     or { mode: 'forget', databaseName, walletsDir }
  * Output: JSON on stdout { ok: true, storage } | { ok: false, error }
  */
 
@@ -67,6 +72,25 @@ async function prunePrivateKeyPool(wallet, source) {
     .delete();
 }
 
+// Remove one database from the shim's registry and drop its stores.
+//
+// The registry is one file shared by every wallet in the directory, so it
+// cannot be deleted to forget a single wallet: that takes every sibling's
+// version with it and leaves each of them unopenable.
+function forgetDatabase(databaseName) {
+  return new Promise((resolve, reject) => {
+    const request = global.indexedDB.deleteDatabase(databaseName);
+
+    // Fires while another connection still holds the database. Callers
+    // close the wallet first, so waiting here would just hang.
+    request.onblocked = () =>
+      reject(new Error(`${databaseName} is still open elsewhere`));
+    request.onerror = () =>
+      reject(request.error ?? new Error(`could not remove ${databaseName}`));
+    request.onsuccess = () => resolve();
+  });
+}
+
 async function main() {
   // Hard timeout — spawn() ignores its timeout option, so enforce internally.
   const WORKER_TIMEOUT_MS = 300_000; // 5 minutes
@@ -95,6 +119,12 @@ async function main() {
       databaseBasePath: walletsDir,
       sysDatabaseBasePath: walletsDir,
     });
+
+    if (input.mode === 'forget') {
+      await forgetDatabase(input.databaseName);
+      process.stdout.write(JSON.stringify({ ok: true }));
+      process.exit(0);
+    }
 
     const navcoinJs = await import('navcoin-js');
     const wallet = navcoinJs.wallet ?? navcoinJs.default?.wallet;

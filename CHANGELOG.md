@@ -61,6 +61,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Removing one source no longer breaks every other wallet on disk.
+  `deleteWalletForSource` deleted `__sysdb__.sqlite`, the indexeddb
+  registry shared by the whole wallets directory, which took every other
+  wallet's version with it: each then failed to open on the next daemon
+  start with `ConstraintError: Object store "keys" already exists`, and
+  the recovered wallet was lost. It now drops just that database's entry,
+  in the wallet worker — the shim binds to one directory per process and
+  cannot be repointed. Reachable before the group import (any user with
+  two sources), and the ordinary flow after it.
+- A phrase can be imported again after one of its derivations was
+  removed. The duplicate check refused whenever any source still carried
+  the import id, so dropping the empty derivations of a group made the
+  phrase unimportable without also removing the one holding the funds.
+- A derivation whose wallet fails to build in the background is recorded
+  as failed and reported by `/status`. It previously stayed `ready` at a
+  zero balance for good — the "empty wallet, or no wallet?" ambiguity the
+  group import exists to remove.
+- A phrase with a word count BIP39 does not define (13 words, say) is
+  reported as a word count. `Mnemonic.isValid` throws rather than
+  returning false at those lengths, and the swallowed error left navcash
+  complaining the phrase was not an Electrum seed — a scheme the user was
+  never using.
+- `--allow-unchecked-mnemonic` on a phrase that is not 24 words now says
+  navcoin-core needs 24 words, instead of repeating the checksum failure
+  the user just asked to waive.
+- `ntr import private-key` no longer prints a sentence about mnemonic
+  derivations, and the list of wallet types is no longer appended to
+  errors that have nothing to do with types (`Duplicate source`, a word
+  count).
+- Wallet creation failures no longer advise trying a different wallet
+  type, which is no longer something the user picks.
+- A sweep blocked by an unsynced or failed source names its derivation.
+  One phrase imports as several sources with indistinguishable ids, and
+  the blocker is usually one that holds nothing.
 - GUI: a daemon left running from an older build is now replaced instead of
   reused. The daemon detaches and outlives the app that started it, so after an
   upgrade the port was still held by the previous version and the GUI kept

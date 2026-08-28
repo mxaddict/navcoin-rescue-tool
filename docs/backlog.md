@@ -29,7 +29,13 @@ entry when it ships — `git log` is the history.
   runs.
 - `ntr-gui --daemon-check` exercises `ensure_daemon`; it never opens a window,
   so nothing in CI proves the webview loads on any platform.
-- Reviewed for correctness in this pass: `daemon.js`, `app-data.js`,
+- The import path was reviewed again after the group import landed:
+  `source-registry.js`, `mnemonic.js`, `constants.js`, the `/import` and
+  `/status` handlers, `navcoin-js-adapter.js`, `cli.js`, `tui.js` and
+  `gui/src`. `wallet-manager.js` and `rescue-scan.js` were read only for
+  how they behave with several sources per phrase, not reviewed as a
+  whole.
+- Reviewed for correctness in an earlier pass: `daemon.js`, `app-data.js`,
   `source-registry.js`, `daemon-client.js`, `navcoin-js-adapter.js`,
   `wallet-worker.js`, `wallet-manager.js`, `rescue-scan.js`, `cli.js`,
   `src-tauri/src/lib.rs`. Skimmed only: `tui.js` rendering internals and the
@@ -55,6 +61,22 @@ entry when it ships — `git log` is the history.
   created 644 while `sources.json` and `auth.cookie` are 600. Existing logs
   stay readable until wiped by hand.
 
+## A sweep is blocked by any unsynced source, including empty ones
+
+`prepareSweep` in `wallet-manager.js` throws if any open wallet is in
+`error` or is not `synced`, because an unsynced source has an unknown
+balance and sweeping around it could leave funds behind with nothing
+saying so. With the group import that guard fires much more often: one
+phrase opens three or four wallets, and a derivation the user has no
+coins in can block the sweep of the one that holds them.
+
+The message now names the derivation and says the source can be removed,
+which is the workaround. The open question is whether the guard should
+instead let a sweep proceed past a source that never built a wallet at
+all (no wallet, no keys, so nothing of ours can be spent from it) while
+still blocking on one that is merely mid-sync. Not changed here because
+it trades a safe failure for a silent one, and the call is the user's.
+
 ## Group import: known consequences
 
 - Importing one mnemonic now builds a wallet per derivation (three for a
@@ -73,6 +95,16 @@ entry when it ships — `git log` is the history.
 - `sources.json` now holds the same phrase once per derivation, in
   `normalizedDetails` on every source of the group. Same file, same 0600
   mode, more copies of the secret.
+- Two `POST /import` calls for different phrases that overlap can lose
+  one: `importSources` reads `sources.json`, awaits wallet creation, then
+  writes the whole array back, so the later write wins. The daemon's
+  import returns before the wallets are built, which keeps the window
+  small. Not reproduced, and no client issues concurrent imports today.
+- `explainNoEligibleWalletType` ends in a fallback that cannot be
+  reached — navcash has no word-count rule and its check returns a
+  boolean, so it always contributes a checksum error for a phrase no
+  derivation accepted. Kept so the function is guaranteed to return an
+  Error rather than `undefined`.
 
 ## Dependency majors not taken
 

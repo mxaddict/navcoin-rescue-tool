@@ -120,7 +120,8 @@
       <p class="hint">
         No need to know which app produced the phrase — it is imported for
         every one of these it can belong to, and Status reports which
-        actually holds funds.
+        actually holds funds. Coinomi derives exactly as navcoin-js-v1
+        does, so it is covered by that source rather than one of its own.
       </p>
     </div>
 

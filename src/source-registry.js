@@ -63,7 +63,9 @@ export function validateImportInput(input) {
     });
 
     if (walletTypes.length === 0) {
-      throw explainNoEligibleWalletType(phrase);
+      throw explainNoEligibleWalletType(phrase, {
+        allowUnchecked: input.allowUncheckedMnemonic === true,
+      });
     }
 
     return {
@@ -102,11 +104,17 @@ export async function writeSources(sourcesState, root = getAppDataRoot()) {
 export async function importSources(
   input,
   root = getAppDataRoot(),
-  walletAdapter = {
-    createImportedWallet,
-    deleteWalletForSource,
-  },
+  walletAdapter = {},
 ) {
+  // Defaulted per entry rather than for the object as a whole: a caller
+  // overriding only wallet creation still gets a real rollback, instead
+  // of the cleanup path throwing "not a function" the first time it is
+  // ever reached.
+  const {
+    createImportedWallet: createWallet = createImportedWallet,
+    deleteWalletForSource: deleteWallet = deleteWalletForSource,
+  } = walletAdapter;
+
   const validated = validateImportInput(input);
 
   // Identifies the secret, independent of what is derived from it, so a
@@ -118,9 +126,11 @@ export async function importSources(
 
   const state = await readSources(root);
 
-  if (state.sources.some((source) => source.importId === importId)) {
-    throw new Error(`Duplicate source: ${importId}`);
-  }
+  // Deliberately not refused here on `importId` alone. A group whose
+  // empty derivations have been removed still has surviving members
+  // carrying the id, and refusing on that would leave re-importing the
+  // phrase impossible without first removing the derivation holding the
+  // funds. The per-derivation check below covers the unchanged case.
 
   // Fingerprint the derivation scheme rather than the label, so a phrase
   // imported under an alias and again under the type it aliases is one
@@ -142,9 +152,11 @@ export async function importSources(
     };
   });
 
-  // A phrase already imported under one type before the group import
-  // existed leaves that fingerprint in place; skipping it keeps the rest
-  // of the group importable rather than failing the whole thing.
+  // Skipping what is already there, rather than failing the whole
+  // import, is what lets a phrase pick up derivations it is missing: one
+  // imported before the group import existed (the fingerprint covers the
+  // derivation scheme, so an old `coinomi` source matches the new
+  // `navcoin-js-v1` one), or one whose sibling was removed.
   const existing = new Set(state.sources.map((source) => source.fingerprint));
   const fresh = prepared.filter((source) => !existing.has(source.fingerprint));
 
@@ -169,17 +181,16 @@ export async function importSources(
         error: null,
       };
 
-      source.wallet = await walletAdapter.createImportedWallet(
-        preparedSource,
-        root,
-      );
+      source.wallet = await createWallet(preparedSource, root);
       created.push(source);
     }
   } catch (error) {
     // The group is all-or-nothing: a half-imported phrase would report a
     // balance from some derivations and silently omit others.
     for (const sourceId of started) {
-      await walletAdapter.deleteWalletForSource(sourceId, root);
+      // Swallowed deliberately: a cleanup that fails must not replace the
+      // error that explains why the import failed in the first place.
+      await deleteWallet(sourceId, root).catch(() => {});
     }
     throw error;
   }
@@ -208,6 +219,28 @@ export async function removeSource(
   await walletAdapter.deleteWalletForSource(source.id, root);
   await writeSources({ sources: nextSources }, root);
   return { removedSourceId: sourceId };
+}
+
+// Record that a source's wallet could never be built.
+//
+// Wallet creation runs in the background after the import has already
+// been answered, so a failure has nowhere else to go: without this the
+// source stays `ready`/`wallet-created` with a zero balance for good,
+// which is exactly the "empty wallet, or no wallet?" ambiguity the
+// group import exists to remove.
+export async function markSourceFailed(
+  sourceId,
+  message,
+  root = getAppDataRoot(),
+) {
+  const state = await readSources(root);
+  const source = state.sources.find((entry) => entry.id === sourceId);
+  if (!source) return;
+
+  source.status = 'error';
+  source.syncStatus = 'error';
+  source.error = message;
+  await writeSources(state, root);
 }
 
 export async function markSourceSynced(sourceId, root = getAppDataRoot()) {

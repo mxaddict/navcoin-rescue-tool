@@ -43,6 +43,12 @@ const WALLET_TYPE_CHECKS = {
 
 const DEFAULT_CHECK = { check: 'bip39', waivable: false };
 
+// The lengths BIP39 defines. `Mnemonic.isValid` sizes a buffer as
+// `words * 11 / 32` and throws a RangeError on a fractional result, so
+// anything else has to be caught here to be reported as a word count
+// rather than swallowed and blamed on the next check in line.
+const BIP39_WORD_COUNTS = [12, 15, 18, 21, 24];
+
 export function getMnemonicCheck(walletType) {
   return (
     WALLET_TYPE_CHECKS[getDerivationWalletType(walletType)] ?? DEFAULT_CHECK
@@ -96,6 +102,20 @@ export function assertMnemonicAccepted(
     throw error;
   }
 
+  if (check === 'bip39' && !BIP39_WORD_COUNTS.includes(wordCount)) {
+    const error = new Error(
+      `A BIP39 phrase is ${BIP39_WORD_COUNTS.join(', ')} words long; ` +
+        `this phrase has ${wordCount}.`,
+    );
+    error.code = MNEMONIC_WORD_COUNT_ERROR;
+    error.check = check;
+    // Every BIP39 derivation refuses this length, so it outranks a rule
+    // that belongs to one wallet type when both are reported.
+    error.everyBip39Type = true;
+    error.waivable = false;
+    throw error;
+  }
+
   if (waivable && allowUnchecked) return;
   if (isPhraseValid(phrase, check)) return;
 
@@ -134,11 +154,14 @@ export function getEligibleWalletTypes(
 // a phrase failing its checksum is reported as a checksum failure, not as
 // navcash complaining it is not an Electrum seed. A waivable rejection
 // wins outright, because it is the one the user can still act on.
-export function explainNoEligibleWalletType(phrase) {
+export function explainNoEligibleWalletType(
+  phrase,
+  { allowUnchecked = false } = {},
+) {
   const errors = [];
   for (const walletType of MNEMONIC_DERIVATION_TYPES) {
     try {
-      assertMnemonicAccepted(phrase, walletType);
+      assertMnemonicAccepted(phrase, walletType, { allowUnchecked });
     } catch (error) {
       // Waivable means navcoin-core would take it with an explicit
       // opt-in, so this is the only rejection with a way forward.
@@ -150,11 +173,29 @@ export function explainNoEligibleWalletType(phrase) {
   // BIP39 before Electrum: nearly every phrase in circulation is BIP39,
   // and navcash refusing it as "not an Electrum seed" describes the
   // scheme the user was not using rather than the word they mistyped.
-  const isBip39Checksum = (error) =>
-    error.code === MNEMONIC_CHECKSUM_ERROR && error.check === 'bip39';
+  //
+  // Within BIP39, which failure to report depends on what the user
+  // asked for. Having already waived the checksum, they need to hear
+  // that the waiver's one derivation needs 24 words — repeating the
+  // checksum answers a question they just overrode.
+  const isBip39 = (error) => error.check === 'bip39';
+  const byCode = (code) => (error) => isBip39(error) && error.code === code;
+
+  const ranked = [
+    // A length no BIP39 scheme accepts is the whole story, and saying so
+    // beats quoting one wallet type's stricter rule back at the user.
+    (error) => isBip39(error) && error.everyBip39Type === true,
+    ...(allowUnchecked
+      ? [byCode(MNEMONIC_WORD_COUNT_ERROR), byCode(MNEMONIC_CHECKSUM_ERROR)]
+      : [byCode(MNEMONIC_CHECKSUM_ERROR), byCode(MNEMONIC_WORD_COUNT_ERROR)]),
+  ];
+
+  for (const matches of ranked) {
+    const match = errors.find(matches);
+    if (match) return match;
+  }
 
   return (
-    errors.find(isBip39Checksum) ??
     errors.find((error) => error.code === MNEMONIC_CHECKSUM_ERROR) ??
     errors[0] ??
     new Error('This phrase cannot be derived by any supported wallet type.')

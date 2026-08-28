@@ -106,27 +106,13 @@ export function getWalletStorageDetails(sourceId, root = getAppDataRoot()) {
   };
 }
 
-export async function createImportedWallet(
-  source,
-  root = getAppDataRoot(),
-  onProgress = null,
-) {
-  const storage = getWalletStorageDetails(source.id, root);
-  const dataFileExists = await fs
-    .access(storage.dataFile)
-    .then(() => true)
-    .catch(() => false);
-
-  if (dataFileExists) {
-    return { ok: true, storage };
-  }
-
-  const layout = getLayout(root);
-  await fs.mkdir(layout.walletsDir, { recursive: true });
-
-  // Run wallet creation in a child process so the daemon event loop stays
-  // responsive during the (potentially long) address pool derivation.
-  const result = await new Promise((resolve, reject) => {
+// Run the wallet worker in a child process and return its reply.
+//
+// A child every time, for two reasons: wallet.Load can take a minute and
+// must not block the daemon's event loop, and the indexeddb shim binds to
+// one wallets directory per process with no way to repoint it.
+function runWalletWorker(payload, onProgress = null) {
+  return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
       [path.join(__dirname, 'wallet-worker.js')],
@@ -151,8 +137,7 @@ export async function createImportedWallet(
 
     child.on('close', (code, signal) => {
       try {
-        const parsed = JSON.parse(stdout);
-        resolve(parsed);
+        resolve(JSON.parse(stdout));
       } catch {
         const reason = signal ? `killed by ${signal}` : `exit code ${code}`;
         const detail = stderr.trim();
@@ -166,15 +151,39 @@ export async function createImportedWallet(
 
     child.on('error', reject);
 
-    child.stdin.write(
-      JSON.stringify({
-        source,
-        walletsDir: layout.walletsDir,
-        password: STATIC_WALLET_PASSWORD,
-      }),
-    );
+    child.stdin.write(JSON.stringify(payload));
     child.stdin.end();
   });
+}
+
+export async function createImportedWallet(
+  source,
+  root = getAppDataRoot(),
+  onProgress = null,
+) {
+  const storage = getWalletStorageDetails(source.id, root);
+  const dataFileExists = await fs
+    .access(storage.dataFile)
+    .then(() => true)
+    .catch(() => false);
+
+  if (dataFileExists) {
+    return { ok: true, storage };
+  }
+
+  const layout = getLayout(root);
+  await fs.mkdir(layout.walletsDir, { recursive: true });
+
+  // Run wallet creation in a child process so the daemon event loop stays
+  // responsive during the (potentially long) address pool derivation.
+  const result = await runWalletWorker(
+    {
+      source,
+      walletsDir: layout.walletsDir,
+      password: STATIC_WALLET_PASSWORD,
+    },
+    onProgress,
+  );
 
   if (!result.ok) {
     await deleteWalletForSource(source.id, root).catch(() => {});
@@ -186,10 +195,12 @@ export async function createImportedWallet(
       raw.includes("reading 'length'") ||
       raw.includes('Cannot read properties of undefined')
     ) {
+      // No "try a different wallet type" here: the user does not pick
+      // one any more. Every type the phrase fits is derived, so this is
+      // one derivation of several failing and the others may be fine.
       message =
         source.type === 'mnemonic'
-          ? `Wallet type "${source.walletType}" could not derive keys from this mnemonic. ` +
-            `Try a different wallet type. For a standard navcoin-js mnemonic use navcoin-js-v1.`
+          ? `Could not derive a "${source.walletType}" wallet from this mnemonic.`
           : `navcoin-js could not import the private key — check the WIF format.`;
     } else {
       message = `navcoin-js import failed: ${raw}`;
@@ -201,21 +212,42 @@ export async function createImportedWallet(
   return result.storage;
 }
 
+// Drop one wallet from the indexeddb registry.
+//
+// The registry (`__sysdb__.sqlite`) holds a version per database and is
+// shared by every wallet in the directory, so it cannot be deleted to
+// forget one of them: `deleteDatabase` removes just this database's row
+// and object stores. Leaving the row behind is what the wholesale delete
+// was working around — a later import reuses the same source id, finds
+// the shim already holding a version for it, skips the upgrade that
+// creates the object stores, and fails to load.
+async function forgetWalletDatabase(walletsDir, databaseName) {
+  const result = await runWalletWorker({
+    mode: 'forget',
+    databaseName,
+    walletsDir,
+  });
+
+  if (!result.ok) {
+    throw new Error(
+      `Could not remove ${databaseName}: ${result.error ?? 'unknown error'}`,
+    );
+  }
+}
+
 export async function deleteWalletForSource(sourceId, root = getAppDataRoot()) {
   const storage = getWalletStorageDetails(sourceId, root);
   const layout = getLayout(root);
 
+  // Before the file, so the registry is never left holding a version for
+  // a database whose file has gone.
+  await forgetWalletDatabase(layout.walletsDir, storage.databaseName);
+
   // Remove the wallet sqlite file.
   await fs.rm(storage.dataFile, { force: true });
 
-  // Remove the indexeddb system registry — it tracks known DBs and causes
-  // "DB did not load" if it still references a deleted wallet file.
-  // Also reset the module-level promises so the next initNavcoinJs call
+  // Reset the module-level promises so the next initNavcoinJs call
   // re-runs setGlobalVars and rebuilds the shim state from the fresh files.
-  await fs.rm(path.join(layout.walletsDir, '__sysdb__.sqlite'), {
-    force: true,
-  });
-
   resetNavcoinJs();
 
   return storage;

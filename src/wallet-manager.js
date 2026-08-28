@@ -387,6 +387,11 @@ export async function openSourceWallet(source, root, navWallet) {
     const layout = getLayout(root);
     const state = makeInitialState(source.id);
     state.sourceType = source.type;
+    // Carried so a sweep blocked by this source can name the derivation.
+    // One phrase imports as several sources whose ids are indistinguishable
+    // 16-hex strings, and the blocking one is usually a derivation the
+    // user never chose and has no funds in.
+    state.walletType = source.walletType ?? null;
     walletState.set(source.id, state);
 
     const wallet = new navWallet.WalletFile({
@@ -693,6 +698,12 @@ export async function purgeAllWallets() {
  *
  * Throws if any source is not synced or has an error.
  */
+function describeSource(state) {
+  return state.walletType
+    ? `${state.sourceId} (${state.walletType})`
+    : state.sourceId;
+}
+
 export function prepareSweep() {
   const states = [...walletState.values()];
 
@@ -700,16 +711,24 @@ export function prepareSweep() {
     throw new Error('No imported sources. Import a wallet before sweeping.');
   }
 
+  // Every source has to be accounted for before anything is broadcast: an
+  // unsynced one has an unknown balance, and sweeping around it would
+  // leave funds behind with nothing to say so. The label matters because
+  // a phrase imports as several derivations — the blocker is often one
+  // the user has no coins in, and `remove` on it unblocks the sweep.
   for (const state of states) {
+    const label = describeSource(state);
+
     if (state.error) {
       throw new Error(
-        `Source ${state.sourceId} is in error state: ${state.error}`,
+        `Source ${label} is in error state: ${state.error}. ` +
+          `Remove it if it is a derivation you do not need.`,
       );
     }
 
     if (state.syncStatus !== 'synced') {
       throw new Error(
-        `Source ${state.sourceId} is not fully synced (status: ${state.syncStatus}). Wait for sync to complete.`,
+        `Source ${label} is not fully synced (status: ${state.syncStatus}). Wait for sync to complete.`,
       );
     }
   }

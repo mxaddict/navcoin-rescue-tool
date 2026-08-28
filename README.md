@@ -163,19 +163,32 @@ ntr stop
 Import a mnemonic source:
 
 ```bash
-ntr import mnemonic \
-  --wallet-type navcoin-js-v1 \
-  --phrase "word1 word2 ... word12"
+ntr import mnemonic --phrase "word1 word2 ... word12"
 ```
 
-Supported mnemonic wallet types:
+You do not pick a wallet type. The phrase is imported for every type it can
+belong to — one source per derivation, sharing an import id — and `ntr status`
+reports which of them actually holds funds. Guessing the type wrong used to
+report an empty wallet, which looks exactly like having no coins.
 
-- `navcoin-core`
-- `navcash`
+Wallet types covered:
+
+- `navcoin-core` (24-word phrases only: it uses the BIP39 entropy itself as
+  the master key)
+- `navcash` (an Electrum seed, not BIP39)
 - `next`
 - `navpay`
 - `navcoin-js-v1`
-- `coinomi` (same derivation as `navcoin-js-v1`: BIP44 `m/44'/130'/0'`)
+- `coinomi` (same derivation as `navcoin-js-v1`: BIP44 `m/44'/130'/0'`, so it
+  is covered by that source rather than one of its own)
+
+A phrase that fails its BIP39 checksum is refused. Only `navcoin-core` can
+derive from one anyway, so `--allow-unchecked-mnemonic` imports that single
+derivation:
+
+```bash
+ntr import mnemonic --phrase "..." --allow-unchecked-mnemonic
+```
 
 Import private-key source:
 

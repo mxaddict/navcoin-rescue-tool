@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { assertMnemonicAccepted, getMnemonicCheck } from '../src/mnemonic.js';
+import {
+  assertMnemonicAccepted,
+  explainNoEligibleWalletType,
+  getEligibleWalletTypes,
+  getMnemonicCheck,
+} from '../src/mnemonic.js';
 import {
   isWaivableMnemonicError,
   MNEMONIC_CHECKSUM_ERROR,
@@ -183,5 +188,58 @@ test('the waiver cannot get a short phrase past navcoin-core', () => {
 test('a 12-word phrase is fine for the types that hash it into a seed', () => {
   for (const walletType of ['navcoin-js-v1', 'coinomi', 'navpay', 'next']) {
     assert.doesNotThrow(() => assertMnemonicAccepted(VALID_BIP39, walletType));
+  }
+});
+
+// A length BIP39 does not define at all. `Mnemonic.isValid` sizes a buffer
+// from the word count and throws a RangeError rather than returning false,
+// which the eligibility sweep swallows — so without an explicit length
+// rule the only surviving complaint is navcash's, and the user is told to
+// check the phrase against an Electrum backup they never had.
+const THIRTEEN_WORDS =
+  'legal winner thank year wave sausage worth useful legal winner thank year wave';
+
+test('a word count BIP39 does not define is reported as a word count', () => {
+  assert.deepEqual(getEligibleWalletTypes(THIRTEEN_WORDS), []);
+
+  const error = explainNoEligibleWalletType(THIRTEEN_WORDS);
+  assert.equal(error.code, MNEMONIC_WORD_COUNT_ERROR);
+  assert.match(error.message, /13/);
+  assert.ok(
+    !/Electrum/i.test(error.message),
+    `blamed on Electrum: ${error.message}`,
+  );
+  assert.ok(
+    !/navcoin-core/.test(error.message),
+    `every BIP39 type refuses this length, so it is not navcoin-core's rule: ${error.message}`,
+  );
+});
+
+test('waiving the checksum reports why the waiver could not apply', () => {
+  // navcoin-core is the only derivation that can take a phrase failing the
+  // checksum, and it needs 24 words. Answering a 12-word phrase with
+  // "the checksum failed" repeats the check the user just overrode.
+  const waived = { allowUnchecked: true };
+  assert.deepEqual(getEligibleWalletTypes(BROKEN_BIP39, waived), []);
+
+  const error = explainNoEligibleWalletType(BROKEN_BIP39, waived);
+  assert.equal(error.code, MNEMONIC_WORD_COUNT_ERROR);
+  assert.match(error.message, /24 words/);
+
+  // Without the waiver the checksum is exactly what to report.
+  assert.equal(
+    explainNoEligibleWalletType(BROKEN_BIP39).code,
+    MNEMONIC_CHECKSUM_ERROR,
+  );
+});
+
+test('no explanation ever contains the phrase', () => {
+  for (const phrase of [THIRTEEN_WORDS, BROKEN_BIP39, BROKEN_BIP39_24]) {
+    for (const options of [{}, { allowUnchecked: true }]) {
+      const { message } = explainNoEligibleWalletType(phrase, options);
+      for (const word of phrase.split(' ')) {
+        assert.ok(!message.includes(word), `"${word}" leaked into: ${message}`);
+      }
+    }
   }
 });

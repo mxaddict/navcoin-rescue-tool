@@ -161,7 +161,13 @@ test('a waiver does not get a 12-word broken phrase in', async () => {
     });
 
     assert.equal(response.status, 400);
-    assert.equal((await response.json()).code, 'mnemonic-checksum');
+
+    // Reported as the word count, not the checksum: the user just asked
+    // for the checksum to be ignored, so repeating it answers nothing.
+    const body = await response.json();
+    assert.equal(body.code, 'mnemonic-word-count');
+    assert.match(body.error, /24 words/);
+    assert.ok(!body.waivable);
   });
 });
 

@@ -35,7 +35,7 @@ import {
 } from './constants.js';
 import {
   isWaivableMnemonicError,
-  MNEMONIC_CHECKSUM_ERROR,
+  MNEMONIC_WORD_COUNT_ERROR,
 } from './mnemonic-error.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -314,11 +314,13 @@ async function handleImport(argv) {
     }
 
     process.stdout.write(`Import: ${result.importId}\n`);
-    process.stdout.write(
-      `Sources created: ${result.sources.length}` +
-        ` (a phrase can belong to more than one wallet type, so each` +
-        ` derivation is scanned)\n`,
-    );
+    if (sourceType === 'mnemonic') {
+      process.stdout.write(
+        `Sources created: ${result.sources.length}` +
+          ` (a phrase can belong to more than one wallet type, so each` +
+          ` derivation is scanned)\n`,
+      );
+    }
     for (const source of result.sources) {
       process.stdout.write(`\n  ${source.id}\n`);
       if (source.walletType) {
@@ -351,10 +353,17 @@ async function handleImport(argv) {
       );
     } else {
       process.stderr.write(`${error.message}\n`);
-      if (sourceType === 'mnemonic' && error.code !== MNEMONIC_CHECKSUM_ERROR) {
+      // Only where the wallet type is the thing in question. Appended to
+      // "Duplicate source" or a word count it is a non sequitur — and
+      // there is no longer a --wallet-type flag it could be advice for.
+      if (
+        sourceType === 'mnemonic' &&
+        error.code === MNEMONIC_WORD_COUNT_ERROR
+      ) {
         process.stderr.write(
           `A mnemonic is imported for every wallet type it can belong to:` +
-            ` ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}.\n`,
+            ` ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}` +
+            ` (coinomi derives exactly as navcoin-js-v1 does).\n`,
         );
       }
     }

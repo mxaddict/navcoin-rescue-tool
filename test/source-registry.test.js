@@ -51,17 +51,20 @@ test('importSource does not persist failed wallet creation', async () => {
   try {
     await bootstrapAppData(root);
 
+    // A malformed WIF gets through validateImportInput — which only
+    // requires a non-empty key — and fails inside navcoin-js while the
+    // wallet is being built. That is the failure this test is about: the
+    // mnemonic cases it used to use are now refused at the input, which
+    // never reaches wallet creation at all.
     await assert.rejects(
       importSource(
         {
-          type: 'mnemonic',
-          walletType: 'navcoin-core',
-          phrase:
-            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+          type: 'private-key',
+          keys: ['not-a-valid-wif-key'],
         },
         root,
       ),
-      /navcoin-js import failed|could not derive keys/,
+      /navcoin-js/,
     );
 
     const stored = await readSources(root);

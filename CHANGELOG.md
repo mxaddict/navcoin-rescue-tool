@@ -26,6 +26,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   waivable there: `ntr import mnemonic --allow-unchecked-mnemonic`, a
   confirm prompt in the TUI, and a checkbox in the GUI shown only after a
   waivable rejection.
+- `navcoin-core` also requires exactly 24 words. It uses the BIP39 entropy
+  itself as the master key and a bitcore PrivateKey is 32 bytes, which only
+  a 24-word phrase yields. A shorter phrase used to be accepted and then
+  died deriving addresses in a background worker with "Cannot read
+  properties of undefined". This one is never waivable.
 - Import failures carry a `code` (and `waivable`) alongside the message, so
   a client can recognise a checksum rejection without matching on text.
 

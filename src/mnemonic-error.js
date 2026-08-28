@@ -6,6 +6,12 @@
 // test/mnemonic.test.js fails if the two drift.
 export const MNEMONIC_CHECKSUM_ERROR = 'mnemonic-checksum';
 
+// A phrase the wallet type cannot derive from at all, whatever its
+// checksum says — currently only a navcoin-core phrase of the wrong
+// length. Never waivable: no flag makes 16 bytes of entropy into the 32 a
+// master key needs.
+export const MNEMONIC_WORD_COUNT_ERROR = 'mnemonic-word-count';
+
 // Whether a checksum rejection is one the user may knowingly override.
 // Only navcoin-core derives without looking at the checksum, so only it
 // can import a phrase that fails one — every other type would throw again

@@ -5,7 +5,10 @@ import {
 } from 'electrum-mnemonic';
 
 import { getDerivationWalletType } from './constants.js';
-import { MNEMONIC_CHECKSUM_ERROR } from './mnemonic-error.js';
+import {
+  MNEMONIC_CHECKSUM_ERROR,
+  MNEMONIC_WORD_COUNT_ERROR,
+} from './mnemonic-error.js';
 
 // The check a wallet type's phrase has to pass before it is accepted, and
 // whether the user may knowingly waive it.
@@ -25,8 +28,13 @@ import { MNEMONIC_CHECKSUM_ERROR } from './mnemonic-error.js';
 // meant. It is checked like the rest, but the check is waivable, because
 // a wallet really created from a phrase BIP39 would reject is exactly the
 // wallet this tool exists to rescue.
+//
+// `words` is a hard requirement rather than a check: navcoin-core uses the
+// BIP39 entropy itself as the master key, and a bitcore PrivateKey is 32
+// bytes, which only a 24-word phrase produces. A shorter phrase used to be
+// accepted here and then failed deriving addresses in a background worker.
 const WALLET_TYPE_CHECKS = {
-  'navcoin-core': { check: 'bip39', waivable: true },
+  'navcoin-core': { check: 'bip39', waivable: true, words: 24 },
   navcash: { check: 'electrum', waivable: false },
 };
 
@@ -71,7 +79,21 @@ export function assertMnemonicAccepted(
   walletType,
   { allowUnchecked = false } = {},
 ) {
-  const { check, waivable } = getMnemonicCheck(walletType);
+  const { check, waivable, words } = getMnemonicCheck(walletType);
+
+  // Checked before the waiver, and before the checksum: a phrase of the
+  // wrong length cannot derive this wallet at all, so there is nothing to
+  // waive and no point reporting a checksum for it.
+  const wordCount = phrase.trim().split(/\s+/).filter(Boolean).length;
+  if (words && wordCount !== words) {
+    const error = new Error(
+      `A "${walletType}" wallet is derived from ${words} words; this phrase has ${wordCount}. ` +
+        `Import it under a wallet type that derives from a ${wordCount}-word phrase.`,
+    );
+    error.code = MNEMONIC_WORD_COUNT_ERROR;
+    error.waivable = false;
+    throw error;
+  }
 
   if (waivable && allowUnchecked) return;
   if (isPhraseValid(phrase, check)) return;

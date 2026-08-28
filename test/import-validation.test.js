@@ -28,6 +28,12 @@ const BASE_URL = `http://127.0.0.1:${TEST_DAEMON_PORT}`;
 const BROKEN_BIP39 =
   'legal winner thank year wave sausage worth useful legal winner thank zoo';
 
+// The same, at 24 words. navcoin-core derives its master key from the
+// BIP39 entropy itself and so only accepts that length, which makes this
+// the phrase for every navcoin-core case below.
+const BROKEN_BIP39_24 =
+  'legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth zoo';
+
 let stubPort = 0;
 let stubClose = null;
 
@@ -109,7 +115,7 @@ test('the daemon marks a navcoin-core rejection waivable and honours the waiver'
     const refused = await postImport(cookie, {
       type: 'mnemonic',
       walletType: 'navcoin-core',
-      phrase: BROKEN_BIP39,
+      phrase: BROKEN_BIP39_24,
     });
     assert.equal(refused.status, 400);
     assert.equal((await refused.json()).waivable, true);
@@ -117,7 +123,7 @@ test('the daemon marks a navcoin-core rejection waivable and honours the waiver'
     const accepted = await postImport(cookie, {
       type: 'mnemonic',
       walletType: 'navcoin-core',
-      phrase: BROKEN_BIP39,
+      phrase: BROKEN_BIP39_24,
       allowUncheckedMnemonic: true,
     });
     assert.equal(accepted.status, 200);
@@ -170,7 +176,7 @@ test('the CLI refuses a broken phrase and names the flag that overrides it', asy
       '--wallet-type',
       'navcoin-core',
       '--phrase',
-      BROKEN_BIP39,
+      BROKEN_BIP39_24,
     ]);
 
     assert.equal(refused.code, 1);
@@ -187,7 +193,7 @@ test('the CLI refuses a broken phrase and names the flag that overrides it', asy
       '--wallet-type',
       'navcoin-core',
       '--phrase',
-      BROKEN_BIP39,
+      BROKEN_BIP39_24,
       '--allow-unchecked-mnemonic',
     ]);
 
@@ -208,7 +214,7 @@ test('the CLI flag does not consume the argument after it', async () => {
       '--wallet-type',
       'navcoin-core',
       '--phrase',
-      BROKEN_BIP39,
+      BROKEN_BIP39_24,
     ]);
 
     assert.equal(result.code, 0, result.stderr);
@@ -243,7 +249,7 @@ function fakeTui(answers) {
 
 test('the TUI offers the override after a waivable rejection and retries with it', async () => {
   await withDaemon('import-validation-tui', async ({ root }) => {
-    const tui = fakeTui(['navcoin-core', BROKEN_BIP39, 'yes']);
+    const tui = fakeTui(['navcoin-core', BROKEN_BIP39_24, 'yes']);
     tui.args[1] = root;
     await cmdImportMnemonic(...tui.args);
 
@@ -260,7 +266,7 @@ test('the TUI offers the override after a waivable rejection and retries with it
 
 test('the TUI cancels instead of importing when the override is declined', async () => {
   await withDaemon('import-validation-tui-no', async ({ root }) => {
-    const tui = fakeTui(['navcoin-core', BROKEN_BIP39, 'no']);
+    const tui = fakeTui(['navcoin-core', BROKEN_BIP39_24, 'no']);
     tui.args[1] = root;
     await cmdImportMnemonic(...tui.args);
 

@@ -5,6 +5,7 @@ import { assertMnemonicAccepted, getMnemonicCheck } from '../src/mnemonic.js';
 import {
   isWaivableMnemonicError,
   MNEMONIC_CHECKSUM_ERROR,
+  MNEMONIC_WORD_COUNT_ERROR,
 } from '../src/mnemonic-error.js';
 import { MNEMONIC_CHECKSUM_ERROR as GUI_MNEMONIC_CHECKSUM_ERROR } from '../gui/src/lib/mnemonic-error.js';
 import { isWaivableMnemonicError as guiIsWaivableMnemonicError } from '../gui/src/lib/mnemonic-error.js';
@@ -14,6 +15,15 @@ import { SUPPORTED_MNEMONIC_WALLET_TYPES } from '../src/constants.js';
 // phrase only has to be accepted.
 const VALID_BIP39 =
   'legal winner thank year wave sausage worth useful legal winner thank yellow';
+
+// 24 words, valid checksum. navcoin-core needs this length, so anything
+// asserting on its checksum behaviour has to use it.
+const VALID_BIP39_24 =
+  'legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth title';
+
+// The 24-word phrase with one word swapped for another wordlist entry.
+const BROKEN_BIP39_24 =
+  'legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth zoo';
 
 // The same 12 words with one changed to another wordlist entry, which
 // breaks the checksum while leaving every word valid. This is the shape
@@ -33,7 +43,11 @@ function rejection(phrase, walletType, options) {
 
 test('a phrase with a broken checksum is rejected for every wallet type', () => {
   for (const walletType of SUPPORTED_MNEMONIC_WALLET_TYPES) {
-    const error = rejection(BROKEN_BIP39, walletType);
+    // navcoin-core only derives from 24 words, so give it a phrase of the
+    // length it accepts and let the checksum be the thing that fails.
+    const phrase =
+      walletType === 'navcoin-core' ? BROKEN_BIP39_24 : BROKEN_BIP39;
+    const error = rejection(phrase, walletType);
     assert.ok(error, `${walletType} must reject a broken checksum`);
     assert.equal(error.code, MNEMONIC_CHECKSUM_ERROR);
   }
@@ -44,7 +58,7 @@ test('a valid BIP39 phrase is accepted by the types that derive from one', () =>
     assert.doesNotThrow(() => assertMnemonicAccepted(VALID_BIP39, walletType));
   }
   assert.doesNotThrow(() =>
-    assertMnemonicAccepted(VALID_BIP39, 'navcoin-core'),
+    assertMnemonicAccepted(VALID_BIP39_24, 'navcoin-core'),
   );
 });
 
@@ -71,9 +85,9 @@ test('navcash is checked against the Electrum scheme, not BIP39', () => {
 // navcoin-core derives from the raw entropy and never reads the checksum,
 // so it is the only type that can honour a waiver.
 test('only navcoin-core can waive the checksum', () => {
-  assert.equal(rejection(BROKEN_BIP39, 'navcoin-core').waivable, true);
+  assert.equal(rejection(BROKEN_BIP39_24, 'navcoin-core').waivable, true);
   assert.doesNotThrow(() =>
-    assertMnemonicAccepted(BROKEN_BIP39, 'navcoin-core', {
+    assertMnemonicAccepted(BROKEN_BIP39_24, 'navcoin-core', {
       allowUnchecked: true,
     }),
   );
@@ -91,8 +105,10 @@ test('only navcoin-core can waive the checksum', () => {
 // original report leaked a live seed.
 test('a rejection never repeats the phrase', () => {
   for (const walletType of SUPPORTED_MNEMONIC_WALLET_TYPES) {
-    const { message } = rejection(BROKEN_BIP39, walletType);
-    for (const word of BROKEN_BIP39.split(' ')) {
+    const phrase =
+      walletType === 'navcoin-core' ? BROKEN_BIP39_24 : BROKEN_BIP39;
+    const { message } = rejection(phrase, walletType);
+    for (const word of phrase.split(' ')) {
       assert.ok(
         !message.includes(word),
         `"${word}" leaked into the ${walletType} message: ${message}`,
@@ -102,7 +118,10 @@ test('a rejection never repeats the phrase', () => {
 });
 
 test('the waiver is only advertised where it can be honoured', () => {
-  assert.match(rejection(BROKEN_BIP39, 'navcoin-core').message, /unchecked/i);
+  assert.match(
+    rejection(BROKEN_BIP39_24, 'navcoin-core').message,
+    /unchecked/i,
+  );
   assert.doesNotMatch(
     rejection(BROKEN_BIP39, 'navcoin-js-v1').message,
     /unchecked/i,
@@ -111,7 +130,7 @@ test('the waiver is only advertised where it can be honoured', () => {
 
 test('isWaivableMnemonicError only fires on a waivable checksum error', () => {
   assert.equal(
-    isWaivableMnemonicError(rejection(BROKEN_BIP39, 'navcoin-core')),
+    isWaivableMnemonicError(rejection(BROKEN_BIP39_24, 'navcoin-core')),
     true,
   );
   assert.equal(
@@ -127,9 +146,42 @@ test('isWaivableMnemonicError only fires on a waivable checksum error', () => {
 test('mnemonic error code matches the GUI copy', () => {
   assert.equal(GUI_MNEMONIC_CHECKSUM_ERROR, MNEMONIC_CHECKSUM_ERROR);
 
-  const waivable = rejection(BROKEN_BIP39, 'navcoin-core');
+  const waivable = rejection(BROKEN_BIP39_24, 'navcoin-core');
   const notWaivable = rejection(BROKEN_BIP39, 'navcoin-js-v1');
   assert.equal(guiIsWaivableMnemonicError(waivable), true);
   assert.equal(guiIsWaivableMnemonicError(notWaivable), false);
   assert.equal(guiIsWaivableMnemonicError(new Error('nope')), false);
+});
+
+// navcoin-core uses the BIP39 entropy as the master key directly, and a
+// bitcore PrivateKey is 32 bytes — only 24 words produce that many. A
+// 12-word phrase passed the checksum and then died deriving addresses in
+// a background worker with "Cannot read properties of undefined".
+test('navcoin-core refuses a phrase too short to derive a master key', () => {
+  const error = rejection(VALID_BIP39, 'navcoin-core');
+
+  assert.ok(error, '12 words cannot be a navcoin-core wallet');
+  assert.equal(error.code, MNEMONIC_WORD_COUNT_ERROR);
+  assert.match(error.message, /24 words/);
+  assert.match(error.message, /has 12/);
+});
+
+// No flag turns 16 bytes of entropy into 32, so the waiver must not reach
+// past the length requirement.
+test('the waiver cannot get a short phrase past navcoin-core', () => {
+  const error = rejection(VALID_BIP39, 'navcoin-core', {
+    allowUnchecked: true,
+  });
+
+  assert.ok(error, 'the waiver must not apply to a length failure');
+  assert.equal(error.code, MNEMONIC_WORD_COUNT_ERROR);
+  assert.equal(isWaivableMnemonicError(error), false);
+});
+
+// The length requirement is navcoin-core's alone: every other type
+// derives through a seed function that takes any valid phrase length.
+test('a 12-word phrase is fine for the types that hash it into a seed', () => {
+  for (const walletType of ['navcoin-js-v1', 'coinomi', 'navpay', 'next']) {
+    assert.doesNotThrow(() => assertMnemonicAccepted(VALID_BIP39, walletType));
+  }
 });

@@ -119,9 +119,10 @@ it trades a safe failure for a silent one, and the call is the user's.
 
 - `rescueScan` accepts a `skipXNav` option that no caller sets. Either wire it
   to something or drop it; leaving it means an untested path.
-- `tui.js` carries dead code: `tabComplete` has no caller, `createRequire` is
-  imported and unused, and several `break` statements sit after
-  `process.exit(0)`. Left alone to keep the daemon-launch fix reviewable.
+- `tui.js` carries dead code: `tabComplete` (around line 186) has no caller,
+  and two `break` statements sit after `process.exit(0)`. Re-verified
+  2026-08-28. The earlier claim here that `createRequire` was unused was
+  wrong — it is what loads `blessed`.
 - The daemon compares the auth cookie with `!==`, which is not constant-time.
   It listens on loopback only and the cookie file is `0600`, so this is a
   hardening item rather than a live hole.

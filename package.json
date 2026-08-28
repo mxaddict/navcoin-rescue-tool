@@ -1,6 +1,6 @@
 {
   "name": "navcoin-rescue-tool",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Recovery-first CLI scaffold for legacy NavCoin wallets.",
   "type": "module",
   "bin": {

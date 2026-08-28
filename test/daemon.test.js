@@ -99,27 +99,34 @@ test('daemon import persists sources and rejects duplicates', async () => {
     const imported = await importDaemonSource(
       {
         type: 'mnemonic',
-        walletType: 'navcoin-js-v1',
         phrase:
           'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
       },
       root,
     );
 
-    assert.equal(imported.source.status, 'ready');
-    assert.equal(imported.source.syncStatus, 'wallet-created');
-    assert.equal(imported.source.walletType, 'navcoin-js-v1');
+    // One phrase, one import id, a source per derivation it can belong to.
+    assert.deepEqual(
+      imported.sources.map((source) => source.walletType),
+      ['next', 'navpay', 'navcoin-js-v1'],
+    );
+    for (const source of imported.sources) {
+      assert.equal(source.status, 'ready');
+      assert.equal(source.syncStatus, 'wallet-created');
+      assert.equal(source.importId, imported.importId);
+    }
 
     const status = await getDaemonStatus(root);
-    assert.equal(status.sourceCount, 1);
-    assert.equal(status.sources[0].id, imported.source.id);
-    assert.equal(status.sources[0].walletType, 'navcoin-js-v1');
+    assert.equal(status.sourceCount, 3);
+    assert.deepEqual(
+      status.sources.map((source) => source.id).sort(),
+      imported.sources.map((source) => source.id).sort(),
+    );
 
     await assert.rejects(
       importDaemonSource(
         {
           type: 'mnemonic',
-          walletType: 'navcoin-js-v1',
           phrase:
             'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
         },
@@ -129,9 +136,13 @@ test('daemon import persists sources and rejects duplicates', async () => {
     );
 
     const reloaded = await readStatus(root);
-    assert.equal(reloaded.sources.sources.length, 1);
+    assert.equal(reloaded.sources.sources.length, 3);
 
-    await removeDaemonSource(imported.source.id, root);
+    // Removal is still per source: the group is an import, not a unit the
+    // rest of the daemon has to know about.
+    for (const source of imported.sources) {
+      await removeDaemonSource(source.id, root);
+    }
     const finalState = await readStatus(root);
     assert.deepEqual(finalState.sources.sources, []);
 
@@ -144,7 +155,7 @@ test('daemon import persists sources and rejects duplicates', async () => {
   }
 });
 
-test('daemon accepts coinomi and dedupes it against navcoin-js-v1', async () => {
+test('daemon derives coinomi only once, as navcoin-js-v1', async () => {
   const root = await makeProjectTempDir('daemon');
   const phrase =
     'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -157,29 +168,22 @@ test('daemon accepts coinomi and dedupes it against navcoin-js-v1', async () => 
     await waitForReady(child);
 
     const imported = await importDaemonSource(
-      { type: 'mnemonic', walletType: 'coinomi', phrase },
+      { type: 'mnemonic', phrase },
       root,
     );
 
-    assert.equal(imported.source.status, 'ready');
-    assert.equal(imported.source.walletType, 'coinomi');
+    // Coinomi derives at the navcoin-js-v1 path, so deriving both would
+    // scan the same keys twice and double-count every UTXO.
+    const types = imported.sources.map((source) => source.walletType);
+    assert.ok(!types.includes('coinomi'), types.join(', '));
+    assert.ok(types.includes('navcoin-js-v1'));
+    assert.equal(new Set(types).size, types.length);
 
     const status = await getDaemonStatus(root);
-    assert.equal(status.sourceCount, 1);
-    assert.equal(status.sources[0].walletType, 'coinomi');
-
-    // Coinomi derives at the navcoin-js-v1 path, so the same phrase under
-    // that type is the same keys and must not become a second source.
-    await assert.rejects(
-      importDaemonSource(
-        { type: 'mnemonic', walletType: 'navcoin-js-v1', phrase },
-        root,
-      ),
-      /Duplicate source/,
-    );
+    assert.equal(status.sourceCount, types.length);
 
     const reloaded = await readStatus(root);
-    assert.equal(reloaded.sources.sources.length, 1);
+    assert.equal(reloaded.sources.sources.length, types.length);
 
     await stopDaemon(root);
     await waitForExit(child);
@@ -207,8 +211,9 @@ test('daemon private-key import works', async () => {
       root,
     );
 
-    assert.equal(imported.source.status, 'ready');
-    assert.equal(imported.source.type, 'private-key');
+    assert.equal(imported.sources.length, 1);
+    assert.equal(imported.sources[0].status, 'ready');
+    assert.equal(imported.sources[0].type, 'private-key');
 
     await stopDaemon(root);
     await waitForExit(child);
@@ -235,8 +240,8 @@ test('daemon restart restores imported sources from disk', async () => {
       },
       root,
     );
-    assert.equal(imported.source.type, 'private-key');
-    const sourceId = imported.source.id;
+    assert.equal(imported.sources[0].type, 'private-key');
+    const sourceId = imported.sources[0].id;
 
     // 2. Stop the daemon cleanly.
     await stopDaemon(root);
@@ -283,7 +288,7 @@ test('daemon survives purge then re-import of same private key', async () => {
       },
       root,
     );
-    assert.equal(imported.source.type, 'private-key');
+    assert.equal(imported.sources[0].type, 'private-key');
 
     // 2. Purge all wallet data.
     await purgeDaemon(root);
@@ -305,8 +310,8 @@ test('daemon survives purge then re-import of same private key', async () => {
       },
       root,
     );
-    assert.equal(reimported.source.status, 'ready');
-    assert.equal(reimported.source.type, 'private-key');
+    assert.equal(reimported.sources[0].status, 'ready');
+    assert.equal(reimported.sources[0].type, 'private-key');
 
     // 5. Daemon still reachable — no crash.
     const finalStatus = await getDaemonStatus(root);
@@ -373,7 +378,6 @@ test('daemon rejects invalid imports without persisting broken state', async () 
       importDaemonSource(
         {
           type: 'wallet-dat',
-          walletType: 'navcoin-js-v1',
           phrase:
             'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
         },
@@ -384,18 +388,18 @@ test('daemon rejects invalid imports without persisting broken state', async () 
     let state = await readStatus(root);
     assert.equal(state.sources.sources.length, 0);
 
-    // Unsupported wallet type.
+    // A phrase no derivation accepts: the group would be empty, which is
+    // a rejection rather than an import of nothing.
     await assert.rejects(
       importDaemonSource(
         {
           type: 'mnemonic',
-          walletType: 'navcoin-blah',
           phrase:
-            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon zoo',
         },
         root,
       ),
-      /Unsupported wallet type/,
+      /checksum/i,
     );
     state = await readStatus(root);
     assert.equal(state.sources.sources.length, 0);
@@ -418,15 +422,14 @@ test('daemon rejects invalid imports without persisting broken state', async () 
     const imported = await importDaemonSource(
       {
         type: 'mnemonic',
-        walletType: 'navcoin-js-v1',
         phrase:
           'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
       },
       root,
     );
-    assert.equal(imported.source.status, 'ready');
+    assert.ok(imported.sources.every((source) => source.status === 'ready'));
     const finalState = await readStatus(root);
-    assert.equal(finalState.sources.sources.length, 1);
+    assert.equal(finalState.sources.sources.length, imported.sources.length);
 
     await stopDaemon(root);
     await waitForExit(child);
@@ -466,14 +469,19 @@ test(
       const imported = await importDaemonSource(
         {
           type: 'mnemonic',
-          walletType: 'navcoin-js-v1',
           phrase:
             'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
         },
         root,
       );
 
-      assert.equal(imported.source.walletType, 'navcoin-js-v1');
+      // The fixture's UTXOs sit on the navcoin-js-v1 derivation. The other
+      // derivations of the same phrase are imported too and scan empty,
+      // which is the point: the balance identifies which one is real.
+      const fundedSource = imported.sources.find(
+        (source) => source.walletType === 'navcoin-js-v1',
+      );
+      assert.ok(fundedSource, 'navcoin-js-v1 is one of the derivations');
 
       // Poll until syncStatus === 'synced' AND the expected balance is credited.
       // rescue-scan runs concurrently with the wallet's built-in Sync(); the
@@ -492,12 +500,18 @@ test(
         if (Date.now() - start > SYNC_TIMEOUT_MS) {
           throw new Error(
             `Wallet did not reach syncStatus='synced' with expected NAV+xNAV balance within ${SYNC_TIMEOUT_MS}ms. ` +
-              `Last status: ${JSON.stringify(status?.sources?.[0])}`,
+              `Last status: ${JSON.stringify(
+                status?.sources?.find(
+                  (source) => source.id === fundedSource.id,
+                ),
+              )}`,
           );
         }
 
         status = await getDaemonStatus(root);
-        const src = status.sources?.[0];
+        const src = status.sources?.find(
+          (source) => source.id === fundedSource.id,
+        );
 
         if (
           src?.syncStatus === 'synced' &&
@@ -509,7 +523,9 @@ test(
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       }
 
-      const src = status.sources[0];
+      const src = status.sources.find(
+        (source) => source.id === fundedSource.id,
+      );
       assert.equal(src.syncStatus, 'synced');
 
       // Assert the NAV confirmed balance matches fixture expectation.

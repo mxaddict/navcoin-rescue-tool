@@ -13,7 +13,6 @@
   ];
 
   let kind = $state('mnemonic');
-  let walletType = $state('navcoin-core');
   let phrase = $state('');
   let keysText = $state('');
   let busy = $state(false);
@@ -37,7 +36,6 @@
         if (!phrase.trim()) throw new Error('Mnemonic phrase required.');
         payload = {
           type: 'mnemonic',
-          walletType,
           phrase: phrase.trim(),
           allowUncheckedMnemonic,
         };
@@ -51,7 +49,7 @@
       }
 
       const res = await importSource(payload);
-      result = res.source;
+      result = res;
 
       try {
         const status = await fetchDaemonStatus();
@@ -113,27 +111,16 @@
 
   {#if kind === 'mnemonic'}
     <div class="field">
-      <label>Wallet type</label>
-      <div class="kind-toggle wallet-toggle" role="tablist">
+      <span class="field-label">Wallet types</span>
+      <div class="type-list">
         {#each WALLET_TYPES as t}
-          <button
-            type="button"
-            role="tab"
-            class:active={walletType === t}
-            aria-selected={walletType === t}
-            onclick={() => {
-            walletType = t;
-            allowUncheckedMnemonic = false;
-            checksumWaivable = false;
-          }}
-            disabled={busy}
-          >
-            {t}
-          </button>
+          <span class="type">{t}</span>
         {/each}
       </div>
       <p class="hint">
-        Pick the source app that originally generated this mnemonic.
+        No need to know which app produced the phrase — it is imported for
+        every one of these it can belong to, and Status reports which
+        actually holds funds.
       </p>
     </div>
 
@@ -198,15 +185,15 @@
     <h3>Imported</h3>
     <dl class="meta">
       <div>
-        <dt>Source ID</dt>
-        <dd class="mono">{result.id}</dd>
+        <dt>Import ID</dt>
+        <dd class="mono">{result.importId}</dd>
       </div>
-      {#if result.walletType}
+      {#each result.sources as source}
         <div>
-          <dt>Wallet type</dt>
-          <dd>{result.walletType}</dd>
+          <dt>{source.walletType ?? source.type}</dt>
+          <dd class="mono">{source.id}</dd>
         </div>
-      {/if}
+      {/each}
     </dl>
     <p class="muted">Syncing in the background — see Status for progress.</p>
 
@@ -245,12 +232,19 @@
     min-width: 120px;
   }
 
-  .wallet-toggle {
+  /* The types are a statement of what gets imported, not a choice, so
+     they are labels rather than buttons. */
+  .type-list {
+    display: flex;
     flex-wrap: wrap;
+    gap: 6px;
   }
 
-  .wallet-toggle button {
-    min-width: 0;
+  .type {
+    background: var(--deep);
+    border-radius: 6px;
+    padding: 4px 10px;
+    color: var(--muted);
     font-family:
       ui-monospace,
       SFMono-Regular,
@@ -274,7 +268,8 @@
     gap: 6px;
   }
 
-  .field label {
+  .field label,
+  .field .field-label {
     color: var(--muted);
     font-size: 11px;
     text-transform: uppercase;
@@ -332,7 +327,7 @@
 
   .meta > div {
     display: grid;
-    grid-template-columns: 110px 1fr;
+    grid-template-columns: 130px 1fr;
     align-items: baseline;
     gap: 12px;
   }

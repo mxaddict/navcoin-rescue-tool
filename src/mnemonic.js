@@ -4,7 +4,10 @@ import {
   validateMnemonic as validateElectrumMnemonic,
 } from 'electrum-mnemonic';
 
-import { getDerivationWalletType } from './constants.js';
+import {
+  getDerivationWalletType,
+  MNEMONIC_DERIVATION_TYPES,
+} from './constants.js';
 import {
   MNEMONIC_CHECKSUM_ERROR,
   MNEMONIC_WORD_COUNT_ERROR,
@@ -59,9 +62,7 @@ function buildMessage(walletType, check, waivable) {
       : `This phrase fails its BIP39 checksum, so at least one word is wrong.`;
 
   const advice =
-    check === 'electrum'
-      ? 'Check the phrase against your backup, or pick the wallet type the phrase actually came from.'
-      : 'Check the phrase against your backup — a single mistyped word is enough to fail it.';
+    'Check the phrase against your backup — a single mistyped word is enough to fail it.';
 
   const waiver = waivable
     ? ' If this wallet really was created from a phrase that fails the checksum, re-import it with the unchecked-mnemonic option to derive from it anyway.'
@@ -87,10 +88,10 @@ export function assertMnemonicAccepted(
   const wordCount = phrase.trim().split(/\s+/).filter(Boolean).length;
   if (words && wordCount !== words) {
     const error = new Error(
-      `A "${walletType}" wallet is derived from ${words} words; this phrase has ${wordCount}. ` +
-        `Import it under a wallet type that derives from a ${wordCount}-word phrase.`,
+      `A "${walletType}" wallet is derived from ${words} words; this phrase has ${wordCount}.`,
     );
     error.code = MNEMONIC_WORD_COUNT_ERROR;
+    error.check = check;
     error.waivable = false;
     throw error;
   }
@@ -100,6 +101,62 @@ export function assertMnemonicAccepted(
 
   const error = new Error(buildMessage(walletType, check, waivable));
   error.code = MNEMONIC_CHECKSUM_ERROR;
+  error.check = check;
   error.waivable = waivable;
   throw error;
+}
+
+// Every derivation scheme that can produce a wallet from this phrase.
+//
+// A rescue tool cannot ask someone which app made a phrase years ago, and
+// guessing wrong reports an empty wallet — indistinguishable from having
+// no coins. So an import derives all of them and lets the balances say
+// which one was real. The set is phrase-dependent: an Electrum seed is
+// only ever navcash, a BIP39 phrase is never navcash, and navcoin-core
+// needs the full 24 words.
+export function getEligibleWalletTypes(
+  phrase,
+  { allowUnchecked = false } = {},
+) {
+  return MNEMONIC_DERIVATION_TYPES.filter((walletType) => {
+    try {
+      assertMnemonicAccepted(phrase, walletType, { allowUnchecked });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+// Why no derivation accepted the phrase, as the error to show for it.
+//
+// Each type refuses for its own reason, and they are not equally useful:
+// a phrase failing its checksum is reported as a checksum failure, not as
+// navcash complaining it is not an Electrum seed. A waivable rejection
+// wins outright, because it is the one the user can still act on.
+export function explainNoEligibleWalletType(phrase) {
+  const errors = [];
+  for (const walletType of MNEMONIC_DERIVATION_TYPES) {
+    try {
+      assertMnemonicAccepted(phrase, walletType);
+    } catch (error) {
+      // Waivable means navcoin-core would take it with an explicit
+      // opt-in, so this is the only rejection with a way forward.
+      if (error.waivable === true) return error;
+      errors.push(error);
+    }
+  }
+
+  // BIP39 before Electrum: nearly every phrase in circulation is BIP39,
+  // and navcash refusing it as "not an Electrum seed" describes the
+  // scheme the user was not using rather than the word they mistyped.
+  const isBip39Checksum = (error) =>
+    error.code === MNEMONIC_CHECKSUM_ERROR && error.check === 'bip39';
+
+  return (
+    errors.find(isBip39Checksum) ??
+    errors.find((error) => error.code === MNEMONIC_CHECKSUM_ERROR) ??
+    errors[0] ??
+    new Error('This phrase cannot be derived by any supported wallet type.')
+  );
 }

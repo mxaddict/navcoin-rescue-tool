@@ -19,7 +19,7 @@ import {
   resetNavcoinJs,
 } from './navcoin-js-adapter.js';
 import {
-  importSource,
+  importSources,
   removeSource,
   readSources,
   purgeAllSources,
@@ -202,34 +202,44 @@ async function main() {
         console.log(`[daemon] importing ${body.type} source...`);
 
         // Import source metadata only (non-blocking - skip wallet creation).
-        const source = await importSource(body, root, {
+        const { importId, sources } = await importSources(body, root, {
           createImportedWallet: async () => ({}),
         });
         console.log(
-          `[daemon] imported ${source.id} (${source.walletType}), creating wallet in background...`,
+          `[daemon] imported ${importId} as ${sources.length} source(s): ` +
+            `${sources.map((s) => s.walletType ?? s.type).join(', ')}; ` +
+            `creating wallets in background...`,
         );
 
-        // Create wallet in background (non-blocking).
-        createImportedWallet(source, root)
-          .then(() => {
-            console.log(
-              `[daemon] wallet created (deriving addresses...), opening...`,
-            );
-            return getNavWallet(root);
-          })
-          .then((navWallet) => {
-            console.log(`[daemon] opening wallet and syncing...`);
-            openSourceWallet(source, root, navWallet).catch((err) => {
-              console.log(`[daemon] failed to open wallet: ${err.message}`);
+        // Create wallets in background (non-blocking). Each derivation is
+        // independent, so one failing must not stop the others — the whole
+        // point of deriving several is that only some of them are real.
+        for (const source of sources) {
+          createImportedWallet(source, root)
+            .then(() => {
+              console.log(
+                `[daemon] wallet created for ${source.id} ` +
+                  `(${source.walletType ?? source.type}), opening...`,
+              );
+              return getNavWallet(root);
+            })
+            .then((navWallet) => {
+              console.log(`[daemon] opening wallet and syncing...`);
+              openSourceWallet(source, root, navWallet).catch((err) => {
+                console.log(
+                  `[daemon] failed to open wallet ${source.id}: ${err.message}`,
+                );
+              });
+            })
+            .catch((err) => {
+              console.log(
+                `[daemon] background wallet creation failed for ` +
+                  `${source.id}: ${err.message}`,
+              );
             });
-          })
-          .catch((err) => {
-            console.log(
-              `[daemon] background wallet creation failed: ${err.message}`,
-            );
-          });
+        }
 
-        sendJson(response, 200, { source });
+        sendJson(response, 200, { importId, sources });
       } catch (error) {
         console.log(`[daemon] import failed: ${error.message}`);
         // `code` lets a client recognise a checksum rejection it may offer

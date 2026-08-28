@@ -490,15 +490,12 @@ export async function cmdImportMnemonic(
   startSpinner,
   stopSpinner,
 ) {
-  const walletType = await ask(
-    `Wallet type (${SUPPORTED_MNEMONIC_WALLET_TYPES.join('/')}):`,
-    SUPPORTED_MNEMONIC_WALLET_TYPES,
+  log(
+    C.muted(
+      `  Imported for every wallet type the phrase can belong to:` +
+        ` ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}.`,
+    ),
   );
-  if (!SUPPORTED_MNEMONIC_WALLET_TYPES.includes(walletType)) {
-    log(C.pink(`  Unknown wallet type: ${walletType}`));
-    log(C.muted(`  Supported: ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}`));
-    return;
-  }
   const phrase = await ask('Mnemonic phrase:');
 
   if (!phrase) {
@@ -513,7 +510,7 @@ export async function cmdImportMnemonic(
   );
   const spinner = startSpinner('Importing... deriving address pool');
   try {
-    const result = await runImport(root, walletType, phrase, false);
+    const result = await runImport(root, phrase, false);
     stopSpinner(spinner);
     logImported(C, root, log, result);
   } catch (error) {
@@ -536,7 +533,7 @@ export async function cmdImportMnemonic(
 
     const retry = startSpinner('Importing... deriving address pool');
     try {
-      const result = await runImport(root, walletType, phrase, true);
+      const result = await runImport(root, phrase, true);
       stopSpinner(retry);
       logImported(C, root, log, result);
     } catch (retryError) {
@@ -546,16 +543,18 @@ export async function cmdImportMnemonic(
   }
 }
 
-function runImport(root, walletType, phrase, allowUncheckedMnemonic) {
+function runImport(root, phrase, allowUncheckedMnemonic) {
   return importDaemonSource(
-    { type: 'mnemonic', walletType, phrase, allowUncheckedMnemonic },
+    { type: 'mnemonic', phrase, allowUncheckedMnemonic },
     root,
   );
 }
 
 function logImported(C, root, log, result) {
-  log(C.teal(`  Imported: ${result.source.id}`));
-  log(`  Wallet type: ${result.source.walletType}`);
+  log(C.teal(`  Imported: ${result.importId}`));
+  for (const source of result.sources) {
+    log(`  ${source.walletType ?? source.type}: ${source.id}`);
+  }
   log(C.muted('  Syncing in the background — check `status` for progress.'));
   logStorageWarning(C, root, log);
 }
@@ -603,7 +602,7 @@ async function cmdImportPrivateKey(
       root,
     );
     stopSpinner(spinner);
-    log(C.teal(`  Imported: ${result.source.id}`));
+    log(C.teal(`  Imported: ${result.sources[0].id}`));
     log(`  Keys: ${keys.length}`);
     log(C.muted('  Syncing in the background — check `status` for progress.'));
     logStorageWarning(C, root, log);

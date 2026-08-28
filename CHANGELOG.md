@@ -36,6 +36,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Importing a mnemonic no longer asks which wallet it came from. One phrase
+  now imports as a group: a single import id and one source per derivation
+  the phrase can belong to, each with its own wallet, so Status reports which
+  derivation actually holds funds. Nobody reliably remembers which app
+  produced a phrase years ago, and picking wrong reported an empty wallet —
+  indistinguishable from having no coins. `importSource` in
+  `src/source-registry.js` is now `importSources` and returns
+  `{ importId, sources }`; `POST /import` returns the same shape in place of
+  `{ source }`. Removal, sync and sweep are unchanged: each derivation is an
+  ordinary source.
+- `ntr import mnemonic` no longer takes `--wallet-type`, the TUI no longer
+  prompts for one, and the GUI's type picker is replaced by a note listing
+  what the import covers. Aliases collapse into the type they alias, so a
+  phrase is never derived twice at the same path: `coinomi` imports as
+  `navcoin-js-v1`.
+- The waiver still narrows the group rather than widening it. A 24-word
+  phrase that fails its BIP39 checksum can only be a `navcoin-core` wallet,
+  so `--allow-unchecked-mnemonic` (and its TUI prompt and GUI checkbox)
+  imports that one derivation alone.
 - Rejection messages no longer repeat the phrase. bitcore-mnemonic's
   `InvalidMnemonic` embeds the whole mnemonic in its message, which the
   daemon wrote to `logs/daemon.log`.

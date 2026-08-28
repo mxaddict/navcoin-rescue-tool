@@ -49,6 +49,15 @@ const WALLET_TYPE_ALIASES = {
 export function getDerivationWalletType(walletType) {
   return WALLET_TYPE_ALIASES[walletType] ?? walletType;
 }
+
+// The distinct derivation schemes behind the user-facing types: aliases
+// collapse into the type they alias, because deriving both would produce
+// the same keys twice and double-count every UTXO. An import tries every
+// one of these the phrase is valid for, so the user never has to know
+// which app produced their phrase.
+export const MNEMONIC_DERIVATION_TYPES = [
+  ...new Set(SUPPORTED_MNEMONIC_WALLET_TYPES.map(getDerivationWalletType)),
+];
 export const SUPPORTED_SOURCE_TYPES = ['mnemonic', 'private-key'];
 
 export const FILE_LAYOUT = {

@@ -7,12 +7,11 @@ import {
   deleteWalletForSource,
   resetNavcoinJs,
 } from './navcoin-js-adapter.js';
+import { SUPPORTED_SOURCE_TYPES } from './constants.js';
 import {
-  getDerivationWalletType,
-  SUPPORTED_MNEMONIC_WALLET_TYPES,
-  SUPPORTED_SOURCE_TYPES,
-} from './constants.js';
-import { assertMnemonicAccepted } from './mnemonic.js';
+  explainNoEligibleWalletType,
+  getEligibleWalletTypes,
+} from './mnemonic.js';
 
 function normalizeMnemonic(phrase) {
   return phrase.trim().split(/\s+/).filter(Boolean).join('\n');
@@ -40,10 +39,6 @@ export function validateImportInput(input) {
   }
 
   if (input.type === 'mnemonic') {
-    if (!SUPPORTED_MNEMONIC_WALLET_TYPES.includes(input.walletType)) {
-      throw new Error(`Unsupported wallet type: ${input.walletType}`);
-    }
-
     const normalizedMnemonic = normalizeMnemonic(input.phrase || '');
     if (!normalizedMnemonic) {
       throw new Error('Mnemonic phrase is required.');
@@ -54,18 +49,26 @@ export function validateImportInput(input) {
       throw new Error('Mnemonic phrase must contain at least 12 words.');
     }
 
+    // The caller does not choose a wallet type: nobody reliably remembers
+    // which app produced a phrase years ago, and picking wrong reports an
+    // empty wallet, which looks exactly like having no coins. Derive every
+    // scheme the phrase is valid for instead and let the balances answer.
+    //
     // Every client — CLI, TUI and GUI — imports through the daemon, which
     // imports through here, so this is the one place the check has to be
     // for all three to behave the same way.
-    assertMnemonicAccepted(
-      normalizedMnemonic.replaceAll('\n', ' '),
-      input.walletType,
-      { allowUnchecked: input.allowUncheckedMnemonic === true },
-    );
+    const phrase = normalizedMnemonic.replaceAll('\n', ' ');
+    const walletTypes = getEligibleWalletTypes(phrase, {
+      allowUnchecked: input.allowUncheckedMnemonic === true,
+    });
+
+    if (walletTypes.length === 0) {
+      throw explainNoEligibleWalletType(phrase);
+    }
 
     return {
       type: 'mnemonic',
-      walletType: input.walletType,
+      walletTypes,
       normalizedDetails: normalizedMnemonic,
     };
   }
@@ -77,7 +80,7 @@ export function validateImportInput(input) {
 
   return {
     type: 'private-key',
-    walletType: null,
+    walletTypes: [null],
     normalizedDetails: normalizedKeys.join('\n'),
   };
 }
@@ -93,7 +96,10 @@ export async function writeSources(sourcesState, root = getAppDataRoot()) {
   return sourcesState;
 }
 
-export async function importSource(
+// One phrase becomes one source per derivation scheme it is valid for,
+// all sharing an import id. Downstream — status, sweep, remove — each is
+// an ordinary source and needs to know nothing about the grouping.
+export async function importSources(
   input,
   root = getAppDataRoot(),
   walletAdapter = {
@@ -102,55 +108,85 @@ export async function importSource(
   },
 ) {
   const validated = validateImportInput(input);
+
+  // Identifies the secret, independent of what is derived from it, so a
+  // phrase already imported is recognised however many sources it made.
+  const importId = buildFingerprint([
+    validated.type,
+    validated.normalizedDetails,
+  ]).slice(0, 16);
+
+  const state = await readSources(root);
+
+  if (state.sources.some((source) => source.importId === importId)) {
+    throw new Error(`Duplicate source: ${importId}`);
+  }
+
   // Fingerprint the derivation scheme rather than the label, so a phrase
   // imported under an alias and again under the type it aliases is one
   // source — two would derive the same keys and double-count every UTXO.
-  const fingerprint = buildFingerprint([
-    validated.type,
-    validated.walletType
-      ? getDerivationWalletType(validated.walletType)
-      : 'private-key',
-    validated.normalizedDetails,
-  ]);
-  const sourceId = fingerprint.slice(0, 16);
-  const state = await readSources(root);
+  const prepared = validated.walletTypes.map((walletType) => {
+    const fingerprint = buildFingerprint([
+      validated.type,
+      walletType ?? 'private-key',
+      validated.normalizedDetails,
+    ]);
 
-  if (state.sources.some((source) => source.fingerprint === fingerprint)) {
-    throw new Error(`Duplicate source: ${sourceId}`);
+    return {
+      id: fingerprint.slice(0, 16),
+      importId,
+      type: validated.type,
+      walletType,
+      fingerprint,
+      normalizedDetails: validated.normalizedDetails,
+    };
+  });
+
+  // A phrase already imported under one type before the group import
+  // existed leaves that fingerprint in place; skipping it keeps the rest
+  // of the group importable rather than failing the whole thing.
+  const existing = new Set(state.sources.map((source) => source.fingerprint));
+  const fresh = prepared.filter((source) => !existing.has(source.fingerprint));
+
+  if (fresh.length === 0) {
+    throw new Error(`Duplicate source: ${importId}`);
   }
 
-  const preparedSource = {
-    id: sourceId,
-    type: validated.type,
-    walletType: validated.walletType,
-    fingerprint,
-    normalizedDetails: validated.normalizedDetails,
-  };
-
-  const source = {
-    id: sourceId,
-    type: validated.type,
-    walletType: validated.walletType,
-    fingerprint,
-    normalizedDetails: validated.normalizedDetails,
-    status: 'ready',
-    syncStatus: 'wallet-created',
-    createdAt: new Date().toISOString(),
-    error: null,
-  };
+  const created = [];
+  // Tracked separately from `created` so the wallet being built when the
+  // failure happens is cleaned up too — it may have left a partial one.
+  const started = [];
 
   try {
-    source.wallet = await walletAdapter.createImportedWallet(
-      preparedSource,
-      root,
-    );
-    state.sources.push(source);
-    await writeSources(state, root);
-    return source;
+    for (const preparedSource of fresh) {
+      started.push(preparedSource.id);
+
+      const source = {
+        ...preparedSource,
+        status: 'ready',
+        syncStatus: 'wallet-created',
+        createdAt: new Date().toISOString(),
+        error: null,
+      };
+
+      source.wallet = await walletAdapter.createImportedWallet(
+        preparedSource,
+        root,
+      );
+      created.push(source);
+    }
   } catch (error) {
-    await walletAdapter.deleteWalletForSource(sourceId, root);
+    // The group is all-or-nothing: a half-imported phrase would report a
+    // balance from some derivations and silently omit others.
+    for (const sourceId of started) {
+      await walletAdapter.deleteWalletForSource(sourceId, root);
+    }
     throw error;
   }
+
+  state.sources.push(...created);
+  await writeSources(state, root);
+  return { importId, sources: created };
 }
 
 export async function removeSource(

@@ -55,6 +55,25 @@ entry when it ships — `git log` is the history.
   created 644 while `sources.json` and `auth.cookie` are 600. Existing logs
   stay readable until wiped by hand.
 
+## Group import: known consequences
+
+- Importing one mnemonic now builds a wallet per derivation (three for a
+  valid 12-word BIP39 phrase, four for 24 words), each with its own
+  `RECOVERY_MIN_POOL_SIZE` address pool and its own electrum sync. Import
+  and first sync therefore take roughly N times as long and N times the
+  disk as before. Measured only in the test suite, where the real-adapter
+  case in `test/source-registry.test.js` builds three wallets; not
+  measured against a real electrum server.
+- Sources imported by an earlier build have a `walletType` that is a
+  user-facing alias (`coinomi`) and no `importId`. `importSources` skips
+  any prepared source whose fingerprint already exists, so re-importing
+  such a phrase adds the derivations it is missing rather than failing —
+  but the pre-existing source keeps its alias label and stays outside the
+  group. Nothing migrates it; verified only by reading the code.
+- `sources.json` now holds the same phrase once per derivation, in
+  `normalizedDetails` on every source of the group. Same file, same 0600
+  mode, more copies of the secret.
+
 ## Dependency majors not taken
 
 - Held back on 2026-08-28 because each is a breaking change across build

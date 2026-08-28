@@ -62,7 +62,7 @@ process.stdout.on('error', (error) => {
 
 function printHelp() {
   process.stdout.write(
-    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --wallet-type <type> --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} show\n  ${CLI_NAME} rescan\n  ${CLI_NAME} sweep <address>\n  ${CLI_NAME} purge\n`,
+    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} show\n  ${CLI_NAME} rescan\n  ${CLI_NAME} sweep <address>\n  ${CLI_NAME} purge\n`,
   );
 }
 
@@ -289,7 +289,6 @@ async function handleImport(argv) {
       result = await importDaemonSource(
         {
           type: 'mnemonic',
-          walletType: options['wallet-type'],
           phrase: options.phrase,
           allowUncheckedMnemonic: options['allow-unchecked-mnemonic'] === true,
         },
@@ -314,18 +313,26 @@ async function handleImport(argv) {
       );
     }
 
-    process.stdout.write(`Imported source: ${result.source.id}\n`);
-    if (result.source.walletType) {
-      process.stdout.write(`Wallet type: ${result.source.walletType}\n`);
+    process.stdout.write(`Import: ${result.importId}\n`);
+    process.stdout.write(
+      `Sources created: ${result.sources.length}` +
+        ` (a phrase can belong to more than one wallet type, so each` +
+        ` derivation is scanned)\n`,
+    );
+    for (const source of result.sources) {
+      process.stdout.write(`\n  ${source.id}\n`);
+      if (source.walletType) {
+        process.stdout.write(`  Wallet type: ${source.walletType}\n`);
+      }
+      if (source.wallet) {
+        process.stdout.write(
+          `  Wallet database: ${source.wallet.databaseName}\n`,
+        );
+        process.stdout.write(`  Wallet file: ${source.wallet.dataFile}\n`);
+      }
+      process.stdout.write(`  Status: ${source.status}\n`);
+      process.stdout.write(`  Sync: ${source.syncStatus}\n`);
     }
-    if (result.source.wallet) {
-      process.stdout.write(
-        `Wallet database: ${result.source.wallet.databaseName}\n`,
-      );
-      process.stdout.write(`Wallet file: ${result.source.wallet.dataFile}\n`);
-    }
-    process.stdout.write(`Status: ${result.source.status}\n`);
-    process.stdout.write(`Sync: ${result.source.syncStatus}\n`);
 
     const layout = getLayout(root);
     process.stdout.write('\n');
@@ -346,7 +353,8 @@ async function handleImport(argv) {
       process.stderr.write(`${error.message}\n`);
       if (sourceType === 'mnemonic' && error.code !== MNEMONIC_CHECKSUM_ERROR) {
         process.stderr.write(
-          `Supported wallet types: ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}\n`,
+          `A mnemonic is imported for every wallet type it can belong to:` +
+            ` ${SUPPORTED_MNEMONIC_WALLET_TYPES.join(', ')}.\n`,
         );
       }
     }

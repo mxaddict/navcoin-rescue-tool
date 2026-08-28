@@ -90,15 +90,6 @@ entry when it ships — `git log` is the history.
   derivation accepted. Kept so the function is guaranteed to return an
   Error rather than `undefined`.
 
-## Dependency majors not taken
-
-- Held back on 2026-08-28 because each is a breaking change across build
-  tooling that CI exercises on four platforms, and the Windows toolchain is
-  already pinned (see below): `chalk` 5 -> 6, `cross-env` 7 -> 10,
-  `@babel/runtime` 7 -> 8 (root), `vite` 5 -> 8 and
-  `@sveltejs/vite-plugin-svelte` 4 -> 7 (gui). The two gui ones have to move
-  together. Everything within range was updated.
-
 ## Findings not fixed
 
 - `rescueScan` accepts a `skipXNav` option that no caller sets. Either wire it

@@ -72,6 +72,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `skipped`, so the CLI, TUI and GUI can show what a forced sweep leaves
   behind.
 
+- Dependencies moved to their current majors: `chalk` 6, `cross-env` 10,
+  `@babel/runtime` 8, and in the GUI `vite` 8 with
+  `@sveltejs/vite-plugin-svelte` 7. Rust dependencies updated within
+  range.
+
 ### Fixed
 
 - Removing one source no longer breaks every other wallet on disk.

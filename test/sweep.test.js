@@ -512,3 +512,186 @@ test('executeSweep broadcasts NAV and xNAV legs from same source', async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('a blocked sweep names every blocker and both ways forward', async () => {
+  const root = await makeProjectTempDir('sweep-block-message');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    await openSourceWallet(
+      { id: 'src-ready', type: 'mnemonic', walletType: 'next', label: 'R' },
+      root,
+      makeNavWallet(),
+    );
+    await openSourceWallet(
+      { id: 'src-slow', type: 'mnemonic', walletType: 'navpay', label: 'S' },
+      root,
+      makeNavWallet({ _syncOnConnect: false, _syncUtxos: false }),
+    );
+    await openSourceWallet(
+      { id: 'src-late', type: 'mnemonic', walletType: 'navcash', label: 'L' },
+      root,
+      makeNavWallet({ _syncOnConnect: false, _syncUtxos: false }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    let message = null;
+    try {
+      prepareSweep();
+      assert.fail('an unsynced source must block the sweep');
+    } catch (err) {
+      message = err.message;
+    }
+
+    // One phrase opens several derivations, so being sent back to wait once
+    // per source is its own failure — every blocker has to be in the message.
+    assert.match(message, /src-slow \(navpay\)/);
+    assert.match(message, /src-late \(navcash\)/);
+    assert.doesNotMatch(
+      message,
+      /src-ready/,
+      'a synced source is not a blocker',
+    );
+    assert.match(message, /2 of 3 sources/);
+    assert.match(message, /1 ready source/);
+    assert.match(message, /force the sweep/);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a forced sweep previews and spends only the ready sources', async () => {
+  const root = await makeProjectTempDir('sweep-force');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const ready = { id: 'src-f-ready', type: 'mnemonic', walletType: 'next' };
+    await openSourceWallet(
+      ready,
+      root,
+      makeNavWallet({
+        _balance: {
+          nav: { confirmed: 4_0000_0000, pending: 0 },
+          staked: { confirmed: 0, pending: 0 },
+        },
+        _txResult: { tx: 'hexReady', fee: 6_000 },
+        _sendResult: { hashes: ['hashReady'], error: null },
+      }),
+    );
+
+    const slow = { id: 'src-f-slow', type: 'mnemonic', walletType: 'navpay' };
+    await openSourceWallet(
+      slow,
+      root,
+      makeNavWallet({
+        _syncOnConnect: false,
+        _syncUtxos: false,
+        _balance: {
+          nav: { confirmed: 9_0000_0000, pending: 0 },
+          staked: { confirmed: 0, pending: 0 },
+        },
+        _sendResult: { hashes: ['hashSlow'], error: null },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const preview = prepareSweep({ force: true });
+    assert.equal(preview.sources.length, 1);
+    assert.equal(preview.sources[0].sourceId, ready.id);
+    // The skipped source's coins must not be counted as about to move.
+    assert.equal(preview.totalNav, 4_0000_0000);
+    assert.deepEqual(preview.skipped, [
+      {
+        sourceId: slow.id,
+        walletType: 'navpay',
+        reason: 'not fully synced (status: connected)',
+      },
+    ]);
+
+    const result = await executeSweep('NDestinationAddr1', { force: true });
+    assert.deepEqual(result.hashes, ['hashReady']);
+    assert.equal(result.totalSent, 4_0000_0000 - 6_000);
+    assert.equal(
+      getSourceState(slow.id).wallet._lastSentTx,
+      undefined,
+      'a skipped source must not broadcast anything',
+    );
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('executeSweep refuses to skip sources unless forced', async () => {
+  const root = await makeProjectTempDir('sweep-exec-block');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    await openSourceWallet(
+      { id: 'src-eb-ready', type: 'mnemonic' },
+      root,
+      makeNavWallet(),
+    );
+    await openSourceWallet(
+      { id: 'src-eb-slow', type: 'mnemonic' },
+      root,
+      makeNavWallet({ _syncOnConnect: false, _syncUtxos: false }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    await assert.rejects(
+      () => executeSweep('NDestinationAddr1'),
+      /not ready to sweep/,
+    );
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('forcing with nothing ready refuses rather than broadcasting nothing', async () => {
+  const root = await makeProjectTempDir('sweep-force-empty');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    await openSourceWallet(
+      { id: 'src-fe-slow', type: 'mnemonic' },
+      root,
+      makeNavWallet({ _syncOnConnect: false, _syncUtxos: false }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.throws(
+      () => prepareSweep({ force: true }),
+      /would broadcast nothing/,
+    );
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

@@ -308,7 +308,8 @@ async function main() {
 
     if (request.method === 'POST' && request.url === '/sweep/prepare') {
       try {
-        const preview = prepareSweep();
+        const body = await readJsonBody(request);
+        const preview = prepareSweep({ force: body.force === true });
         sendJson(response, 200, { preview });
       } catch (error) {
         sendJson(response, 400, { error: error.message });
@@ -330,10 +331,14 @@ async function main() {
           );
         }
 
-        // Re-validate sync state at confirm time.
-        prepareSweep();
+        // Re-validate sync state at confirm time. A source can fall out
+        // of sync between the preview and the confirmation, and forcing
+        // has to be asked for again rather than inherited from the
+        // preview the user was shown.
+        const force = body.force === true;
+        prepareSweep({ force });
 
-        const result = await executeSweep(body.destination);
+        const result = await executeSweep(body.destination, { force });
         sendJson(response, 200, { result });
       } catch (error) {
         sendJson(response, 400, { error: error.message });

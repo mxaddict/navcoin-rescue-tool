@@ -16,6 +16,11 @@
   let phrase = $state('');
 
   let preview = $state(null);
+  // Set when prepare refused because sources are not synced. The retry is
+  // a deliberate second action: skipping a source means sweeping without
+  // knowing what it holds.
+  let blockedMessage = $state(null);
+  let force = $state(false);
   let result = $state(null);
   let busy = $state(false);
   let error = $state(null);
@@ -44,15 +49,27 @@
       error = 'Destination addresses do not match.';
       return;
     }
+    await prepare(false);
+  }
+
+  async function prepare(forced) {
     busy = true;
     error = null;
+    blockedMessage = null;
     try {
-      const res = await sweepPrepare();
+      const res = await sweepPrepare({ force: forced });
       preview = res?.preview ?? null;
+      force = forced;
       step = 'review';
       phrase = '';
     } catch (err) {
-      error = err.message ?? String(err);
+      const message = err.message ?? String(err);
+      error = message;
+      // Only a sync block can be forced past. Anything else — no sources,
+      // an unreachable daemon — must not offer a button that cannot help.
+      if (!forced && /not ready to sweep/.test(message)) {
+        blockedMessage = message;
+      }
     } finally {
       busy = false;
       await tick();
@@ -71,6 +88,7 @@
       const res = await sweepConfirm({
         destination: destination.trim(),
         confirmPhrase: phrase,
+        force,
       });
       result = res?.result ?? null;
       step = 'done';
@@ -106,7 +124,14 @@
 
 {#if error}
   <div class="callout error">
-    <p>{error}</p>
+    <p class="pre">{error}</p>
+    {#if blockedMessage}
+      <div class="actions">
+        <button class="danger" onclick={() => prepare(true)} disabled={busy}>
+          {busy ? 'Preparing…' : 'Sweep anyway, skipping those sources'}
+        </button>
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -193,6 +218,26 @@
         <dd>{preview.sources?.length ?? 0}</dd>
       </div>
     </dl>
+
+    {#if preview.skipped?.length}
+      <div class="callout error">
+        <p class="small">
+          <strong>Skipped — balance unknown, NOT included:</strong>
+        </p>
+        <ul class="skipped">
+          {#each preview.skipped as skip}
+            <li>
+              <span class="mono">{skip.sourceId}</span>{#if skip.walletType}
+                ({skip.walletType}){/if} — {skip.reason}
+            </li>
+          {/each}
+        </ul>
+        <p class="small">
+          Coins these sources hold stay where they are. Go back and wait for
+          them to sync to sweep everything.
+        </p>
+      </div>
+    {/if}
 
     <p class="muted small">
       Fees are subtracted from each leg's amount. Final on-chain amount may
@@ -397,6 +442,23 @@
   button.ghost:hover:not(:disabled) {
     color: var(--text);
     border-color: var(--muted);
+  }
+
+  .pre {
+    white-space: pre-wrap;
+  }
+
+  .skipped {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .skipped li {
+    word-break: break-all;
   }
 
   .hashes {

@@ -678,17 +678,46 @@ async function cmdRescan(C, root, log) {
   }
 }
 
-async function cmdSweep(C, root, log, ask) {
+export async function cmdSweep(C, root, log, ask) {
   const SEP = makeSep(C);
   log(C.muted('  Checking sync state...'));
 
   let preview;
+  let force = false;
   try {
     const response = await sweepPrepare(root);
     preview = response.preview;
   } catch (error) {
-    log(C.pink(`  Sweep blocked: ${error.message}`));
-    return;
+    // The message lists every source holding the sweep up. Offer to skip
+    // them rather than making the user re-run the command, but make what
+    // is being given up explicit: their balances are unknown, so the
+    // sweep may leave coins behind.
+    for (const line of String(error.message).split('\n')) {
+      log(C.pink(`  ${line}`));
+    }
+
+    // Only a sync block can be forced past. Offering the retry for
+    // anything else — no sources at all, an unreachable daemon — would
+    // ask a question whose answer changes nothing.
+    if (!/not ready to sweep/.test(String(error.message))) return;
+
+    const answer = await ask(
+      'Sweep anyway, skipping those sources? (yes/no):',
+      ['yes', 'no'],
+    );
+    if (answer !== 'yes') {
+      log(C.muted('  Sweep cancelled.'));
+      return;
+    }
+
+    try {
+      const response = await sweepPrepare(root, { force: true });
+      preview = response.preview;
+      force = true;
+    } catch (retryError) {
+      log(C.pink(`  Sweep blocked: ${retryError.message}`));
+      return;
+    }
   }
 
   log('');
@@ -703,9 +732,22 @@ async function cmdSweep(C, root, log, ask) {
   );
   log('  Sources:');
   for (const src of preview.sources) {
+    const label = src.walletType
+      ? `${src.sourceId} (${src.walletType})`
+      : src.sourceId;
     log(
-      `    ${C.muted(src.sourceId)}  ${C.cyan(navStr(src.nav))} NAV  +  ${C.indigo(navStr(src.xnav))} xNAV`,
+      `    ${C.muted(label)}  ${C.cyan(navStr(src.nav))} NAV  +  ${C.indigo(navStr(src.xnav))} xNAV`,
     );
+  }
+
+  if (preview.skipped.length > 0) {
+    log(C.pink('  Skipped — balance unknown, NOT included:'));
+    for (const src of preview.skipped) {
+      const label = src.walletType
+        ? `${src.sourceId} (${src.walletType})`
+        : src.sourceId;
+      log(`    ${C.muted(label)}  ${C.pink(src.reason)}`);
+    }
   }
   log(SEP);
 
@@ -735,7 +777,9 @@ async function cmdSweep(C, root, log, ask) {
 
   log(C.muted('  Broadcasting...'));
   try {
-    const response = await sweepConfirm(destination, 'SEND MY COINS', root);
+    const response = await sweepConfirm(destination, 'SEND MY COINS', root, {
+      force,
+    });
     const result = response.result;
     log(C.teal('  Sweep broadcast successfully.'));
     log(

@@ -685,64 +685,102 @@ export async function purgeAllWallets() {
   walletState.clear();
 }
 
-/**
- * Validate that all sources are fully synced and return a sweep preview.
- *
- * Returns:
- *   {
- *     totalNav,
- *     totalXNav,
- *     totalCombined,
- *     sources: [{ sourceId, nav, xnav }],
- *   }
- *
- * Throws if any source is not synced or has an error.
- */
 function describeSource(state) {
   return state.walletType
     ? `${state.sourceId} (${state.walletType})`
     : state.sourceId;
 }
 
-export function prepareSweep() {
+// Why a source cannot take part in a sweep, or null if it can.
+function sweepBlockReason(state) {
+  if (state.error) return `in error state: ${state.error}`;
+  if (state.syncStatus !== 'synced')
+    return `not fully synced (status: ${state.syncStatus})`;
+  return null;
+}
+
+// Split the open wallets into the ones a sweep can spend from and the
+// ones it cannot. Both `prepareSweep` and `executeSweep` go through this
+// so the preview and the broadcast can never disagree about which
+// sources are in.
+function partitionSweepSources() {
+  const ready = [];
+  const blocked = [];
+
+  for (const state of walletState.values()) {
+    const reason = sweepBlockReason(state);
+    if (reason) {
+      blocked.push({ state, reason });
+    } else {
+      ready.push(state);
+    }
+  }
+
+  return { ready, blocked };
+}
+
+/**
+ * Validate the sources and return a sweep preview.
+ *
+ * Returns:
+ *   {
+ *     totalNav,
+ *     totalXNav,
+ *     totalCombined,
+ *     sources: [{ sourceId, walletType, nav, xnav }],
+ *     skipped: [{ sourceId, walletType, reason }],
+ *   }
+ *
+ * Throws if a source is not synced, unless `force` is set — then that
+ * source is excluded from the sweep and reported in `skipped`.
+ */
+export function prepareSweep({ force = false } = {}) {
   const states = [...walletState.values()];
 
   if (states.length === 0) {
     throw new Error('No imported sources. Import a wallet before sweeping.');
   }
 
-  // Every source has to be accounted for before anything is broadcast: an
-  // unsynced one has an unknown balance, and sweeping around it would
-  // leave funds behind with nothing to say so. The label matters because
-  // a phrase imports as several derivations — the blocker is often one
-  // the user has no coins in, and `remove` on it unblocks the sweep.
-  for (const state of states) {
-    const label = describeSource(state);
+  const { ready, blocked } = partitionSweepSources();
 
-    if (state.error) {
-      throw new Error(
-        `Source ${label} is in error state: ${state.error}. ` +
-          `Remove it if it is a derivation you do not need.`,
-      );
-    }
+  // An unsynced source has an unknown balance, so sweeping around it can
+  // leave coins behind with nothing saying so. Every blocker is listed
+  // rather than just the first: one phrase opens several derivations, and
+  // being sent back to wait once per source is its own failure.
+  if (blocked.length > 0 && !force) {
+    const lines = blocked.map(
+      ({ state, reason }) => `  ${describeSource(state)} — ${reason}`,
+    );
 
-    if (state.syncStatus !== 'synced') {
-      throw new Error(
-        `Source ${label} is not fully synced (status: ${state.syncStatus}). Wait for sync to complete.`,
-      );
-    }
+    throw new Error(
+      `${blocked.length} of ${states.length} sources are not ready to sweep:\n` +
+        `${lines.join('\n')}\n` +
+        `Wait for them to finish syncing, or force the sweep to skip them ` +
+        `and send only what the ${ready.length} ready source(s) hold.`,
+    );
+  }
+
+  if (ready.length === 0) {
+    throw new Error(
+      'No source is ready to sweep, so forcing would broadcast nothing.',
+    );
   }
 
   let totalNav = 0;
   let totalXNav = 0;
   const sources = [];
 
-  for (const state of states) {
+  for (const state of ready) {
     const nav = state.balance.nav.confirmed;
     const xnav = state.balance.xnav?.confirmed ?? 0;
     totalNav += nav;
     totalXNav += xnav;
-    sources.push({ sourceId: state.sourceId, nav, xnav });
+    sources.push({
+      sourceId: state.sourceId,
+      walletType: state.walletType ?? null,
+      nav,
+      xnav,
+    });
   }
 
   return {
@@ -750,6 +788,13 @@ export function prepareSweep() {
     totalXNav,
     totalCombined: totalNav + totalXNav,
     sources,
+    // Always present, empty when nothing was skipped, so a caller can
+    // render it without checking whether the sweep was forced.
+    skipped: blocked.map(({ state, reason }) => ({
+      sourceId: state.sourceId,
+      walletType: state.walletType ?? null,
+      reason,
+    })),
   };
 }
 
@@ -763,14 +808,22 @@ export function prepareSweep() {
  * Throws if any broadcast fails. Already-broadcast legs from earlier sources
  * cannot be undone — partial-success state is the responsibility of callers
  * to surface.
+ *
+ * Spends only from the sources `prepareSweep` would have accepted for the
+ * same `force`, so what is broadcast is what the preview showed.
  */
-export async function executeSweep(destination) {
-  const states = [...walletState.values()];
+export async function executeSweep(destination, { force = false } = {}) {
+  const { ready, blocked } = partitionSweepSources();
+
+  if (blocked.length > 0 && !force) {
+    throw new Error(`${blocked.length} source(s) are not ready to sweep.`);
+  }
+
   const hashes = [];
   let totalSent = 0;
   let totalFee = 0;
 
-  for (const state of states) {
+  for (const state of ready) {
     if (!state.wallet) continue;
 
     const nav = state.balance.nav.confirmed;

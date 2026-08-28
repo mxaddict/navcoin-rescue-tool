@@ -74,13 +74,20 @@ export async function rescanDaemon() {
   return await daemonRequest('/rescan', { method: 'POST' });
 }
 
-export async function sweepPrepare() {
-  return await daemonRequest('/sweep/prepare', { method: 'POST' });
+export async function sweepPrepare({ force = false } = {}) {
+  return await daemonRequest('/sweep/prepare', {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  });
 }
 
-export async function sweepConfirm({ destination, confirmPhrase }) {
+export async function sweepConfirm({
+  destination,
+  confirmPhrase,
+  force = false,
+}) {
   return await daemonRequest('/sweep/confirm', {
     method: 'POST',
-    body: JSON.stringify({ destination, confirmPhrase }),
+    body: JSON.stringify({ destination, confirmPhrase, force }),
   });
 }

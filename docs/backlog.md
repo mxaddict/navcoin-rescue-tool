@@ -61,22 +61,6 @@ entry when it ships — `git log` is the history.
   created 644 while `sources.json` and `auth.cookie` are 600. Existing logs
   stay readable until wiped by hand.
 
-## A sweep is blocked by any unsynced source, including empty ones
-
-`prepareSweep` in `wallet-manager.js` throws if any open wallet is in
-`error` or is not `synced`, because an unsynced source has an unknown
-balance and sweeping around it could leave funds behind with nothing
-saying so. With the group import that guard fires much more often: one
-phrase opens three or four wallets, and a derivation the user has no
-coins in can block the sweep of the one that holds them.
-
-The message now names the derivation and says the source can be removed,
-which is the workaround. The open question is whether the guard should
-instead let a sweep proceed past a source that never built a wallet at
-all (no wallet, no keys, so nothing of ours can be spent from it) while
-still blocking on one that is merely mid-sync. Not changed here because
-it trades a safe failure for a silent one, and the call is the user's.
-
 ## Group import: known consequences
 
 - Importing one mnemonic now builds a wallet per derivation (three for a

@@ -33,6 +33,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   properties of undefined". This one is never waivable.
 - Import failures carry a `code` (and `waivable`) alongside the message, so
   a client can recognise a checksum rejection without matching on text.
+- A sweep can be forced past sources that are not ready:
+  `ntr sweep <address> --force`, a prompt in the TUI, and a button on the
+  GUI's block message. Forcing sweeps only the synced sources and lists the
+  rest as skipped — their balances are unknown, so their coins stay where
+  they are. Forcing with nothing ready is refused rather than broadcasting
+  an empty sweep.
 
 ### Changed
 
@@ -58,6 +64,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Rejection messages no longer repeat the phrase. bitcore-mnemonic's
   `InvalidMnemonic` embeds the whole mnemonic in its message, which the
   daemon wrote to `logs/daemon.log`.
+
+- The message that blocks a sweep now names every source holding it up,
+  with its derivation and why, and says both ways forward. It previously
+  named one source per attempt, which with the group import meant being
+  sent back to wait once per derivation. `prepareSweep` also returns
+  `skipped`, so the CLI, TUI and GUI can show what a forced sweep leaves
+  behind.
 
 ### Fixed
 

@@ -70,14 +70,23 @@ export function rescanDaemon(root) {
   return daemonRequest('/rescan', { method: 'POST', root });
 }
 
-export function sweepPrepare(root) {
-  return daemonRequest('/sweep/prepare', { method: 'POST', root });
+export function sweepPrepare(root, { force = false } = {}) {
+  return daemonRequest('/sweep/prepare', {
+    method: 'POST',
+    root,
+    body: { force },
+  });
 }
 
-export function sweepConfirm(destination, confirmPhrase, root) {
+export function sweepConfirm(
+  destination,
+  confirmPhrase,
+  root,
+  { force = false } = {},
+) {
   return daemonRequest('/sweep/confirm', {
     method: 'POST',
     root,
-    body: { destination, confirmPhrase },
+    body: { destination, confirmPhrase, force },
   });
 }

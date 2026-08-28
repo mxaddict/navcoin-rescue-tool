@@ -62,7 +62,7 @@ process.stdout.on('error', (error) => {
 
 function printHelp() {
   process.stdout.write(
-    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} show\n  ${CLI_NAME} rescan\n  ${CLI_NAME} sweep <address>\n  ${CLI_NAME} purge\n`,
+    `Usage:\n  ${CLI_NAME}\n  ${CLI_NAME} start\n  ${CLI_NAME} stop\n  ${CLI_NAME} import mnemonic --phrase <words>\n  ${CLI_NAME} import private-key --key <wif> [--key <wif>]\n  ${CLI_NAME} remove <source-id>\n  ${CLI_NAME} status\n  ${CLI_NAME} show\n  ${CLI_NAME} rescan\n  ${CLI_NAME} sweep <address> [--force]\n  ${CLI_NAME} purge\n`,
   );
 }
 
@@ -235,7 +235,7 @@ async function handleShow() {
 // Options that stand alone rather than taking a value. Without this a
 // bare `--allow-unchecked-mnemonic` consumes the next token as its value,
 // which silently swallows whatever followed it.
-const BOOLEAN_OPTIONS = new Set(['allow-unchecked-mnemonic']);
+const BOOLEAN_OPTIONS = new Set(['allow-unchecked-mnemonic', 'force']);
 
 function parseOptions(argv) {
   const options = {};
@@ -530,21 +530,26 @@ function prompt(question) {
 }
 
 async function handleSweep(argv) {
-  const [destination] = argv;
+  const [destination, ...rest] = argv;
 
-  if (!destination) {
-    process.stderr.write('Usage: ntr sweep <destination-address>\n');
+  if (!destination || destination.startsWith('--')) {
+    process.stderr.write(
+      `Usage: ${CLI_NAME} sweep <destination-address> [--force]\n`,
+    );
     process.exitCode = 1;
     return;
   }
 
+  const options = parseOptions(rest);
+  const force = options.force === true;
   const root = getAppDataRoot();
 
-  // Step 1: call prepare — validates all sources are synced, returns preview.
+  // Step 1: call prepare — validates the sources are synced (or, with
+  // --force, sets the unsynced ones aside) and returns the preview.
   let preview;
 
   try {
-    const response = await sweepPrepare(root);
+    const response = await sweepPrepare(root, { force });
     preview = response.preview;
   } catch (error) {
     if (isDaemonUnreachable(error)) {
@@ -553,6 +558,13 @@ async function handleSweep(argv) {
       );
     } else {
       process.stderr.write(`Sweep blocked: ${error.message}\n`);
+      // Only a sync block can be forced past, so only that gets the hint.
+      if (!force && /not ready to sweep/.test(error.message)) {
+        process.stderr.write(
+          `\nTo sweep anyway, skipping those sources, run:\n` +
+            `  ${CLI_NAME} sweep ${destination} --force\n`,
+        );
+      }
     }
     process.exitCode = 1;
     return;
@@ -572,9 +584,27 @@ async function handleSweep(argv) {
   process.stdout.write(`\nSources:\n`);
 
   for (const src of preview.sources) {
+    const label = src.walletType
+      ? `${src.sourceId} (${src.walletType})`
+      : src.sourceId;
     process.stdout.write(
-      `  ${src.sourceId}  ${(src.nav / 1e8).toFixed(8)} NAV  +  ${(src.xnav / 1e8).toFixed(8)} xNAV\n`,
+      `  ${label}  ${(src.nav / 1e8).toFixed(8)} NAV  +  ${(src.xnav / 1e8).toFixed(8)} xNAV\n`,
     );
+  }
+
+  if (preview.skipped.length > 0) {
+    // Their balances are unknown, not zero — say so plainly, because
+    // this is the sweep leaving coins behind.
+    process.stdout.write(
+      `\nSkipped (--force), balance unknown and NOT included:\n`,
+    );
+
+    for (const src of preview.skipped) {
+      const label = src.walletType
+        ? `${src.sourceId} (${src.walletType})`
+        : src.sourceId;
+      process.stdout.write(`  ${label}  ${src.reason}\n`);
+    }
   }
 
   // Step 2: re-enter destination.
@@ -600,7 +630,9 @@ async function handleSweep(argv) {
 
   // Step 4: execute.
   try {
-    const response = await sweepConfirm(destination, 'SEND MY COINS', root);
+    const response = await sweepConfirm(destination, 'SEND MY COINS', root, {
+      force,
+    });
     const result = response.result;
 
     process.stdout.write('\nSweep broadcast successfully.\n');

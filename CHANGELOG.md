@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-13
+
 ### Fixed
 
 - A wallet with many transactions can finish syncing. `new_tx` fires once
@@ -199,7 +201,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Release` can be dispatched with no tag to build and smoke-test a ref without
   publishing anything.
 
-[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.1.0...v0.1.1

@@ -140,6 +140,27 @@ the daemon at node's default heap.
   function's comment; noted here because it surprises anyone comparing against
   `navcoin-cli` output.
 
+## A network blip in the release build skips the publish
+
+The v0.2.2 run failed on 2026-09-13 with
+`Invoke-WebRequest: Unable to write data to the transport connection: An
+existing connection was forcibly closed by the remote host.` — the step
+in `release.yml` that downloads the bundled node runtime from nodejs.org,
+on the Windows job only. The other three platforms had already fetched
+theirs. Nothing was retried, so the job failed, and `smoke` and `release`
+skipped: a tag on the remote, a green-looking push, and nothing
+published. `gh run rerun --failed` got it out.
+
+Each platform downloads its runtime with a single unretried call
+(`Invoke-WebRequest` on Windows, `curl` elsewhere). A retry with backoff
+around those four would turn a blip into a slower build instead of a
+failed release. Not done here because it changes the release workflow,
+which only a tag exercises — so it cannot be verified without cutting
+one.
+
+Also worth knowing when checking a run: `gh run watch --exit-status`
+exited 0 for that failed run. Enumerating the jobs is what caught it.
+
 ## Windows CI is pinned to the VS2022 image
 
 The npm jobs and the Windows release build run on `windows-2022`, not

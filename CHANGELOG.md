@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-13
+
 ### Changed
 
 - Rust dependencies refreshed within their existing ranges — 36 crates,
@@ -209,7 +211,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Release` can be dispatched with no tag to build and smoke-test a ref without
   publishing anything.
 
-[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.1.1...v0.1.2

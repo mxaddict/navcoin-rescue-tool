@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Rust dependencies refreshed within their existing ranges — 36 crates,
+  all patch or minor, including `tauri-runtime`, `reqwest`, `wasm-bindgen`
+  and `toml`. These ship inside the GUI binary. Still held back by
+  transitive pins: `generic-array`, and the `toml` 0.8 line
+  (`toml`, `toml_datetime`, `toml_edit`) that `tauri-build` resolves.
+
 ## [0.2.1] - 2026-09-13
 
 ### Fixed

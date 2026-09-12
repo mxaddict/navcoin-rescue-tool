@@ -16,17 +16,27 @@ const OUT_XNAV = 0x4;
 // the wallet's tip lags. For a one-shot rescue + sweep flow we'd rather
 // surface the balance as confirmed and let the broadcast fail clearly if
 // the chain still considers it immature.
-async function computeBalance(wallet) {
-  // Real wallets expose wallet.db.GetUtxos / wallet.db.GetTx; tests use a
-  // simpler mock without a db. Fall back to the wallet's own GetBalance in
-  // that case so the test fixtures don't need to model UTXOs.
-  let utxos;
+// Every unspent output, or null when this wallet has no queryable db.
+//
+// Real wallets expose wallet.db.GetUtxos / wallet.db.GetTx; tests use a
+// simpler mock without a db, and callers fall back to the wallet's own
+// GetBalance in that case so the fixtures don't need to model UTXOs.
+async function readUnspentOutputs(wallet) {
   try {
-    utxos = await wallet.db.GetUtxos(true);
+    const utxos = await wallet.db.GetUtxos(true);
+    return Array.isArray(utxos) ? utxos : null;
   } catch {
-    return await wallet.GetBalance();
+    return null;
   }
-  if (!Array.isArray(utxos)) return await wallet.GetBalance();
+}
+
+// `outputs` is the result of readUnspentOutputs when the caller already
+// has it. Reading them again here is the same table scan twice on the
+// busiest path in the daemon.
+async function computeBalance(wallet, outputs = undefined) {
+  const utxos =
+    outputs === undefined ? await readUnspentOutputs(wallet) : outputs;
+  if (!utxos) return await wallet.GetBalance();
 
   let navConfirmed = 0;
   let navPending = 0;
@@ -35,10 +45,18 @@ async function computeBalance(wallet) {
   let stakedConfirmed = 0;
   let stakedPending = 0;
 
+  // One output per transaction is the exception, not the rule, and a
+  // rescan re-reads the same set repeatedly — so look each transaction up
+  // once rather than once per output it paid us.
+  const txByHash = new Map();
+
   for (const utxo of utxos) {
     if (utxo.spentIn) continue;
     const prevHash = utxo.id.split(':')[0];
-    const tx = await wallet.db.GetTx(prevHash);
+    if (!txByHash.has(prevHash)) {
+      txByHash.set(prevHash, await wallet.db.GetTx(prevHash));
+    }
+    const tx = txByHash.get(prevHash);
     if (!tx) continue;
 
     const pending = tx.height === undefined || tx.height <= 0;
@@ -95,15 +113,24 @@ const RECONNECT_TIMEOUT_MS = 30_000;
 // How long to wait between reconnect attempts (ms).
 const RECONNECT_INTERVAL_MS = 10_000;
 const ELECTRUM_PROBE_TIMEOUT_MS = 5_000;
+// How long transactions are allowed to accumulate before the address and
+// balance snapshot is rebuilt.
+const REFRESH_COALESCE_MS = 1_000;
 
 let electrumNodeCache = null;
 let electrumNodeCacheAt = 0;
 let electrumNodeProbePromise = null;
+// Which node the next wallet opened should start on. One phrase opens a
+// wallet per derivation, so pointing them all at the same server is a
+// self-inflicted thundering herd: they connect, scan and reconnect in
+// lockstep until the server stops answering their keepalives.
+let nextElectrumNodeOffset = 0;
 
 export function resetElectrumNodeSelectionCache() {
   electrumNodeCache = null;
   electrumNodeCacheAt = 0;
   electrumNodeProbePromise = null;
+  nextElectrumNodeOffset = 0;
 }
 
 function makeInitialState(sourceId) {
@@ -128,6 +155,9 @@ function makeInitialState(sourceId) {
     reconnectTimer: null,
     watchdog: null,
     rescanInFlight: false,
+    refreshPending: false,
+    refreshInFlight: false,
+    refreshTimer: null,
     sourceType: null,
     closing: false,
     connectPromise: null,
@@ -330,7 +360,17 @@ async function configureElectrumNodes(wallet) {
     wallet.AddNode(node.host, node.port, node.proto);
   }
 
-  wallet.electrumNodeIndex = 0;
+  // navcoin-js picks a random starting node of its own, which rebuilding
+  // the list here discards. Spread the wallets across the list instead of
+  // handing every one of them the same server. Healthiest first, so the
+  // first wallet opened still gets the best node.
+  if (nodes.length === 0) {
+    wallet.electrumNodeIndex = 0;
+    return;
+  }
+
+  wallet.electrumNodeIndex = nextElectrumNodeOffset % nodes.length;
+  nextElectrumNodeOffset = (nextElectrumNodeOffset + 1) % nodes.length;
 }
 
 function scheduleReconnect(source, state, navWallet) {
@@ -440,12 +480,11 @@ export async function openSourceWallet(source, root, navWallet) {
       state.syncTotal = total;
     });
 
-    wallet.on('balance_changed', async () => {
-      try {
-        state.balance = await computeBalance(wallet);
-      } catch {
-        // Non-fatal: leave previous balance intact.
-      }
+    // navcoin-js 1.1.182 never emits this; kept because it is the event
+    // that should drive a balance refresh if it ever does, and routed
+    // through the same coalescing so it cannot reintroduce the storm.
+    wallet.on('balance_changed', () => {
+      requestRefresh(source.id, wallet);
     });
 
     wallet.on('utxo_phase', (phase) => {
@@ -468,8 +507,8 @@ export async function openSourceWallet(source, root, navWallet) {
       }
     });
 
-    wallet.on('new_tx', async () => {
-      await refreshAddressesAndBalance(source.id, wallet);
+    wallet.on('new_tx', () => {
+      requestRefresh(source.id, wallet);
     });
 
     wallet.on('no_servers_available', () => {
@@ -576,9 +615,62 @@ export async function openSourceWallet(source, root, navWallet) {
   }
 }
 
+// Ask for the snapshot to be rebuilt, coalescing bursts into one pass.
+//
+// A refresh reads every address and every unspent output, so it must not
+// run once per transaction: a wallet with thousands of them emits
+// `new_tx` thousands of times while it scans, and because the handler is
+// async and nothing awaits it, every one of those passes was live at the
+// same time — each holding its own address list, output list and pending
+// queries. That is what exhausted the heap on a large wallet, and what
+// starved the event loop until electrum dropped the socket for missing
+// its keepalive, which restarted the scan that was producing the
+// transactions.
+function requestRefresh(sourceId, wallet) {
+  const state = walletState.get(sourceId);
+  if (!state || state.closing) return;
+
+  state.refreshPending = true;
+
+  // A pass is already running or already scheduled; it will pick this up.
+  if (state.refreshInFlight || state.refreshTimer) return;
+
+  state.refreshTimer = setTimeout(() => {
+    state.refreshTimer = null;
+    void drainRefresh(sourceId, wallet);
+  }, REFRESH_COALESCE_MS);
+
+  // The snapshot is a view of the wallet, never a reason to keep the
+  // daemon alive.
+  state.refreshTimer.unref?.();
+}
+
+async function drainRefresh(sourceId, wallet) {
+  const state = walletState.get(sourceId);
+  if (!state || state.closing || state.refreshInFlight) return;
+
+  state.refreshInFlight = true;
+  try {
+    state.refreshPending = false;
+    await refreshAddressesAndBalance(sourceId, wallet);
+  } finally {
+    state.refreshInFlight = false;
+  }
+
+  // Transactions that landed mid-pass get another one, through the same
+  // window — a continuous stream must not become back-to-back full reads.
+  if (state.refreshPending && !state.closing) {
+    requestRefresh(sourceId, wallet);
+  }
+}
+
 async function refreshAddressesAndBalance(sourceId, wallet) {
   const state = walletState.get(sourceId);
   if (!state) return;
+
+  // Read once, use for both halves: the per-address balances below and
+  // the wallet totals at the end.
+  const unspent = await readUnspentOutputs(wallet);
 
   try {
     const navAddrs = await wallet.NavReceivingAddresses(true);
@@ -589,26 +681,21 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
     // a per-address pubkey).
     const balanceByPk = new Map();
     const balanceByHashId = new Map();
-    try {
-      const utxos = await wallet.db.GetUtxos(true);
-      for (const u of utxos) {
-        if (u.spentIn) continue;
-        if (u.type & OUT_XNAV) {
-          if (!u.hashId) continue;
-          balanceByHashId.set(
-            u.hashId,
-            (balanceByHashId.get(u.hashId) ?? 0) + (u.amount ?? 0),
-          );
-          continue;
-        }
-        if (!u.spendingPk) continue;
-        balanceByPk.set(
-          u.spendingPk,
-          (balanceByPk.get(u.spendingPk) ?? 0) + (u.amount ?? 0),
+    for (const u of unspent ?? []) {
+      if (u.spentIn) continue;
+      if (u.type & OUT_XNAV) {
+        if (!u.hashId) continue;
+        balanceByHashId.set(
+          u.hashId,
+          (balanceByHashId.get(u.hashId) ?? 0) + (u.amount ?? 0),
         );
+        continue;
       }
-    } catch {
-      // Non-fatal: balance maps stay empty, addresses report 0.
+      if (!u.spendingPk) continue;
+      balanceByPk.set(
+        u.spendingPk,
+        (balanceByPk.get(u.spendingPk) ?? 0) + (u.amount ?? 0),
+      );
     }
 
     state.addresses = [
@@ -634,7 +721,7 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
   }
 
   try {
-    state.balance = await computeBalance(wallet);
+    state.balance = await computeBalance(wallet, unspent);
   } catch {
     // Non-fatal: leave previous balance intact.
   }
@@ -651,6 +738,9 @@ export async function closeSourceWallet(sourceId) {
 
   clearInterval(state.watchdog);
   state.watchdog = null;
+
+  clearTimeout(state.refreshTimer);
+  state.refreshTimer = null;
 
   if (!state.wallet) {
     walletState.delete(sourceId);

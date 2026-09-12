@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A wallet with many transactions can finish syncing. `new_tx` fires once
+  per transaction found, and the daemon rebuilt its whole snapshot — every
+  address, every unspent output, and a transaction lookup per output — for
+  each one. Nothing awaited those handlers, so on a large wallet thousands
+  ran at once: the daemon died with `JavaScript heap out of memory` around
+  4 GB, and before that the blocked event loop missed electrum's keepalives,
+  so the server closed the socket and the scan restarted from the beginning.
+  Refreshes are now coalesced into one pass per second with a trailing pass
+  for anything that lands mid-pass, and a pass reads the unspent outputs
+  once and each transaction once instead of once per output.
+- Wallets opened together no longer all connect to the same electrum server.
+  The node list is rebuilt on open, which discarded the random starting
+  point navcoin-js picks, and every wallet was then pointed at index 0 — so
+  one phrase's derivations connected, scanned and reconnected in lockstep
+  against a single server. They are spread across the list instead,
+  healthiest first.
+
 ## [0.2.0] - 2026-08-28
 
 ### Added

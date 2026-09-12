@@ -61,6 +61,37 @@ entry when it ships — `git log` is the history.
   created 644 while `sources.json` and `auth.cookie` are 600. Existing logs
   stay readable until wiped by hand.
 
+## Large-wallet sync: what is fixed and what is not
+
+The per-transaction snapshot rebuild and the single-server herding are
+fixed (see the changelog). These remain, all from one user report on
+2026-09-12: two phrases, eight derivations, a wallet large enough to OOM
+the daemon at node's default heap.
+
+- **Nothing caps how many wallets scan at once.** `main` in `daemon.js`
+  opens every stored source in one loop, and the `/import` handler opens
+  every derivation of a phrase the same way — eight full history scans in
+  one process, each with its own electrum socket and sqlite traffic. The
+  refresh fix removes the memory blowup, not the multiplier. A cap would
+  have to gate `rescueScan` rather than `openSourceWallet`, because the
+  scan is deliberately not awaited: the open resolves as soon as the
+  wallet is connected. Sources waiting for a slot would sit in
+  `connected`, which the sweep guard already treats as not ready.
+- **`AddTx error: SQLITE_CONSTRAINT: UNIQUE constraint failed: S_txs.key`**
+  appears in the user's log, four times, once per wallet of a group. It
+  comes from inside navcoin-js, not from our code. Not diagnosed; it did
+  not stop the scan.
+- **The daemon runs on node's default heap** and is spawned with no
+  `--max-old-space-size`. The crash was at roughly 4 GB. Raising it was
+  considered and not done: the allocation was unbounded, so a larger heap
+  only moves where it dies.
+- **Not measured against a real large wallet.** The fix was found by
+  reading the sync path and is covered by unit tests that count database
+  reads per transaction event; nobody has re-run the reported wallet.
+- **`balance_changed` is emitted nowhere in navcoin-js 1.1.182.** The
+  handler is kept and now routes through the same coalescing, so a future
+  version that starts emitting it cannot reintroduce the storm.
+
 ## Group import: known consequences
 
 - Importing one mnemonic now builds a wallet per derivation (three for a

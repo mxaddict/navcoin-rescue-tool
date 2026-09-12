@@ -845,3 +845,209 @@ test('wallet manager hides dummy pool addresses for private-key sources', async 
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+// A large wallet emits `new_tx` once per transaction it finds. Rebuilding
+// the whole address and balance snapshot for each one is what exhausted
+// the heap and starved the event loop until electrum dropped the socket.
+class CountingWalletFile extends EventEmitter {
+  constructor() {
+    super();
+    this.electrumNodes = [];
+    this.electrumNodeIndex = 0;
+    this.counts = { refreshes: 0, getUtxos: 0, getTx: 0 };
+    this.getTxHashes = [];
+    this.extraUtxo = null;
+    this.db = {
+      GetUtxos: async () => {
+        this.counts.getUtxos += 1;
+        // Two outputs of one transaction, plus a second transaction, so a
+        // lookup per output and a lookup per transaction differ.
+        return [
+          { id: 'txA:0', spendingPk: 'pk1', amount: 1_0000_0000, type: 0x1 },
+          { id: 'txA:1', spendingPk: 'pk1', amount: 2_0000_0000, type: 0x1 },
+          { id: 'txB:0', spendingPk: 'pk2', amount: 4_0000_0000, type: 0x1 },
+          ...(this.extraUtxo ? [this.extraUtxo] : []),
+        ];
+      },
+      GetTx: async (hash) => {
+        this.counts.getTx += 1;
+        this.getTxHashes.push(hash);
+        return { height: 100 };
+      },
+    };
+  }
+
+  async Load() {}
+
+  ClearNodeList() {
+    this.electrumNodes = [];
+  }
+
+  AddNode(host, port, proto) {
+    this.electrumNodes.push({ host, port, proto });
+  }
+
+  async Connect() {
+    this.emit('connected', 'mock-server:40004');
+    queueMicrotask(() => {
+      this.emit('bootstrap_started');
+      this.emit('sync_finished');
+    });
+  }
+
+  // Counted here rather than on GetUtxos: this is called once per refresh
+  // pass, while GetUtxos is what must not be called twice within one.
+  async NavReceivingAddresses() {
+    this.counts.refreshes += 1;
+    return [
+      { address: 'addr1', hash: 'pk1', path: "m/44'/130'/0'/0/0", used: 1 },
+    ];
+  }
+
+  async xNavReceivingAddresses() {
+    return [];
+  }
+
+  async GetBalance() {
+    return {
+      nav: { confirmed: 0, pending: 0 },
+      staked: { confirmed: 0, pending: 0 },
+    };
+  }
+
+  Disconnect() {}
+  CloseDb() {}
+}
+
+async function withCountingWallet(name, body) {
+  const root = await makeProjectTempDir(name);
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: `src-${name}`, type: 'mnemonic', label: name };
+    await openSourceWallet(source, root, { WalletFile: CountingWalletFile });
+    // Let the open-time and sync_finished refreshes settle before counting.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const state = getSourceState(source.id);
+    await body({ source, state, wallet: state.wallet });
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+test('a burst of transactions rebuilds the snapshot once, not once per tx', async () => {
+  await withCountingWallet('refresh-coalesce', async ({ wallet, state }) => {
+    wallet.counts.refreshes = 0;
+
+    // What a large wallet does while it scans. Each of these used to start
+    // its own full read of every address and every unspent output, with
+    // nothing awaiting them, so all of them were live at once.
+    for (let i = 0; i < 200; i += 1) wallet.emit('new_tx', {});
+
+    // Nothing may have run yet: the whole point is that the burst waits.
+    assert.equal(
+      wallet.counts.refreshes,
+      0,
+      'the burst must be collected, not serviced as it arrives',
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+
+    assert.ok(
+      wallet.counts.refreshes >= 1,
+      'the snapshot still has to be rebuilt',
+    );
+    assert.ok(
+      wallet.counts.refreshes <= 2,
+      `200 transactions must not mean 200 passes, got ${wallet.counts.refreshes}`,
+    );
+    // The pass really read the wallet, rather than being skipped.
+    assert.equal(state.balance.nav.confirmed, 7_0000_0000);
+  });
+});
+
+test('one pass reads the outputs once and each transaction once', async () => {
+  await withCountingWallet('refresh-reads', async ({ wallet }) => {
+    wallet.counts.refreshes = 0;
+    wallet.counts.getUtxos = 0;
+    wallet.counts.getTx = 0;
+    wallet.getTxHashes = [];
+
+    wallet.emit('new_tx', {});
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+
+    assert.equal(wallet.counts.refreshes, 1, 'exactly one pass');
+    assert.equal(
+      wallet.counts.getUtxos,
+      1,
+      'the per-address balances and the totals come from one read',
+    );
+    // Three outputs, two transactions.
+    assert.deepEqual(wallet.getTxHashes, ['txA', 'txB']);
+  });
+});
+
+test('a transaction arriving mid-pass still gets a pass of its own', async () => {
+  await withCountingWallet('refresh-trailing', async ({ wallet, state }) => {
+    wallet.counts.refreshes = 0;
+
+    wallet.emit('new_tx', {});
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.equal(wallet.counts.refreshes, 1);
+
+    // Coalescing must not swallow what arrives after a pass starts: the
+    // balance it produced is already stale when this one lands.
+    wallet.extraUtxo = {
+      id: 'txC:0',
+      spendingPk: 'pk1',
+      amount: 5_0000_0000,
+      type: 0x1,
+    };
+    wallet.emit('new_tx', {});
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+
+    assert.equal(wallet.counts.refreshes, 2);
+    assert.equal(state.balance.nav.confirmed, 12_0000_0000);
+  });
+});
+
+// One phrase opens a wallet per derivation. Starting them all on the same
+// server makes them connect, scan and reconnect in lockstep, which is how
+// a group import turns into keepalive timeouts and a reconnect loop.
+test('wallets opened together are spread across electrum nodes', async () => {
+  const root = await makeProjectTempDir('wallet-mgr-node-spread');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const chosen = [];
+    for (let i = 0; i < 3; i += 1) {
+      const source = { id: `src-spread-${i}`, type: 'mnemonic' };
+      await openSourceWallet(source, root, { WalletFile: CountingWalletFile });
+      const wallet = getSourceState(source.id).wallet;
+      chosen.push(wallet.electrumNodes[wallet.electrumNodeIndex].host);
+    }
+
+    assert.equal(
+      new Set(chosen).size,
+      3,
+      `each wallet needs its own server, got ${JSON.stringify(chosen)}`,
+    );
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

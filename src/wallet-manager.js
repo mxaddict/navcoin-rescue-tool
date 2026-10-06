@@ -1,6 +1,12 @@
 import { getLayout } from './app-data.js';
 import { STATIC_WALLET_PASSWORD } from './constants.js';
-import { configureElectrumNodes } from './electrum-connection.js';
+import {
+  advanceElectrumNode,
+  configureElectrumNodes,
+  connectWithFailover,
+  describeElectrumNode,
+  retireElectrumClient,
+} from './electrum-connection.js';
 import { rescueScan } from './rescue-scan.js';
 import { markSourceSynced } from './source-registry.js';
 
@@ -88,17 +94,22 @@ const openingWallets = new Map();
 
 export { resetElectrumNodeSelectionCache } from './electrum-connection.js';
 
-// How long to wait in 'connecting' before attempting a reconnect (ms).
-const RECONNECT_TIMEOUT_MS = 30_000;
-// How long to wait between reconnect attempts (ms).
+// How long to wait after every node failed before trying the list again.
 const RECONNECT_INTERVAL_MS = 10_000;
+// How long to wait after a live connection drops before moving to the
+// next node. One drop fires several disconnect events; they all land
+// inside this window and are handled once.
+export const FAILOVER_DELAY_MS = 1_000;
+// How often a scan waiting for a connection checks for one.
+const CONNECTED_POLL_MS = 50;
 // How long transactions are allowed to accumulate before the address and
 // balance snapshot is rebuilt.
 const REFRESH_COALESCE_MS = 1_000;
 
-function makeInitialState(sourceId) {
+function makeInitialState(sourceId, root) {
   return {
     sourceId,
+    root,
     wallet: null,
     syncStatus: 'opening',
     syncPhase: null,
@@ -116,8 +127,16 @@ function makeInitialState(sourceId) {
     },
     error: null,
     reconnectTimer: null,
-    watchdog: null,
+    // The status to show once a connection is (re)established — what the
+    // source was doing when it lost one, so a synced source goes back to
+    // synced instead of sticking at 'connected'.
+    statusOnConnect: null,
     rescanInFlight: false,
+    // Aborts the scan running now, if any.
+    scanAbort: null,
+    // Set when the connection drops under a running scan: that scan is
+    // abandoned and runScan starts it over once reconnected.
+    scanInterrupted: false,
     refreshPending: false,
     refreshInFlight: false,
     refreshTimer: null,
@@ -209,7 +228,7 @@ async function runFreshRescan(state) {
       staked: { confirmed: 0, pending: 0 },
     };
 
-    await rescueScan(state.wallet, {
+    await runScan(state, {
       skipDerive: state.sourceType === 'private-key',
     });
   } catch (err) {
@@ -221,13 +240,66 @@ async function runFreshRescan(state) {
   }
 }
 
-async function waitForConnected(state, timeoutMs = 15_000) {
-  const start = Date.now();
-  while (!state.connected) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error('Timed out waiting for electrum connection to be ready');
+// Run rescueScan to a clean finish, then record the source as synced. A
+// scan the connection dropped under is run again once there is a
+// connection, because its failed lookups make it an incomplete picture,
+// not a finished one.
+async function runScan(state, opts) {
+  let completed = false;
+  do {
+    await waitForConnected(state);
+    if (state.closing || !state.wallet) return;
+
+    const controller = new AbortController();
+    state.scanAbort = controller;
+    state.scanInterrupted = false;
+    try {
+      // A scan the drop cut off can be stuck on a lookup the dead socket
+      // will never answer, so stop waiting for it the moment it is
+      // aborted rather than when it notices.
+      completed = await Promise.race([
+        rescueScan(state.wallet, {
+          ...opts,
+          password: STATIC_WALLET_PASSWORD,
+          signal: controller.signal,
+        }),
+        whenAborted(controller.signal).then(() => false),
+      ]);
+    } catch (err) {
+      if (!controller.signal.aborted) throw err;
+    } finally {
+      if (state.scanAbort === controller) state.scanAbort = null;
     }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+  } while (state.scanInterrupted && !state.closing);
+
+  if (completed && !state.closing) await finishSync(state);
+}
+
+async function finishSync(state) {
+  state.syncStatus = 'synced';
+  state.syncPhase = null;
+  state.syncProgress = 100;
+  state.syncCurrent = state.syncTotal;
+  await refreshAddressesAndBalance(state.sourceId, state.wallet);
+  try {
+    await markSourceSynced(state.sourceId, state.root);
+  } catch {
+    // Non-fatal — registry write failure means we'll re-scan on next
+    // daemon start instead of skipping. Same effective behavior as
+    // before this optimization.
+  }
+}
+
+function whenAborted(signal) {
+  return new Promise((resolve) => {
+    signal.addEventListener('abort', resolve, { once: true });
+  });
+}
+
+// Resolves once the source is connected, or will never be (closing).
+async function waitForConnected(state) {
+  while (!state.connected && !state.closing && state.wallet) {
+    await new Promise((resolve) => setTimeout(resolve, CONNECTED_POLL_MS));
   }
 }
 
@@ -248,44 +320,64 @@ async function prunePrivateKeyPool(wallet, source) {
     .delete();
 }
 
-function scheduleReconnect(source, state, navWallet) {
-  clearTimeout(state.reconnectTimer);
-  state.reconnectTimer = setTimeout(async () => {
-    if (state.closing) return;
+// The syncStatus to show, unless the source is already in error: a
+// connection coming and going is not what the user needs to see over a
+// failure that still stands.
+function setConnectionStatus(state, status) {
+  if (state.syncStatus !== 'error') state.syncStatus = status;
+}
 
-    // Don't reconnect if already connected, syncing, synced, or closed.
-    if (
-      state.connected ||
-      state.syncStatus === 'synced' ||
-      state.syncStatus === 'syncing' ||
-      state.syncStatus === 'error' ||
-      state.connectPromise ||
-      !state.wallet
-    ) {
-      return;
-    }
+// Connect to the first node that answers. Resolves true when connected;
+// false when every node failed, after scheduling another pass through the
+// list. One pass at a time per source.
+function connectSource(state) {
+  if (!state.connectPromise) {
+    state.connectPromise = (async () => {
+      setConnectionStatus(state, 'connecting');
+      state.connectingAt = Date.now();
 
-    const electrumNodes = state.wallet.electrumNodes;
-    if (Array.isArray(electrumNodes) && electrumNodes.length > 1) {
-      const currentIndex = Number.isInteger(state.wallet.electrumNodeIndex)
-        ? state.wallet.electrumNodeIndex
-        : 0;
-      state.wallet.electrumNodeIndex =
-        (currentIndex + 1) % electrumNodes.length;
-    }
+      const connected = await connectWithFailover(state.wallet, {
+        shouldStop: () => state.closing || !state.wallet || state.connected,
+      });
+      if (connected || state.connected) return true;
+      if (state.closing || !state.wallet) return false;
 
-    state.syncStatus = 'connecting';
-    state.connectingAt = Date.now();
-
-    try {
-      state.connectPromise = state.wallet.Connect();
-      await state.connectPromise;
-    } catch {
-      // Connect() errors are non-fatal — watchdog will retry.
-    } finally {
+      console.error(
+        `[electrum] no node reachable for ${describeSource(state)}; ` +
+          `retrying in ${RECONNECT_INTERVAL_MS / 1000}s`,
+      );
+      setConnectionStatus(state, 'no-servers');
+      scheduleReconnect(state, RECONNECT_INTERVAL_MS, { nextNode: false });
+      return false;
+    })().finally(() => {
       state.connectPromise = null;
-    }
-  }, RECONNECT_INTERVAL_MS);
+    });
+  }
+  return state.connectPromise;
+}
+
+// Reconnect after `delayMs`, starting from the node after the current one
+// when `nextNode` is set. A timer already pending is left alone: the
+// events of one outage must not keep pushing the reconnect back, which is
+// how a dead node used to hold a wallet forever.
+//
+// The node only changes when the timer fires. navcoin-js names the
+// current node in its own error lines, so moving it any earlier would log
+// the dead server's last errors under the next server's name.
+function scheduleReconnect(state, delayMs, { nextNode }) {
+  if (state.closing || state.reconnectTimer) return;
+
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = null;
+    if (state.closing || !state.wallet || state.connected) return;
+
+    if (nextNode) advanceElectrumNode(state.wallet);
+    connectSource(state).catch((err) => {
+      if (state.closing) return;
+      state.syncStatus = 'error';
+      state.error = err.message;
+    });
+  }, delayMs);
 }
 
 export async function openSourceWallet(source, root, navWallet) {
@@ -300,7 +392,7 @@ export async function openSourceWallet(source, root, navWallet) {
 
   const openPromise = (async () => {
     const layout = getLayout(root);
-    const state = makeInitialState(source.id);
+    const state = makeInitialState(source.id, root);
     state.sourceType = source.type;
     // Carried so a sweep blocked by this source can name the derivation.
     // One phrase imports as several sources whose ids are indistinguishable
@@ -320,27 +412,37 @@ export async function openSourceWallet(source, root, navWallet) {
     state.wallet = wallet;
 
     wallet.on('connected', (server) => {
+      console.error(
+        `[electrum] ${describeSource(state)} connected to ${server}`,
+      );
       state.connected = true;
-      state.syncStatus = 'connected';
       state.server = server;
+      setConnectionStatus(state, state.statusOnConnect ?? 'connected');
+      state.statusOnConnect = null;
     });
 
+    // Only a live connection going away is a drop. navcoin-js also fires
+    // this while it sets up each new connection and once per failed
+    // attempt; those belong to the attempt in progress, which handles its
+    // own failure.
     wallet.on('disconnected', () => {
-      if (state.closing) return;
+      if (state.closing || !state.connected || !state.wallet) return;
 
+      console.error(
+        `[electrum] ${describeSource(state)} lost ` +
+          `${describeElectrumNode(wallet)}, failing over`,
+      );
       state.connected = false;
       state.server = null;
-      // Only reschedule reconnect if we were previously connected or syncing —
-      // not if we're already in an error or no-servers state.
-      if (
-        state.syncStatus !== 'error' &&
-        state.syncStatus !== 'no-servers' &&
-        state.wallet
-      ) {
-        state.syncStatus = 'connecting';
-        state.connectingAt = Date.now();
-        scheduleReconnect(source, state, navWallet);
+      if (state.scanAbort) {
+        state.scanInterrupted = true;
+        state.scanAbort.abort();
       }
+      state.statusOnConnect ??= state.syncStatus;
+      setConnectionStatus(state, 'connecting');
+      state.connectingAt = Date.now();
+
+      scheduleReconnect(state, FAILOVER_DELAY_MS, { nextNode: true });
     });
 
     // bootstrap_started fires once at rescueScan entry AND on every electrum
@@ -367,61 +469,28 @@ export async function openSourceWallet(source, root, navWallet) {
       state.syncPhase = phase;
     });
 
-    wallet.on('sync_finished', async () => {
-      state.syncStatus = 'synced';
-      state.syncPhase = null;
-      state.syncProgress = 100;
-      state.syncCurrent = state.syncTotal;
-      await refreshAddressesAndBalance(source.id, wallet);
-      try {
-        await markSourceSynced(source.id, root);
-      } catch {
-        // Non-fatal — registry write failure means we'll re-scan on next
-        // daemon start instead of skipping. Same effective behavior as
-        // before this optimization.
-      }
+    // navcoin-js runs a sync of its own on every connect and reports it
+    // finished, usually long before a scan of ours is. While one runs,
+    // only that scan's clean finish counts — runScan reports it — or the
+    // source is recorded as synced mid-scan and skips the scan next start.
+    wallet.on('sync_finished', () => {
+      if (state.rescanInFlight) return;
+      void finishSync(state);
     });
 
     wallet.on('new_tx', () => {
       requestRefresh(source.id, wallet);
     });
 
-    wallet.on('no_servers_available', () => {
-      if (state.closing) return;
-
-      state.syncStatus = 'no-servers';
-      state.connected = false;
-      state.server = null;
-      // Retry after interval — servers may come back up.
-      scheduleReconnect(source, state, navWallet);
-    });
-
     wallet.on('db_load_error', (error) => {
       if (state.closing) return;
 
       clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = null;
       state.syncStatus = 'error';
       state.error = String(error);
       state.wallet = null;
     });
-
-    // Watchdog: if stuck in 'connecting' for too long, try reconnecting.
-    state.watchdog = setInterval(() => {
-      if (!walletState.has(source.id)) {
-        clearInterval(state.watchdog);
-        return;
-      }
-
-      if (
-        state.syncStatus === 'connecting' &&
-        state.connectingAt !== null &&
-        Date.now() - state.connectingAt > RECONNECT_TIMEOUT_MS &&
-        !state.reconnectTimer &&
-        state.wallet
-      ) {
-        scheduleReconnect(source, state, navWallet);
-      }
-    }, 5_000);
 
     try {
       await wallet.Load({
@@ -435,31 +504,25 @@ export async function openSourceWallet(source, root, navWallet) {
       // Seed initial address and balance snapshot before connecting.
       await refreshAddressesAndBalance(source.id, wallet);
 
-      state.syncStatus = 'connecting';
-      state.connectingAt = Date.now();
-      state.connectPromise = wallet.Connect();
-      await state.connectPromise;
-
-      // wallet.Connect resolves when server_banner returns, but the
-      // 'ready' handler (which subscribes to headers/dao/etc) is async
-      // and may still be running. Wait for the 'connected' event handler
-      // to flip state.connected before starting the scan so the first
-      // requests don't race against the connect handshake.
-      await waitForConnected(state);
+      // Bounded: every node gets one attempt. When none answers the source
+      // opens anyway, in 'no-servers', with the next pass already scheduled.
+      const connected = await connectSource(state);
 
       if (source.lastSyncedAt) {
         // Source has been fully scanned before. Skip the auto re-scan on
         // open and rely on user-triggered `rescan` for updates. State is
         // already populated from the seed refresh above.
-        state.syncStatus = 'synced';
         state.syncProgress = 100;
+        if (connected) state.syncStatus = 'synced';
+        else state.statusOnConnect = 'synced';
       } else {
         // Mark in-flight so a /rescan request landing during the brief
         // 'connected' / pre-progress window can't kick off a second
         // concurrent scan that races with this one's outpointsSeen and
         // reapStaleUtxos passes (was the source of growing-balance bugs).
+        // runScan waits for a connection itself if there is none yet.
         state.rescanInFlight = true;
-        rescueScan(wallet, {
+        runScan(state, {
           skipDerive: source.type === 'private-key',
         })
           .catch((err) => {
@@ -474,8 +537,6 @@ export async function openSourceWallet(source, root, navWallet) {
     } catch (error) {
       state.syncStatus = 'error';
       state.error = error.message;
-    } finally {
-      state.connectPromise = null;
     }
 
     return state;
@@ -607,12 +668,10 @@ export async function closeSourceWallet(sourceId) {
   const state = walletState.get(sourceId);
   if (!state) return;
   state.closing = true;
+  state.scanAbort?.abort();
 
   clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
-
-  clearInterval(state.watchdog);
-  state.watchdog = null;
 
   clearTimeout(state.refreshTimer);
   state.refreshTimer = null;
@@ -623,6 +682,9 @@ export async function closeSourceWallet(sourceId) {
   }
 
   try {
+    // Disconnect() alone closes the socket but leaves the client's own
+    // reconnect loop running against a wallet nobody holds any more.
+    retireElectrumClient(state.wallet);
     state.wallet.Disconnect();
   } catch {
     // Ignore disconnect errors on close.

@@ -92,6 +92,50 @@ the daemon at node's default heap.
   handler is kept and now routes through the same coalescing, so a future
   version that starts emitting it cannot reintroduce the storm.
 
+## Electrum failover: what is left
+
+Failover was rebuilt in `electrum-connection.js` (2026-10-06) after a user
+log showed a wallet retrying one dead server forever. What it leaves open:
+
+- **Closing a wallet mid-handshake throws inside navcoin-js.** Its
+  connect-time `ready` handler keeps running after several awaits and calls
+  `this.client.subscribe.on(...)`; `closeSourceWallet` → `Disconnect()` has
+  deleted `this.client` by then, so it throws `Cannot read properties of
+undefined (reading 'subscribe')` from an async listener — an unhandled
+  rejection. The daemon has no `unhandledRejection` handler, so removing a
+  source in the second or so after it connects can end the process. Seen in
+  `test/electrum-failover.test.js`, which now waits for the connection to be
+  set up before closing; not reproduced against a running daemon. Not caused
+  by failover: there the new client is assigned in the same synchronous step.
+  The real fix is in navcoin-js.
+- **Requests pending on a dropped connection are never settled.** The
+  electrum client drops them on close. Rejecting them was tried and
+  declined: navcoin-js awaits its own requests without handling errors, and
+  the rejections ended the process. Each drop therefore strands whatever was
+  in flight — our scan is abandoned through its abort signal, navcoin-js's
+  own tasks just stay pending.
+- **navcoin-js's connect-time `sync_finished` still marks a source synced
+  when no scan is running.** That covers a source whose last scan failed: on
+  the next reconnect it would show `synced` and be recorded as synced, so the
+  failed scan is skipped next start. Unchanged behaviour, found by reading
+  `wallet.on('sync_finished')` in `wallet-manager.js`; not reproduced.
+- **The supervision depends on electrum-client-js 0.1.x internals**
+  (`persistencePolicy`, the `subscribe` emitter, `Connect()` creating the
+  client synchronously). `assertClientShape` fails loudly if they change;
+  re-run `test/electrum-failover.test.js` on any navcoin-js or
+  electrum-client-js upgrade.
+- **Considered: fixing it upstream instead** — have navcoin-js pass a
+  persistence policy, rotate on a websocket close, and settle pending
+  requests. Better long term, and it would make most of
+  `electrum-connection.js` unnecessary; not done because it needs a
+  navcoin-js release.
+- **Coverage gap: only local `ws://` stub servers.** Refused, reset and
+  silent servers are covered; TLS failures on the real `wss://` nodes and
+  real mainnet servers are not.
+- `test/electrum-failover.test.js` leaves `tmp/electrum-failover` behind on
+  purpose: the indexeddb shim keeps its sqlite files open for the life of
+  the test process, so it is cleared at the start of the next run instead.
+
 ## Group import: known consequences
 
 - Importing one mnemonic now builds a wallet per derivation (three for a

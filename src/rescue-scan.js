@@ -18,6 +18,15 @@ const DEFAULT_OPTS = {
   xNavPoolSize: 100,
   concurrency: 25,
   progressInterval: 25,
+  // Aborting stops the scan at its next step: no further lookups, no
+  // stale-UTXO reap and no sync_finished. Lookups already sent stay
+  // pending until they answer, or forever if their connection died.
+  signal: undefined,
+  // The spending password, needed to derive addresses. Not read from
+  // wallet.spendingPassword: navcoin-js blanks that whenever its own sync
+  // finishes, which it runs on every connect, and a blank password makes
+  // address derivation quietly do nothing.
+  password: undefined,
 };
 
 /**
@@ -39,13 +48,18 @@ function createScan() {
   return { outpointsSeen: new Set(), failures: 0 };
 }
 
+// Resolves true once the scan has run to the end, false when there was no
+// connection to scan with and nothing was done.
 export async function rescueScan(wallet, opts = {}) {
   if (!wallet.client) {
-    return;
+    return false;
   }
 
   const cfg = { ...DEFAULT_OPTS, ...opts };
-  const password = wallet.spendingPassword;
+  const password = cfg.password;
+  if (cfg.skipDerive !== true && !password) {
+    throw new Error('rescueScan needs the spending password to derive');
+  }
 
   const scan = createScan();
 
@@ -84,6 +98,7 @@ export async function rescueScan(wallet, opts = {}) {
   // failed to look up, and a UTXO marked spent stays that way in the db.
   // Overcounting until the next clean scan is recoverable; hiding a live
   // UTXO from the sweep is not.
+  cfg.signal?.throwIfAborted();
   if (scan.failures > 0) {
     console.error(
       `[rescue-scan] ${scan.failures} lookup(s) failed — skipping stale-UTXO reap`,
@@ -92,13 +107,10 @@ export async function rescueScan(wallet, opts = {}) {
     await reapStaleUtxos(wallet, scan.outpointsSeen);
   }
 
+  cfg.signal?.throwIfAborted();
   wallet.emit('bootstrap_finished');
   wallet.emit('sync_finished');
-
-  // wallet.spendingPassword stays set so periodic re-scans can re-derive
-  // and re-fill pools as new addresses come into use. The static password
-  // is already a known-public constant in this codebase, so retaining it
-  // in memory after the initial sync doesn't change the security posture.
+  return true;
 }
 
 // Adaptive gap-bounded scan for one branch. Derives in batches and scans
@@ -126,12 +138,14 @@ async function walkBranch(wallet, password, branch, cfg, scan) {
 
   try {
     while (true) {
+      cfg.signal?.throwIfAborted();
       // Derive ahead so we always have walkBatchSize unscanned addrs ready.
       // HD derivation (especially navcoin-core's all-hardened path) is
       // CPU-bound — emit progress during the loop so the bar moves while
       // we derive.
       const needed = scannedIdx + cfg.walkBatchSize;
       while (derivedIdx < needed) {
+        cfg.signal?.throwIfAborted();
         await wallet.NavCreateAddress(password, branch);
         derivedIdx++;
         if (derivedIdx % cfg.progressInterval === 0) {
@@ -148,7 +162,7 @@ async function walkBranch(wallet, password, branch, cfg, scan) {
       if (batch.length === 0) break;
 
       let inBatchScanned = 0;
-      await mapConcurrent(batch, cfg.concurrency, async (addr) => {
+      await mapConcurrent(batch, cfg, async (addr) => {
         const found = await scanAndHydrateAddr(wallet, addr.address, scan);
         if (found > 0 && addr.idx > lastUsedIdx) lastUsedIdx = addr.idx;
         inBatchScanned++;
@@ -183,7 +197,7 @@ async function scanExistingNavAddrs(wallet, cfg, scan) {
   const all = await wallet.db.GetNavReceivingAddresses(true);
   let scanned = 0;
 
-  await mapConcurrent(all, cfg.concurrency, async (addr) => {
+  await mapConcurrent(all, cfg, async (addr) => {
     await scanAndHydrateAddr(wallet, addr.address, scan);
     scanned++;
     if (scanned % cfg.progressInterval === 0 || scanned === all.length) {
@@ -278,7 +292,7 @@ async function discoverStakingPartners(wallet, cfg) {
   wallet.emit('scripthash_progress', 0, addrs.length);
 
   let scanned = 0;
-  await mapConcurrent(addrs, cfg.concurrency, async (addr) => {
+  await mapConcurrent(addrs, cfg, async (addr) => {
     try {
       const stakingAddresses = await wallet.client.blockchain_staking_getKeys(
         Buffer.from(addr.hash, 'hex').reverse().toString('hex'),
@@ -312,13 +326,14 @@ async function scanStaking(wallet, cfg, scan) {
   const stakingAddrs = await wallet.GetStakingAddresses();
   const items = [];
   for (const stakingAddr of stakingAddrs) {
+    cfg.signal?.throwIfAborted();
     const shs = await wallet.GetScriptHashes(stakingAddr);
     for (const sh of shs) items.push(sh);
   }
 
   let scanned = 0;
 
-  await mapConcurrent(items, cfg.concurrency, async (sh) => {
+  await mapConcurrent(items, cfg, async (sh) => {
     let list;
     try {
       list = await wallet.client.blockchain_scripthash_listunspent(sh);
@@ -407,7 +422,7 @@ async function scanXNav(wallet, cfg, scan) {
   const owned = [];
   let scanned = 0;
 
-  await mapConcurrent(entries, cfg.concurrency, async (entry) => {
+  await mapConcurrent(entries, cfg, async (entry) => {
     const txid = entry.tx_hash;
     const txKeys = await loadTxKeys(wallet, txid);
 
@@ -431,6 +446,7 @@ async function scanXNav(wallet, cfg, scan) {
 
   let claimed = 0;
   for (const { txid, height } of owned) {
+    cfg.signal?.throwIfAborted();
     claimed++;
     if (claimed % cfg.progressInterval === 0 || claimed === owned.length) {
       wallet.emit('scripthash_progress', claimed, owned.length);
@@ -577,12 +593,13 @@ async function hasOwnedXNavOutput(wallet, txKeys) {
   return false;
 }
 
-async function mapConcurrent(items, concurrency, fn) {
+async function mapConcurrent(items, cfg, fn) {
   if (items.length === 0) return;
   const queue = items.slice();
-  const workerCount = Math.min(concurrency, items.length);
+  const workerCount = Math.min(cfg.concurrency, items.length);
   const workers = Array.from({ length: workerCount }, async () => {
     while (queue.length > 0) {
+      cfg.signal?.throwIfAborted();
       const item = queue.shift();
       if (item === undefined) return;
       await fn(item);

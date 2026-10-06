@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- When the electrum server a wallet is connected to goes down, the wallet
+  now moves to the next server. Before, the electrum client retried the same
+  server forever on its own — `electrum reconnect` followed by
+  `websocket connection closed: code: [1006]` repeating in the log — and the
+  daemon's rotation to another server never ran, because every failed retry
+  pushed its timer back. The daemon now owns the reconnect: the client's own
+  loop is switched off, and each server gets one attempt before the next is
+  tried.
+- A server that accepts the connection and then never answers is given up
+  after a timeout instead of holding the wallet in `connecting`. With every
+  server down, a source now opens in `no-servers` and keeps retrying the
+  list, where before it never finished opening.
+- Wallets are no longer started on a server the startup probe found
+  unreachable. They are spread across the reachable ones; the rest stay on
+  the list as failover targets.
+- A scan caught by a dropped server is abandoned and run again once the
+  wallet is on another one. Requests sent to the dead server are never
+  answered, so the scan used to wait on them forever.
+- A source is no longer recorded as synced while its first scan is still
+  running. navcoin-js reports its own short sync on every connect as
+  finished, and that was taken for the scan finishing, so the next start
+  skipped a scan that had never completed.
+- `rescan`, and the rescan after a failover, derive new addresses again.
+  navcoin-js blanks the wallet's spending password once that connect-time
+  sync finishes, and deriving with a blank password silently derives
+  nothing, so a rescan only walked the addresses the wallet already had.
+
+### Changed
+
+- The daemon log names the server each wallet connects to, loses, and
+  fails over from, so a log shows which servers a wallet was on.
+
 ## [0.2.2] - 2026-09-13
 
 ### Changed

@@ -153,14 +153,27 @@ function buildElectrumReply(msg, fixture) {
  * navcoin-js can complete a full wallet sync against it.
  *
  * @param {object|null} fixture - optional fixture object (from mainnet-fake.json)
- * Returns { port, close } where close() returns a Promise that resolves when
- * the server is fully shut down.
+ * @param {object} [options]
+ * @param {number} [options.port] - port to listen on; 0 picks a free one.
+ *   Pass a stopped stub's port to bring "the same server" back up.
+ * @param {string[]} [options.unanswered] - methods the stub reads and never
+ *   answers, like a server that stalls mid-request.
+ * Returns { port, connections, requests, close } where connections() counts
+ * the sockets accepted so far, requests(method) counts the requests for
+ * that method received so far, answered or not, and close() returns a
+ * Promise that resolves when the server is fully shut down.
  */
-export function startStubElectrumServer(fixture = null) {
-  return new Promise((resolve) => {
+export function startStubElectrumServer(
+  fixture = null,
+  { port = 0, unanswered = [] } = {},
+) {
+  return new Promise((resolve, reject) => {
     const sockets = new Set();
+    let accepted = 0;
+    const received = new Map();
 
     const server = net.createServer((socket) => {
+      accepted += 1;
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));
       socket.on('error', () => sockets.delete(socket));
@@ -242,6 +255,8 @@ export function startStubElectrumServer(fixture = null) {
 
           try {
             const msg = JSON.parse(payload.toString('utf8'));
+            received.set(msg.method, (received.get(msg.method) ?? 0) + 1);
+            if (unanswered.includes(msg.method)) continue;
             let result = buildElectrumReply(msg, fixture);
             let replyObj;
             if (result === undefined) {
@@ -281,8 +296,9 @@ export function startStubElectrumServer(fixture = null) {
       }
     });
 
-    server.listen(0, '127.0.0.1', () => {
-      const port = server.address().port;
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      const boundPort = server.address().port;
 
       const close = () =>
         new Promise((res) => {
@@ -292,7 +308,12 @@ export function startStubElectrumServer(fixture = null) {
           server.close(() => res());
         });
 
-      resolve({ port, close });
+      resolve({
+        port: boundPort,
+        connections: () => accepted,
+        requests: (method) => received.get(method) ?? 0,
+        close,
+      });
     });
   });
 }

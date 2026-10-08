@@ -8,12 +8,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A source can be removed and imported again without restarting the
+  daemon. The daemon kept the removed wallet's database file open, and an
+  import of the same phrase or key reuses the same database name, so on
+  Linux and macOS the new wallet was written through the old handle to the
+  deleted file — `SQLITE_READONLY` — and every source of that import sat in
+  `error`. On Windows the open file made the remove itself fail with
+  `EBUSY`. The daemon now closes the file and deletes the database itself.
+- Purging works on Windows. It deleted the wallets directory while the
+  daemon still held the files in it, which Windows refuses (`EBUSY`).
+- Removing a source in the moments after it connected no longer stops the
+  daemon. navcoin-js was still setting the connection up and crashed on the
+  client the close had removed
+  (`TypeError: Cannot read properties of undefined (reading 'subscribe')`).
+- Importing a phrase no longer now and then loses one of its derivations
+  with `Wallet worker exit code 1`. The derivations are created in parallel
+  and share sqlite files, and when one creation waited on another's lock
+  past sqlite's default one-second limit — easy on a busy machine — the new
+  wallet was left half-created. Every process now waits up to 30 seconds
+  for the lock instead.
 - The source registry (`sources.json`) can no longer be corrupted by two
   updates at once — several derivations finishing their scans together is
   enough. Their writes shared a temp file, so a shorter one could land on
   top of a longer one and the mix was saved, leaving a registry the daemon
   could not read on its next start; on Windows the second write could also
   fail outright. Writes to one file now take turns.
+- A wallet that fails to be created now says why. On Windows the worker
+  exited before its report reached the daemon, and anything navcoin-js
+  printed beside the report made it unreadable, so the failure arrived as
+  a bare exit code.
 - `AddTx error: SQLITE_CONSTRAINT: UNIQUE constraint failed: S_txs.key` no
   longer fills the log during a sync. It came from two lookups of the same
   transaction storing it at once — common in a first sync, and so after

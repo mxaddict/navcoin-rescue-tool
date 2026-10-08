@@ -15,6 +15,7 @@ import {
 import { APP_VERSION, DAEMON_HOST, DAEMON_PORT } from './constants.js';
 import {
   createImportedWallet,
+  deleteOpenedWallet,
   getNavWallet,
   resetNavcoinJs,
 } from './navcoin-js-adapter.js';
@@ -271,7 +272,12 @@ async function main() {
       try {
         const body = await readJsonBody(request);
         await closeSourceWallet(body.sourceId);
-        const result = await removeSource(body.sourceId, root);
+        // Deleted here rather than in a worker: only this process can
+        // close the files it has open, or a re-import of the same source
+        // would reopen the deleted one.
+        const result = await removeSource(body.sourceId, root, {
+          deleteWalletForSource: deleteOpenedWallet,
+        });
         resetNavcoinJs();
         sendJson(response, 200, result);
       } catch (error) {

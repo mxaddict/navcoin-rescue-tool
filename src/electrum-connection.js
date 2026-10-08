@@ -233,6 +233,8 @@ function attemptConnect(wallet, timeoutMs) {
 // so failing them turns into unhandled rejections that end the process.
 // A scan caught by a drop is abandoned through its abort signal instead.
 const supervisedWallets = new WeakSet();
+// Wallets closed for good, whose connection setup may still be running.
+const closedWallets = new WeakSet();
 
 function superviseConnects(wallet) {
   if (supervisedWallets.has(wallet)) return;
@@ -243,8 +245,36 @@ function superviseConnects(wallet) {
     retireElectrumClient(this);
     const result = connect.apply(this, args);
     superviseClient(this.client);
+    containSetupAfterClose(this, this.client);
     return result;
   };
+}
+
+// navcoin-js sets each connection up in an async 'ready' listener that
+// keeps going across several awaits and reads wallet.client in between.
+// Closing the wallet in that window deletes the client under it, and the
+// TypeError that follows is an unhandled rejection that ends the process —
+// removing a source just after it connected took the daemon down. Once the
+// wallet is closed, that setup has nothing left to do, so what it throws
+// is reported here instead. While the wallet is open nothing changes: the
+// error is rethrown exactly as before.
+function containSetupAfterClose(wallet, client) {
+  if (!client) return;
+
+  for (const listener of client.subscribe.listeners('ready')) {
+    client.subscribe.removeListener('ready', listener);
+    client.subscribe.on('ready', function containedSetup(...args) {
+      return Promise.resolve()
+        .then(() => listener.apply(this, args))
+        .catch((err) => {
+          if (!closedWallets.has(wallet)) throw err;
+          console.error(
+            `[electrum] connection setup stopped by the wallet closing: ` +
+              `${err?.message ?? err}`,
+          );
+        });
+    });
+  }
 }
 
 // persistencePolicy is assigned by the client's connect(), which Connect()
@@ -272,9 +302,17 @@ function superviseClient(client) {
   client.persistencePolicy = { maxRetry: 0, callback: () => {} };
 }
 
+// Take a wallet off the network as it is being closed: its client is
+// retired, and its connection setup still running cannot crash the
+// process on the way out.
+export function closeElectrumConnection(wallet) {
+  closedWallets.add(wallet);
+  retireElectrumClient(wallet);
+}
+
 // Detach the wallet's current client for good: nothing it does afterwards
 // reaches the wallet, and it does not reconnect.
-export function retireElectrumClient(wallet) {
+function retireElectrumClient(wallet) {
   const client = wallet.client;
   if (!client) return;
   assertClientShape(client);

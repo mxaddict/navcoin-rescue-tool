@@ -77,10 +77,6 @@ the daemon at node's default heap.
   scan is deliberately not awaited: the open resolves as soon as the
   wallet is connected. Sources waiting for a slot would sit in
   `connected`, which the sweep guard already treats as not ready.
-- **`AddTx error: SQLITE_CONSTRAINT: UNIQUE constraint failed: S_txs.key`**
-  appears in the user's log, four times, once per wallet of a group. It
-  comes from inside navcoin-js, not from our code. Not diagnosed; it did
-  not stop the scan.
 - **The daemon runs on node's default heap** and is spawned with no
   `--max-old-space-size`. The crash was at roughly 4 GB. Raising it was
   considered and not done: the allocation was unbounded, so a larger heap
@@ -97,17 +93,6 @@ the daemon at node's default heap.
 Failover was rebuilt in `electrum-connection.js` (2026-10-06) after a user
 log showed a wallet retrying one dead server forever. What it leaves open:
 
-- **Closing a wallet mid-handshake throws inside navcoin-js.** Its
-  connect-time `ready` handler keeps running after several awaits and calls
-  `this.client.subscribe.on(...)`; `closeSourceWallet` → `Disconnect()` has
-  deleted `this.client` by then, so it throws `Cannot read properties of
-undefined (reading 'subscribe')` from an async listener — an unhandled
-  rejection. The daemon has no `unhandledRejection` handler, so removing a
-  source in the second or so after it connects can end the process. Seen in
-  `test/electrum-failover.test.js`, which now waits for the connection to be
-  set up before closing; not reproduced against a running daemon. Not caused
-  by failover: there the new client is assigned in the same synchronous step.
-  The real fix is in navcoin-js.
 - **Requests pending on a dropped connection are never settled.** The
   electrum client drops them on close. Rejecting them was tried and
   declined: navcoin-js awaits its own requests without handling errors, and
@@ -135,6 +120,43 @@ undefined (reading 'subscribe')` from an async listener — an unhandled
 - `test/electrum-failover.test.js` leaves `tmp/electrum-failover` behind on
   purpose: the indexeddb shim keeps its sqlite files open for the life of
   the test process, so it is cleared at the start of the next run instead.
+
+## Remove and re-import: what is left
+
+Fixed 2026-10-08 (see the changelog), from a user log full of `AddTx` errors
+after removing and re-importing a phrase. Every case is now a test in
+`test/remove-reimport.test.js`. What it leaves open:
+
+- **Every derivation of the fixture phrase reports the xNAV balance.** In
+  `test/fixtures/mainnet-fake.json` runs, `next`, `navpay` and
+  `navcoin-js-v1` each show the same 3 xNAV, while the NAV sits on
+  `navcoin-js-v1` alone. If that holds on mainnet, a sweep would try to
+  spend the same xNAV once per derivation. Seen in the stub runs only; not
+  investigated.
+- **Purge leaves `__sysdb__.sqlite` behind.** It is the indexeddb shim's
+  registry, opened through a variable private to the shim, so the daemon
+  cannot close it, and Windows will not delete it while open. Purge empties
+  it instead — every database is deleted through it — and it holds only
+  database names.
+- **Deleting depends on indexeddbshim 16 internals.** `destroyDatabase` in
+  `wallet-database.js` closes the sqlite handle at `__db._db._db`, because
+  nothing public does. It fails loudly if that shape changes; re-run
+  `test/remove-reimport.test.js` on any indexeddbshim upgrade.
+- **A wallet whose creation failed is still forgotten through the worker**
+  (`deleteWalletForSource` in `createImportedWallet`). That is right while
+  the daemon never opens such a wallet; if it ever does, that path needs
+  `deleteOpenedWallet` too.
+- **The sqlite busy timeout has no test in the suite.** Parallel wallet
+  creation under load (four processes each creating the fixture phrase's
+  derivations, fourteen rounds) failed 13 of 168 creations at the default
+  lock wait and 0 of 168 with `SQLITE_BUSY_TIMEOUT_MS` in
+  `wallet-database.js`, measured 2026-10-08 on Windows. A test that reliably
+  reproduces it needs minutes of load, so it was not added; a regression
+  would show as an intermittent `Dexie-encrypted can't find its encryption
+table` in a wallet-creation error.
+- Removing a source mid-setup now logs
+  `[electrum] connection setup stopped by the wallet closing: …` — expected,
+  not a fault.
 
 ## Group import: known consequences
 

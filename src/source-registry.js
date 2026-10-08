@@ -5,6 +5,7 @@ import { getAppDataRoot, getLayout, writeJsonFileAtomic } from './app-data.js';
 import {
   createImportedWallet,
   deleteWalletForSource,
+  purgeOpenedWallets,
   resetNavcoinJs,
 } from './navcoin-js-adapter.js';
 import { SUPPORTED_SOURCE_TYPES } from './constants.js';
@@ -254,18 +255,17 @@ export async function markSourceSynced(sourceId, root = getAppDataRoot()) {
 export async function purgeAllSources(
   root = getAppDataRoot(),
   walletAdapter = {
-    createImportedWallet,
-    deleteWalletForSource,
+    purgeWallets: purgeOpenedWallets,
   },
 ) {
   const state = await readSources(root);
-  const layout = getLayout(root);
 
-  // Wipe the entire wallets directory so no stale indexeddbshim SQLite files
-  // (including ___tx___ caches) are left behind to cause ConstraintErrors on
-  // the next import of the same key or mnemonic.
-  await fs.rm(layout.walletsDir, { recursive: true, force: true });
-  await fs.mkdir(layout.walletsDir, { recursive: true });
+  // Every wallet and the ___tx___ cache go, so nothing stale is left to
+  // cause ConstraintErrors on the next import of the same key or mnemonic.
+  // Through the daemon's own shim rather than by deleting the directory:
+  // the daemon still holds those files open, which on Windows makes the
+  // directory undeletable.
+  await walletAdapter.purgeWallets(root);
 
   resetNavcoinJs();
 

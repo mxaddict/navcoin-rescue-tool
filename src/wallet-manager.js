@@ -2,10 +2,10 @@ import { getLayout } from './app-data.js';
 import { STATIC_WALLET_PASSWORD } from './constants.js';
 import {
   advanceElectrumNode,
+  closeElectrumConnection,
   configureElectrumNodes,
   connectWithFailover,
   describeElectrumNode,
-  retireElectrumClient,
 } from './electrum-connection.js';
 import { rescueScan } from './rescue-scan.js';
 import { markSourceSynced } from './source-registry.js';
@@ -685,8 +685,9 @@ export async function closeSourceWallet(sourceId) {
 
   try {
     // Disconnect() alone closes the socket but leaves the client's own
-    // reconnect loop running against a wallet nobody holds any more.
-    retireElectrumClient(state.wallet);
+    // reconnect loop running against a wallet nobody holds any more, and
+    // navcoin-js's connection setup free to crash on the missing client.
+    closeElectrumConnection(state.wallet);
     state.wallet.Disconnect();
   } catch {
     // Ignore disconnect errors on close.

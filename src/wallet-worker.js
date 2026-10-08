@@ -17,36 +17,39 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { getDerivationWalletType } from './constants.js';
+import { forgetDatabase, shimConfig } from './wallet-database.js';
+
+// Send the one reply the parent reads, then exit once it has been
+// written. On Windows a write to a pipe is asynchronous, so exiting
+// straight after it can drop the reply: the parent then sees a bare exit
+// code and none of the reason, which is how wallet-creation failures
+// arrived with no explanation. A stdout that is already gone has nowhere
+// to report to, so that exits at once.
+let replied = false;
+function replyAndExit(reply, code) {
+  if (replied) return;
+  replied = true;
+  try {
+    process.stdout.write(JSON.stringify(reply), () => process.exit(code));
+  } catch {
+    process.exit(code);
+  }
+}
 
 process.on('uncaughtException', (error) => {
-  try {
-    process.stdout.write(
-      JSON.stringify({ ok: false, error: `uncaught: ${error.message}` }),
-    );
-  } catch {}
-  process.exit(1);
+  replyAndExit({ ok: false, error: `uncaught: ${error.message}` }, 1);
 });
 
 process.on('unhandledRejection', (error) => {
-  try {
-    process.stdout.write(
-      JSON.stringify({
-        ok: false,
-        error: `unhandled: ${error?.message ?? String(error)}`,
-      }),
-    );
-  } catch {}
-  process.exit(1);
+  replyAndExit(
+    { ok: false, error: `unhandled: ${error?.message ?? String(error)}` },
+    1,
+  );
 });
 
 ['SIGTERM', 'SIGINT'].forEach((sig) => {
   process.on(sig, () => {
-    try {
-      process.stdout.write(
-        JSON.stringify({ ok: false, error: `killed by ${sig}` }),
-      );
-    } catch {}
-    process.exit(1);
+    replyAndExit({ ok: false, error: `killed by ${sig}` }, 1);
   });
 });
 
@@ -72,35 +75,11 @@ async function prunePrivateKeyPool(wallet, source) {
     .delete();
 }
 
-// Remove one database from the shim's registry and drop its stores.
-//
-// The registry is one file shared by every wallet in the directory, so it
-// cannot be deleted to forget a single wallet: that takes every sibling's
-// version with it and leaves each of them unopenable.
-function forgetDatabase(databaseName) {
-  return new Promise((resolve, reject) => {
-    const request = global.indexedDB.deleteDatabase(databaseName);
-
-    // Fires while another connection still holds the database. Callers
-    // close the wallet first, so waiting here would just hang.
-    request.onblocked = () =>
-      reject(new Error(`${databaseName} is still open elsewhere`));
-    request.onerror = () =>
-      reject(request.error ?? new Error(`could not remove ${databaseName}`));
-    request.onsuccess = () => resolve();
-  });
-}
-
 async function main() {
   // Hard timeout — spawn() ignores its timeout option, so enforce internally.
   const WORKER_TIMEOUT_MS = 300_000; // 5 minutes
   const timer = setTimeout(() => {
-    try {
-      process.stdout.write(
-        JSON.stringify({ ok: false, error: 'wallet worker timed out' }),
-      );
-    } catch {}
-    process.exit(1);
+    replyAndExit({ ok: false, error: 'wallet worker timed out' }, 1);
   }, WORKER_TIMEOUT_MS);
   timer.unref();
 
@@ -114,16 +93,12 @@ async function main() {
   try {
     global.window = global;
     const { default: setGlobalVars } = await import('indexeddbshim');
-    setGlobalVars(null, {
-      checkOrigin: false,
-      databaseBasePath: walletsDir,
-      sysDatabaseBasePath: walletsDir,
-    });
+    setGlobalVars(null, shimConfig(walletsDir));
 
     if (input.mode === 'forget') {
-      await forgetDatabase(input.databaseName);
-      process.stdout.write(JSON.stringify({ ok: true }));
-      process.exit(0);
+      await forgetDatabase(global.indexedDB, input.databaseName);
+      replyAndExit({ ok: true }, 0);
+      return;
     }
 
     const navcoinJs = await import('navcoin-js');
@@ -176,8 +151,8 @@ async function main() {
       w.CloseDb();
     } catch {}
 
-    process.stdout.write(
-      JSON.stringify({
+    replyAndExit(
+      {
         ok: true,
         storage: {
           backend: 'navcoin-js',
@@ -186,17 +161,11 @@ async function main() {
           passwordMode: 'static',
           network: 'mainnet',
         },
-      }),
+      },
+      0,
     );
-    process.exit(0);
   } catch (error) {
-    process.stdout.write(
-      JSON.stringify({
-        ok: false,
-        error: error.message ?? String(error),
-      }),
-    );
-    process.exit(1);
+    replyAndExit({ ok: false, error: error.message ?? String(error) }, 1);
   }
 }
 

@@ -7,6 +7,11 @@ import { createRequire } from 'node:module';
 
 import { getAppDataRoot, getLayout } from './app-data.js';
 import { STATIC_WALLET_PASSWORD } from './constants.js';
+import {
+  destroyAllDatabases,
+  destroyDatabase,
+  shimConfig,
+} from './wallet-database.js';
 
 const require = createRequire(import.meta.url);
 
@@ -75,11 +80,7 @@ async function loadNavcoinJs() {
 
 async function initNavcoinJs(walletsDir) {
   const { navcoinJs, setGlobalVars } = await loadNavcoinJs();
-  setGlobalVars(null, {
-    checkOrigin: false,
-    databaseBasePath: walletsDir,
-    sysDatabaseBasePath: walletsDir,
-  });
+  setGlobalVars(null, shimConfig(walletsDir));
 
   const wallet = navcoinJs.wallet ?? navcoinJs.default?.wallet;
 
@@ -140,7 +141,11 @@ function runWalletWorker(payload, onProgress = null) {
         resolve(JSON.parse(stdout));
       } catch {
         const reason = signal ? `killed by ${signal}` : `exit code ${code}`;
-        const detail = stderr.trim();
+        // stdout too: the worker reports its own failures there, and
+        // anything else printed alongside makes the report unparseable.
+        const detail = [stderr.trim(), stdout.trim()]
+          .filter(Boolean)
+          .join('\n');
         reject(
           new Error(
             `Wallet worker ${reason}${detail ? `: ${detail}` : ' and no parseable output'}`,
@@ -251,6 +256,41 @@ export async function deleteWalletForSource(sourceId, root = getAppDataRoot()) {
   resetNavcoinJs();
 
   return storage;
+}
+
+// Delete a wallet the daemon has had open, through the daemon's own shim.
+//
+// deleteWalletForSource forgets the database in a worker process, which
+// leaves this process's shim holding its cached handle to the file: on
+// Windows the file then cannot be deleted at all, and elsewhere importing
+// the same source again — same id, same database name — reopens the
+// deleted file and every write fails. Only a delete made here closes that
+// handle and drops it. The wallet must already be closed.
+export async function deleteOpenedWallet(sourceId, root = getAppDataRoot()) {
+  await getNavWallet(root);
+  const storage = getWalletStorageDetails(sourceId, root);
+  await destroyDatabase(globalThis.indexedDB, storage.databaseName);
+  await fs.rm(storage.dataFile, { force: true });
+  return storage;
+}
+
+// The shim's registry of databases. This process cannot close it, so a
+// purge empties it rather than deleting it.
+const SHIM_REGISTRY_FILE = '__sysdb__.sqlite';
+
+// Delete every wallet and the shared transaction cache, through the
+// daemon's own shim, for the same reason as deleteOpenedWallet. Every
+// wallet must already be closed. Whatever else is in the directory goes
+// too, so nothing of an earlier wallet survives a purge.
+export async function purgeOpenedWallets(root = getAppDataRoot()) {
+  await getNavWallet(root);
+  await destroyAllDatabases(globalThis.indexedDB);
+
+  const { walletsDir } = getLayout(root);
+  for (const entry of await fs.readdir(walletsDir)) {
+    if (entry === SHIM_REGISTRY_FILE) continue;
+    await fs.rm(path.join(walletsDir, entry), { recursive: true, force: true });
+  }
 }
 
 /**

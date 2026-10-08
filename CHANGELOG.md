@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The source registry (`sources.json`) can no longer be corrupted by two
+  updates at once — several derivations finishing their scans together is
+  enough. Their writes shared a temp file, so a shorter one could land on
+  top of a longer one and the mix was saved, leaving a registry the daemon
+  could not read on its next start; on Windows the second write could also
+  fail outright. Writes to one file now take turns.
+
 ## [0.2.3] - 2026-10-06
 
 ### Fixed

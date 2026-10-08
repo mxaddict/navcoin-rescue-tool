@@ -59,12 +59,38 @@ async function ensureFile(filePath, content, mode) {
 // imported mnemonics and WIF keys verbatim, and rename() carries the
 // temp file's mode across, so the mode has to be set at creation.
 // Ignored on Windows, where the app-data dir is already per-user.
-export async function writeJsonFileAtomic(filePath, value) {
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  await fs.rename(tempPath, filePath);
+// The write to each path in progress in this process, if any.
+const pendingWrites = new Map();
+
+// Write `value` to `filePath` through a temp file and a rename, so a reader
+// never sees half a file.
+//
+// Writes to one path take turns. The daemon writes the same file from
+// several places at once — every derivation of a phrase marks itself
+// synced when its scan ends — and overlapping writes broke it two ways:
+// sharing the temp file, a shorter write landed on top of a longer one and
+// the mix was renamed into place, corrupt; and two renames onto one file at
+// once fail on Windows with EPERM.
+export function writeJsonFileAtomic(filePath, value) {
+  const previous = pendingWrites.get(filePath) ?? Promise.resolve();
+  const write = async () => {
+    const tempPath = `${filePath}.${process.pid}.tmp`;
+    await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, {
+      mode: 0o600,
+    });
+    await fs.rename(tempPath, filePath);
+  };
+
+  // After the previous write either way: its failure is its own caller's
+  // to handle, and must not stop this one.
+  const current = previous.then(write, write);
+  pendingWrites.set(filePath, current);
+
+  const forget = () => {
+    if (pendingWrites.get(filePath) === current) pendingWrites.delete(filePath);
+  };
+  current.then(forget, forget);
+  return current;
 }
 
 async function readJsonFileWithRetry(filePath, attempts = 3) {

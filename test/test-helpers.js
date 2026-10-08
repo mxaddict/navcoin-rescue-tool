@@ -158,6 +158,9 @@ function buildElectrumReply(msg, fixture) {
  *   Pass a stopped stub's port to bring "the same server" back up.
  * @param {string[]} [options.unanswered] - methods the stub reads and never
  *   answers, like a server that stalls mid-request.
+ * @param {number} [options.latencyMs] - delay before each reply, like a
+ *   server across a network rather than on loopback. Concurrent requests
+ *   overlap the way they do against a real server.
  * Returns { port, connections, requests, close } where connections() counts
  * the sockets accepted so far, requests(method) counts the requests for
  * that method received so far, answered or not, and close() returns a
@@ -165,7 +168,7 @@ function buildElectrumReply(msg, fixture) {
  */
 export function startStubElectrumServer(
   fixture = null,
-  { port = 0, unanswered = [] } = {},
+  { port = 0, unanswered = [], latencyMs = 0 } = {},
 ) {
   return new Promise((resolve, reject) => {
     const sockets = new Set();
@@ -288,7 +291,14 @@ export function startStubElectrumServer(
               header[1] = 127;
               header.writeBigUInt64BE(BigInt(replyBuf.length), 2);
             }
-            socket.write(Buffer.concat([header, replyBuf]));
+            const frame = Buffer.concat([header, replyBuf]);
+            if (latencyMs > 0) {
+              setTimeout(() => {
+                if (!socket.destroyed) socket.write(frame);
+              }, latencyMs);
+            } else {
+              socket.write(frame);
+            }
           } catch {
             // Non-JSON or control frames (ping/close) — ignore.
           }

@@ -9,6 +9,7 @@ import {
 } from './electrum-connection.js';
 import { rescueScan } from './rescue-scan.js';
 import { markSourceSynced } from './source-registry.js';
+import { cacheTransactionsOnce } from './tx-cache.js';
 
 // Output type bitmask values from navcoin-js (utils/output_types.js).
 // Inlined to avoid coupling to internal module paths.
@@ -499,6 +500,7 @@ export async function openSourceWallet(source, root, navWallet) {
         skipInitialHistorySync: true,
       });
       await prunePrivateKeyPool(wallet, source);
+      cacheTransactionsOnce(wallet);
       await configureElectrumNodes(wallet);
 
       // Seed initial address and balance snapshot before connecting.

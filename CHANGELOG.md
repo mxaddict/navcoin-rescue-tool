@@ -14,6 +14,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   top of a longer one and the mix was saved, leaving a registry the daemon
   could not read on its next start; on Windows the second write could also
   fail outright. Writes to one file now take turns.
+- `AddTx error: SQLITE_CONSTRAINT: UNIQUE constraint failed: S_txs.key` no
+  longer fills the log during a sync. It came from two lookups of the same
+  transaction storing it at once — common in a first sync, and so after
+  every re-import — and was harmless: the copy stored first is the one
+  kept, so nothing was lost.
 
 ## [0.2.3] - 2026-10-06
 

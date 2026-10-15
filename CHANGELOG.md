@@ -8,6 +8,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Coins cold-staked through a staking partner are counted and swept. The
+  rescan found them, but `status` showed 0 NAV for them and `sweep` sent
+  nothing, because only plain NAV outputs were counted and selected. They
+  are now part of the NAV balance and the sweep spends them, with change to
+  a plain address.
 - A source added while another finishes its scan is no longer dropped from
   the registry (`sources.json`), and two sources finishing together no
   longer lose one's "synced" mark. Each update read the registry, waited,

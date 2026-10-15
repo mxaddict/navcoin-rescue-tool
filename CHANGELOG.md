@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows the daemon no longer occasionally dies at start with `EPERM`
+  renaming `daemon.json`. It answers the `/status` polls of `ntr start` by
+  reading that file, and writes it as it starts listening; Windows refuses
+  to replace a file the same process has open. Reads of the app's state
+  files now wait for any write to them in progress, and the reverse.
+
 ## [0.2.5] - 2026-10-16
 
 ### Fixed

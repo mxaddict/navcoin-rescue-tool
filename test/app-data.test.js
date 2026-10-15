@@ -7,6 +7,7 @@ import {
   bootstrapAppData,
   getAppDataRoot,
   readStatus,
+  writeDaemonState,
   writeJsonFileAtomic,
 } from '../src/app-data.js';
 import { makeProjectTempDir } from './test-helpers.js';
@@ -65,6 +66,40 @@ test('concurrent atomic writes leave one whole file, never a mix', async () => {
       [],
       'no temp file left behind',
     );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+// The daemon answers /status by reading daemon.json, and writes it when it
+// starts listening — while `ntr start` is already polling /status. On
+// Windows a rename onto a file this process has open for reading fails
+// with EPERM, and the daemon died at start on one. Reads and writes of
+// these files must not overlap.
+test('reading and writing daemon state at once never fails', async () => {
+  const root = await makeProjectTempDir('app-data-read-write');
+
+  try {
+    await bootstrapAppData(root);
+    // /status polls keep arriving for as long as the daemon is writing.
+    let writing = true;
+    const poll = async () => {
+      while (writing) await readStatus(root);
+    };
+    // Settled rather than awaited one by one, so a poller that fails early
+    // is still reported, and a failed write is not hidden behind it.
+    const pollers = Promise.allSettled([poll(), poll(), poll()]);
+    try {
+      for (let round = 0; round < 200; round += 1) {
+        await writeDaemonState({ status: 'running', round }, root);
+      }
+    } finally {
+      writing = false;
+    }
+    for (const result of await pollers) {
+      if (result.status === 'rejected') throw result.reason;
+    }
+    assert.equal((await readStatus(root)).daemon.round, 199);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

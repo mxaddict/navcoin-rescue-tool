@@ -201,11 +201,6 @@ table` in a wallet-creation error.
 - `handleStatus`/`handleShow` in `cli.js` and several TUI commands report any
   failure as "No running daemon found", including real errors from a daemon
   that is running. Misleading when the daemon answers but the request fails.
-- `writeDaemonState` (`app-data.js`) reads `daemon.json`, merges and writes it
-  back outside the file's turn, the read-modify-write race `updateSources`
-  fixed for the registry. Its callers in `daemon.js` run one after another at
-  start and stop, so no overlap was seen; move it onto `updateJsonFile` if
-  anything starts writing it concurrently.
 - Balance reporting treats anything with one confirmation as spendable
   (`computeBalance`), deliberately diverging from navcoin-js. Documented in the
   function's comment; noted here because it surprises anyone comparing against

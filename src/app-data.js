@@ -59,8 +59,8 @@ async function ensureFile(filePath, content, mode) {
 // imported mnemonics and WIF keys verbatim, and rename() carries the
 // temp file's mode across, so the mode has to be set at creation.
 // Ignored on Windows, where the app-data dir is already per-user.
-// The write to each path in progress in this process, if any.
-const pendingWrites = new Map();
+// The read or write of each path in progress in this process, if any.
+const fileTurns = new Map();
 
 // Write `value` to `filePath` through a temp file and a rename, so a reader
 // never sees half a file.
@@ -73,6 +73,15 @@ const pendingWrites = new Map();
 // once fail on Windows with EPERM.
 export function writeJsonFileAtomic(filePath, value) {
   return takeTurn(filePath, () => writeNow(filePath, value));
+}
+
+// Read `filePath` in its turn, never alongside a write to it. Windows
+// refuses a rename onto a file this process has open, with EPERM: the
+// daemon answers /status by reading daemon.json and writes it when it
+// starts listening, while `ntr start` is already polling /status, and it
+// died at start when the two met.
+export function readJsonFile(filePath) {
+  return takeTurn(filePath, () => readJsonFileWithRetry(filePath));
 }
 
 // Read `filePath`, pass it to `mutate`, and write back what it returns, all
@@ -91,15 +100,15 @@ export function updateJsonFile(filePath, mutate) {
 }
 
 function takeTurn(filePath, task) {
-  const previous = pendingWrites.get(filePath) ?? Promise.resolve();
+  const previous = fileTurns.get(filePath) ?? Promise.resolve();
 
   // After the previous write either way: its failure is its own caller's
   // to handle, and must not stop this one.
   const current = previous.then(task, task);
-  pendingWrites.set(filePath, current);
+  fileTurns.set(filePath, current);
 
   const forget = () => {
-    if (pendingWrites.get(filePath) === current) pendingWrites.delete(filePath);
+    if (fileTurns.get(filePath) === current) fileTurns.delete(filePath);
   };
   current.then(forget, forget);
   return current;
@@ -184,31 +193,35 @@ export async function readAuthCookie(root = getAppDataRoot()) {
   return cookie.trim();
 }
 
-export async function writeDaemonState(partialState, root = getAppDataRoot()) {
-  const layout = getLayout(root);
-  const current = (await pathExists(layout.daemonFile))
-    ? await readJsonFileWithRetry(layout.daemonFile)
-    : {
-        host: DAEMON_HOST,
-        port: DAEMON_PORT,
-        createdAt: new Date().toISOString(),
-      };
+// Merged into the state on disk in one turn, like updateJsonFile, so a
+// concurrent write is not undone.
+export function writeDaemonState(partialState, root = getAppDataRoot()) {
+  const { daemonFile } = getLayout(root);
+  return takeTurn(daemonFile, async () => {
+    const current = (await pathExists(daemonFile))
+      ? await readJsonFileWithRetry(daemonFile)
+      : {
+          host: DAEMON_HOST,
+          port: DAEMON_PORT,
+          createdAt: new Date().toISOString(),
+        };
 
-  const nextState = {
-    ...current,
-    ...partialState,
-    updatedAt: new Date().toISOString(),
-  };
+    const nextState = {
+      ...current,
+      ...partialState,
+      updatedAt: new Date().toISOString(),
+    };
 
-  await writeJsonFileAtomic(layout.daemonFile, nextState);
-  return nextState;
+    await writeNow(daemonFile, nextState);
+    return nextState;
+  });
 }
 
 export async function readStatus(root = getAppDataRoot()) {
   const layout = getLayout(root);
   const [daemon, sources] = await Promise.all([
-    readJsonFileWithRetry(layout.daemonFile),
-    readJsonFileWithRetry(layout.sourcesFile),
+    readJsonFile(layout.daemonFile),
+    readJsonFile(layout.sourcesFile),
   ]);
 
   return {

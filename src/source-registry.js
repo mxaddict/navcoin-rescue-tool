@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 
 import {
   getAppDataRoot,
   getLayout,
+  readJsonFile,
   updateJsonFile,
   writeJsonFileAtomic,
 } from './app-data.js';
@@ -95,7 +95,7 @@ export function validateImportInput(input) {
 
 export async function readSources(root = getAppDataRoot()) {
   const layout = getLayout(root);
-  return JSON.parse(await fs.readFile(layout.sourcesFile, 'utf8'));
+  return readJsonFile(layout.sourcesFile);
 }
 
 export async function writeSources(sourcesState, root = getAppDataRoot()) {

@@ -51,6 +51,14 @@ class MockWalletFile extends EventEmitter {
     // the front on each SendTransaction call; otherwise fall back to _sendResult.
     this._sendResultQueue = opts._sendResultQueue ?? null;
     this._sendResult = opts._sendResult ?? { hashes: ['abc123'], error: null };
+    // Optional UTXO db, so balance comes from computeBalance instead of
+    // the GetBalance fallback.
+    if (opts._utxos) {
+      this.db = {
+        GetUtxos: async () => opts._utxos,
+        GetTx: async () => ({ height: 100 }),
+      };
+    }
   }
 
   async Load() {
@@ -76,8 +84,24 @@ class MockWalletFile extends EventEmitter {
     return this._balance;
   }
 
-  async NavCreateTransaction(destination, amount, memo, password, subtractFee) {
-    this._lastTxArgs = { destination, amount, memo, password, subtractFee };
+  async NavCreateTransaction(
+    destination,
+    amount,
+    memo,
+    password,
+    subtractFee,
+    fee,
+    type,
+  ) {
+    this._lastTxArgs = {
+      destination,
+      amount,
+      memo,
+      password,
+      subtractFee,
+      fee,
+      type,
+    };
     return this._txResult;
   }
 
@@ -382,7 +406,7 @@ test('staked balance is reported but excluded from sweep totals', async () => {
     await bootstrapAppData(root);
 
     const source = { id: 'src-staked', type: 'mnemonic', label: 'Staked' };
-    // nav = 2 NAV spendable, staked = 5 NAV cold-staked (not directly sweepable).
+    // No UTXO db, so the balance is GetBalance as-is: only nav is swept.
     const navWallet = makeNavWallet({
       _balance: {
         nav: { confirmed: 2_0000_0000, pending: 0 },
@@ -405,6 +429,54 @@ test('staked balance is reported but excluded from sweep totals', async () => {
       getSourceState(source.id).wallet._lastTxArgs.amount,
       2_0000_0000,
     );
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('cold-stake outputs are counted and swept with NAV outputs', async () => {
+  const root = await makeProjectTempDir('sweep-cold-stake');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: 'src-cold-stake', type: 'mnemonic' };
+    // 5 NAV cold-staked through a partner (spendable by our spending key)
+    // plus 2 NAV in a plain output.
+    const navWallet = makeNavWallet({
+      _utxos: [
+        { id: 'aa:0', type: 0x2, amount: 5_0000_0000, spendingPk: 'pk1' },
+        { id: 'bb:0', type: 0x1, amount: 2_0000_0000, spendingPk: 'pk1' },
+      ],
+      _txResult: { tx: 'coldtx', fee: 10_000 },
+      _sendResult: { hashes: ['coldhash1'], error: null },
+    });
+    await openSourceWallet(source, root, navWallet);
+
+    // The UTXO-db balance lands on the coalesced refresh, not on open.
+    const state = getSourceState(source.id);
+    for (let i = 0; i < 40 && state.balance.nav.confirmed === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.equal(state.balance.nav.confirmed, 7_0000_0000);
+    assert.equal(state.balance.staked.confirmed, 5_0000_0000);
+
+    const preview = prepareSweep();
+    assert.equal(preview.totalNav, 7_0000_0000);
+
+    const result = await executeSweep('NDestinationAddr1');
+    const lastTxArgs = state.wallet._lastTxArgs;
+    assert.equal(lastTxArgs.amount, 7_0000_0000);
+    // NAV | STAKED, so navcoin-js selects cold-stake outputs and sends
+    // change to a plain address.
+    assert.equal(lastTxArgs.type, 0x3);
+    assert.equal(result.totalSent, 7_0000_0000 - 10_000);
   } finally {
     global.WebSocket = OriginalWebSocket;
     await closeAllWallets();

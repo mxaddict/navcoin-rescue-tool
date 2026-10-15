@@ -73,8 +73,15 @@ async function computeBalance(wallet, outputs = undefined) {
       if (pending) xnavPending += utxo.amount;
       else xnavConfirmed += utxo.amount;
     } else if (utxo.type & OUT_STAKED) {
-      if (pending) stakedPending += utxo.amount;
-      else stakedConfirmed += utxo.amount;
+      // Cold-stake outputs are spendable by our spending key, so they
+      // count toward the NAV balance that is displayed and swept.
+      if (pending) {
+        stakedPending += utxo.amount;
+        navPending += utxo.amount;
+      } else {
+        stakedConfirmed += utxo.amount;
+        navConfirmed += utxo.amount;
+      }
     } else if (utxo.type & OUT_NAV) {
       if (pending) navPending += utxo.amount;
       else navConfirmed += utxo.amount;
@@ -870,6 +877,10 @@ export async function executeSweep(destination, { force = false } = {}) {
             '',
             STATIC_WALLET_PASSWORD,
             true,
+            undefined,
+            // Spend cold-stake outputs too. Not OUT_STAKED alone: with
+            // that type navcoin-js sends change back to a cold-stake script.
+            OUT_NAV | OUT_STAKED,
           ),
         nav,
       );

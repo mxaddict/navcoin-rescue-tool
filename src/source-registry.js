@@ -1,7 +1,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 
-import { getAppDataRoot, getLayout, writeJsonFileAtomic } from './app-data.js';
+import {
+  getAppDataRoot,
+  getLayout,
+  updateJsonFile,
+  writeJsonFileAtomic,
+} from './app-data.js';
 import {
   createImportedWallet,
   deleteWalletForSource,
@@ -97,6 +102,13 @@ export async function writeSources(sourcesState, root = getAppDataRoot()) {
   const layout = getLayout(root);
   await writeJsonFileAtomic(layout.sourcesFile, sourcesState);
   return sourcesState;
+}
+
+// Change the registry in one turn with every other write to it; see
+// updateJsonFile. `mutate` gets the current registry and returns the next
+// one, or undefined to leave it.
+export function updateSources(mutate, root = getAppDataRoot()) {
+  return updateJsonFile(getLayout(root).sourcesFile, mutate);
 }
 
 // One phrase becomes one source per derivation scheme it is valid for,
@@ -196,9 +208,26 @@ export async function importSources(
     throw error;
   }
 
-  state.sources.push(...created);
-  await writeSources(state, root);
-  return { importId, sources: created };
+  // Against the registry as it is now, not as it was read above: wallet
+  // creation takes a while, and anything written meanwhile must survive.
+  // That includes the same phrase imported twice at once, so the duplicate
+  // check runs again here. The wallets are not rolled back: a source's
+  // wallet is named by its id, so the other import's sources use them too.
+  let added = [];
+  await updateSources((current) => {
+    const present = new Set(
+      current.sources.map((source) => source.fingerprint),
+    );
+    added = created.filter((source) => !present.has(source.fingerprint));
+    if (added.length === 0) return undefined;
+    current.sources.push(...added);
+    return current;
+  }, root);
+
+  if (added.length === 0) {
+    throw new Error(`Duplicate source: ${importId}`);
+  }
+  return { importId, sources: added };
 }
 
 export async function removeSource(
@@ -211,14 +240,19 @@ export async function removeSource(
 ) {
   const state = await readSources(root);
   const source = state.sources.find((entry) => entry.id === sourceId);
-  const nextSources = state.sources.filter((source) => source.id !== sourceId);
 
-  if (nextSources.length === state.sources.length) {
+  if (!source) {
     throw new Error(`Unknown source id: ${sourceId}`);
   }
 
   await walletAdapter.deleteWalletForSource(source.id, root);
-  await writeSources({ sources: nextSources }, root);
+  await updateSources(
+    (current) => ({
+      ...current,
+      sources: current.sources.filter((entry) => entry.id !== sourceId),
+    }),
+    root,
+  );
   return { removedSourceId: sourceId };
 }
 
@@ -234,22 +268,24 @@ export async function markSourceFailed(
   message,
   root = getAppDataRoot(),
 ) {
-  const state = await readSources(root);
-  const source = state.sources.find((entry) => entry.id === sourceId);
-  if (!source) return;
+  await updateSources((state) => {
+    const source = state.sources.find((entry) => entry.id === sourceId);
+    if (!source) return undefined;
 
-  source.status = 'error';
-  source.syncStatus = 'error';
-  source.error = message;
-  await writeSources(state, root);
+    source.status = 'error';
+    source.syncStatus = 'error';
+    source.error = message;
+    return state;
+  }, root);
 }
 
 export async function markSourceSynced(sourceId, root = getAppDataRoot()) {
-  const state = await readSources(root);
-  const source = state.sources.find((entry) => entry.id === sourceId);
-  if (!source) return;
-  source.lastSyncedAt = new Date().toISOString();
-  await writeSources(state, root);
+  await updateSources((state) => {
+    const source = state.sources.find((entry) => entry.id === sourceId);
+    if (!source) return undefined;
+    source.lastSyncedAt = new Date().toISOString();
+    return state;
+  }, root);
 }
 
 export async function purgeAllSources(

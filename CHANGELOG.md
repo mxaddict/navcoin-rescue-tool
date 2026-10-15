@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A source added while another finishes its scan is no longer dropped from
+  the registry (`sources.json`), and two sources finishing together no
+  longer lose one's "synced" mark. Each update read the registry, waited,
+  and wrote back the copy it had read, undoing anything written in between.
+  Updates now read and write in one turn.
+
 ## [0.2.4] - 2026-10-08
 
 ### Fixed

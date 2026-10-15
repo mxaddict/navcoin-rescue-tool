@@ -10,7 +10,7 @@ import test from 'node:test';
 
 import { bootstrapAppData } from '../src/app-data.js';
 import { getNavWallet } from '../src/navcoin-js-adapter.js';
-import { readSources, writeSources } from '../src/source-registry.js';
+import { readSources, updateSources } from '../src/source-registry.js';
 import {
   closeAllWallets,
   getSourceState,
@@ -92,9 +92,12 @@ async function openWallet({ scanned = true } = {}) {
     walletType: 'navcoin-js-v1',
     ...(scanned ? { lastSyncedAt: new Date().toISOString() } : {}),
   };
-  const registry = await readSources(root);
-  registry.sources.push(source);
-  await writeSources(registry, root);
+  // In the daemon's own turn: a wallet from an earlier test can still be
+  // marking itself synced, and a separate read and write would race it.
+  await updateSources((registry) => {
+    registry.sources.push(source);
+    return registry;
+  }, root);
 
   await openSourceWallet(source, root, navWallet);
   const state = getSourceState(source.id);

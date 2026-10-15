@@ -72,18 +72,30 @@ const pendingWrites = new Map();
 // the mix was renamed into place, corrupt; and two renames onto one file at
 // once fail on Windows with EPERM.
 export function writeJsonFileAtomic(filePath, value) {
+  return takeTurn(filePath, () => writeNow(filePath, value));
+}
+
+// Read `filePath`, pass it to `mutate`, and write back what it returns, all
+// in one turn. A caller that reads, awaits and then writes loses any write
+// that lands in between: two sources marking themselves synced at once
+// each wrote back a registry without the other's change, and one finishing
+// while a source was being added wrote the new source out of the file.
+// `mutate` must be synchronous, since a Promise it returned would be written
+// out as `{}`; returning undefined leaves the file as it is.
+export function updateJsonFile(filePath, mutate) {
+  return takeTurn(filePath, async () => {
+    const next = mutate(await readJsonFileWithRetry(filePath));
+    if (next !== undefined) await writeNow(filePath, next);
+    return next;
+  });
+}
+
+function takeTurn(filePath, task) {
   const previous = pendingWrites.get(filePath) ?? Promise.resolve();
-  const write = async () => {
-    const tempPath = `${filePath}.${process.pid}.tmp`;
-    await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, {
-      mode: 0o600,
-    });
-    await fs.rename(tempPath, filePath);
-  };
 
   // After the previous write either way: its failure is its own caller's
   // to handle, and must not stop this one.
-  const current = previous.then(write, write);
+  const current = previous.then(task, task);
   pendingWrites.set(filePath, current);
 
   const forget = () => {
@@ -91,6 +103,14 @@ export function writeJsonFileAtomic(filePath, value) {
   };
   current.then(forget, forget);
   return current;
+}
+
+async function writeNow(filePath, value) {
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  await fs.rename(tempPath, filePath);
 }
 
 async function readJsonFileWithRetry(filePath, attempts = 3) {

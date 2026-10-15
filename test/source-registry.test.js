@@ -13,9 +13,12 @@ import {
 import {
   importSources,
   markSourceFailed,
+  markSourceSynced,
   readSources,
   removeSource,
+  updateSources,
   validateImportInput,
+  writeSources,
 } from '../src/source-registry.js';
 import { getProjectRoot, makeProjectTempDir } from './test-helpers.js';
 
@@ -452,5 +455,67 @@ test('a derivation whose wallet never built is recorded as failed', async () => 
       assert.equal(sibling.syncStatus, 'wallet-created');
       assert.equal(sibling.error, null);
     }
+  });
+});
+
+// Every derivation of a phrase marks itself synced when its scan ends, so
+// these land together, and a source can be added while they do. Each one
+// read the registry and wrote it back later, so the last write put back a
+// copy missing everyone else's change — including a newly added source.
+test('registry updates landing together all survive', async () => {
+  const root = await makeProjectTempDir('registry-concurrent');
+
+  try {
+    await bootstrapAppData(root);
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+    await writeSources({ sources: ids.map((id) => ({ id })) }, root);
+
+    await Promise.all([
+      ...ids.map((id) => markSourceSynced(id, root)),
+      updateSources((state) => {
+        state.sources.push({ id: 'added' });
+        return state;
+      }, root),
+    ]);
+
+    const { sources } = await readSources(root);
+    assert.deepEqual(
+      sources.map((source) => source.id).sort(),
+      [...ids, 'added'].sort(),
+    );
+    for (const id of ids) {
+      assert.ok(
+        sources.find((source) => source.id === id).lastSyncedAt,
+        `${id} marked synced`,
+      );
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+// The same phrase submitted twice at once (a double submit) passes the
+// duplicate check in both requests before either has written anything.
+// It must still end up registered once, not as two copies of every source.
+test('the same phrase imported twice at once is registered once', async () => {
+  await withRoot(async (root) => {
+    const input = { type: 'mnemonic', phrase: VALID_12 };
+    const results = await Promise.allSettled([
+      importSources(input, root, fakeAdapter()),
+      importSources(input, root, fakeAdapter()),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+    assert.match(rejected[0].reason.message, /^Duplicate source/);
+
+    const { sources } = await readSources(root);
+    assert.equal(sources.length, fulfilled[0].value.sources.length);
+    assert.equal(
+      new Set(sources.map((source) => source.id)).size,
+      sources.length,
+    );
   });
 });

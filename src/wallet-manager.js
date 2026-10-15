@@ -91,6 +91,9 @@ async function computeBalance(wallet, outputs = undefined) {
   return {
     nav: { confirmed: navConfirmed, pending: navPending },
     xnav: { confirmed: xnavConfirmed, pending: xnavPending },
+    // Counted from the outputs, this is already inside `nav`: the
+    // cold-staked part of it, not extra funds, so anything printing both
+    // must not add them. The GetBalance fallback above keeps them apart.
     staked: { confirmed: stakedConfirmed, pending: stakedPending },
   };
 }

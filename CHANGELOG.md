@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-10-16
+
 ### Fixed
 
 - On Windows the daemon no longer occasionally dies at start with `EPERM`
@@ -309,7 +311,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Release` can be dispatched with no tag to build and smoke-test a ref without
   publishing anything.
 
-[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.2...v0.2.3

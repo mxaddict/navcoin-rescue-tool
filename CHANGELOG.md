@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.2.6] - 2026-10-16
+## [0.2.7] - 2026-10-16
 
 ### Fixed
 
@@ -15,6 +15,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reading that file, and writes it as it starts listening; Windows refuses
   to replace a file the same process has open. Reads of the app's state
   files now wait for any write to them in progress, and the reverse.
+
+## [0.2.6] - 2026-10-16
+
+Tagged but never released: its release build stopped on a version
+mismatch between the manifests. Its fix ships in 0.2.7.
 
 ## [0.2.5] - 2026-10-16
 
@@ -311,7 +316,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Release` can be dispatched with no tag to build and smoke-test a ref without
   publishing anything.
 
-[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.5...v0.2.7
 [0.2.6]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.3...v0.2.4

@@ -141,7 +141,15 @@ after removing and re-importing a phrase. Every case is now a test in
 - **Deleting depends on indexeddbshim 16 internals.** `destroyDatabase` in
   `wallet-database.js` closes the sqlite handle at `__db._db._db`, because
   nothing public does. It fails loudly if that shape changes; re-run
-  `test/remove-reimport.test.js` on any indexeddbshim upgrade.
+  `test/remove-reimport.test.js` on any indexeddbshim upgrade. indexeddbshim
+  19 (dependabot's npm group, #11, 2026-10-28) moves `websql-configurable` to
+  4.x, which swaps node-sqlite3 for `better-sqlite3`. That PR failed all six
+  remove-then-reimport tests on every platform and was left open: each ran
+  about five minutes, then its daemon request ended in `fetch failed`. Likely
+  but unconfirmed cause: `better-sqlite3`'s `close()` is synchronous and takes
+  no callback, so `closeSqlite`'s promise would never settle. Upgrading means
+  rewriting `destroyDatabase` for the new handle and re-checking
+  `SQLITE_BUSY_TIMEOUT_MS`, which is passed as the shim's `sqlBusyTimeout`.
 - **A wallet whose creation failed is still forgotten through the worker**
   (`deleteWalletForSource` in `createImportedWallet`). That is right while
   the daemon never opens such a wallet; if it ever does, that path needs

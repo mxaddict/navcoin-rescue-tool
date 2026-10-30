@@ -16,17 +16,17 @@
     "gui:build": "tauri build"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
+    "@tauri-apps/cli": "^2.12.4",
     "cross-env": "^10.1.0",
-    "node-gyp": "^12.4.0",
-    "prettier": "^3.5.3"
+    "node-gyp": "^13.1.0",
+    "prettier": "^3.9.10"
   },
   "dependencies": {
     "@aguycalled/bitcore-lib": "^0.15.117",
-    "@babel/runtime": "^8.0.0",
+    "@babel/runtime": "^8.0.8",
     "blessed": "^0.1.81",
-    "chalk": "^6.0.0",
-    "indexeddbshim": "^16.1.0",
+    "chalk": "^6.0.1",
+    "indexeddbshim": "^19.0.7",
     "navcoin-js": "^1.1.182"
   }
 }

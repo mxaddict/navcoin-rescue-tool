@@ -253,7 +253,7 @@ Layout:
 Near-term:
 
 1. Atomic / per-source-result sweep so partial broadcast failure is visible
-2. CI release pipeline + cross-platform archives (Linux x86_64/arm64, macOS arm64, Windows x86_64). macOS Intel and Windows ARM64 are out of scope — see PLAN.md "Known Platform Limitations".
+2. CI release pipeline + cross-platform archives (Linux x86_64/arm64, macOS arm64/x86_64, Windows x86_64). Windows ARM64 is out of scope — see PLAN.md "Known Platform Limitations".
 
 Longer-term:
 

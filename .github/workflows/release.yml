@@ -40,15 +40,21 @@ jobs:
             node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-arm64.tar.xz
             ext: tar.gz
             prebuild_dir: linux-arm64
-          # macOS Intel (x86_64) build skipped: Intel Macs are end-of-life,
-          # GitHub is winding down macos-13 runners, and our user base is
-          # Apple Silicon. Re-add if demand emerges.
           - os: macos-latest
             platform: macos
             arch: arm64
             node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-darwin-arm64.tar.gz
             ext: tar.gz
             prebuild_dir: darwin-arm64
+          # Intel Macs build natively on macos-15-intel (macos-13 is
+          # retired), so native deps compile for x86_64 without
+          # cross-compiling and the smoke test runs on real Intel hardware.
+          - os: macos-15-intel
+            platform: macos
+            arch: x86_64
+            node_url: https://nodejs.org/dist/v22.11.0/node-v22.11.0-darwin-x64.tar.gz
+            ext: tar.gz
+            prebuild_dir: darwin-x64
           # windows-2022, not windows-latest: the current image ships
           # Visual Studio 2026, which only node-gyp 12+ finds, and the npm
           # 12 that bundles it skips build scripts for nested copies of
@@ -387,6 +393,10 @@ jobs:
           - os: macos-latest
             platform: macos
             arch: arm64
+            ext: tar.gz
+          - os: macos-15-intel
+            platform: macos
+            arch: x86_64
             ext: tar.gz
           - os: windows-latest
             platform: windows

@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- macOS Intel (`x86_64`) release archives, built and smoke-tested on
+  GitHub's `macos-15-intel` runner.
+
 ## [0.2.7] - 2026-10-16
 
 ### Fixed

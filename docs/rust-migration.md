@@ -33,9 +33,9 @@ The Linux webview dependency is the status quo and the only place a system
 library remains. A Rust-native toolkit (`iced`/`egui`) would remove it at the
 cost of rewriting the UI outside the browser model; see Decisions.
 
-A side benefit: the two platforms currently excluded — Windows ARM64 and
-macOS Intel — were excluded because `bcrypto`'s vendored C failed to build.
-A pure-Rust crypto stack has no such problem, so both come back for free.
+A side benefit: Windows ARM64, the one platform currently excluded, is
+excluded because `bcrypto`'s vendored C fails to build there. A pure-Rust
+crypto stack has no such problem, so it comes back for free.
 
 ## What exists today
 

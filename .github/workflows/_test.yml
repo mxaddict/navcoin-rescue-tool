@@ -15,6 +15,7 @@ jobs:
           - ubuntu-latest
           - ubuntu-24.04-arm
           - macos-latest
+          - macos-15-intel
           # windows-2022, not windows-latest: the current Windows image
           # ships Visual Studio 2026, which only node-gyp 12+ can find, and
           # the npm 12 that bundles it skips build scripts for nested
@@ -67,6 +68,7 @@ jobs:
           - ubuntu-latest
           - ubuntu-24.04-arm
           - macos-latest
+          - macos-15-intel
           - windows-latest
     runs-on: ${{ matrix.os }}
 

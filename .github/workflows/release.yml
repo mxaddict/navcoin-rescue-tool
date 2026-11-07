@@ -139,8 +139,11 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - name: Build GUI bundle
-        run: npm run gui:build
+      # --no-bundle: the archive ships the raw target/release binary, so
+      # Tauri's .dmg/.deb/.AppImage/.msi installers are never used, and
+      # bundle_dmg.sh fails on the macos-15-intel runner.
+      - name: Build GUI binary
+        run: npm run gui:build -- --no-bundle
 
       - name: Prune to production dependencies
         run: npm prune --omit=dev

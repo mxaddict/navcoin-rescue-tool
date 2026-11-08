@@ -221,6 +221,84 @@ table` in a wallet-creation error.
   function's comment; noted here because it surprises anyone comparing against
   `navcoin-cli` output.
 
+## Codebase review 2026-11-08: findings not fixed
+
+A read-only review, most severe first. "Re-checked" means the code path
+was traced again after the review; the rest come from the review alone, by
+reading, and no test was written or run for any of them.
+
+- **High: a `.nav` destination is resolved by an electrum server and the
+  result is never shown.** Re-checked. The `/sweep/confirm` handler in
+  `daemon.js` only checks the destination is present, and the CLI, TUI and
+  `gui/src/views/Sweep.svelte` only compare the two typed copies.
+  navcoin-js's `NavCreateTransaction` and `xNavCreateTransaction` treat any
+  string ending in `.nav` as a DotNav name and resolve it through
+  `ResolveName`, which asks whichever public electrum node the source is
+  connected to — once per source and leg. A hostile node answers with its
+  own address; the user only ever saw `alice.nav`. Fix: reject anything
+  that is not a valid mainnet NAV or xNAV address in the daemon before
+  `executeSweep`.
+- **Medium: a source below the fee aborts the sweep and hides what was
+  already sent.** Re-checked. `executeSweep` in `wallet-manager.js` spends
+  any `nav > 0`, with subtract-fee on and navcoin-js's default fee. In
+  `NavCreateTransaction`, `amount < fee` adds no destination output and,
+  since inputs equal the amount, no change either; the signed transaction
+  has inputs and no outputs, the broadcast fails, and `broadcastLeg`
+  throws. Later sources are never swept, and the hashes of earlier legs are
+  dropped, so the user sees "Sweep failed" after coins moved. A retry hits
+  the same dust source every time. Balances just above the fee (a dust
+  output) are suspected to fail the same way, not checked.
+- **Medium: a failed read in `GET /status` crashes the daemon.**
+  Re-checked. The request handler passed to `http.createServer` is async,
+  the `/status` branch awaits `readStatus` with no try/catch (every other
+  route has one), and `daemon.js` has no `unhandledRejection` handler.
+  `readJsonFileWithRetry` in `app-data.js` rethrows non-`SyntaxError`
+  errors (EPERM/EBUSY from antivirus on Windows, EMFILE) and a persistent
+  `SyntaxError`. The GUI polls `/status` throughout a sweep.
+- **Medium: `/status` and `/import` replies carry the phrase or WIF keys.**
+  Re-checked for `/status`. It spreads each record from `sources.json`
+  (`...source`), and `source-registry.js` stores `normalizedDetails` in that
+  record. Only `wallet-worker.js` reads the field, so the replies could drop
+  it. Today it reaches the webview on every poll and the Rust
+  `probe_daemon` buffer.
+- **Medium: the CLI takes secrets only as arguments.** `handleImport` /
+  `parseOptions` in `cli.js`: `--phrase` and `--key` have no stdin or
+  prompt fallback, so the secret lands in shell history and is readable in
+  `/proc/<pid>/cmdline` while the request runs.
+- **Medium: secrets go to whatever holds the daemon port.**
+  `daemonRequest` in `daemon-client.js` sends the auth cookie and import
+  bodies to the fixed loopback port, and `ensure_daemon` in
+  `src-tauri/src/lib.rs` returns `Ok` for `DaemonProbe::Unidentified`. A
+  local user who binds the port while the daemon is down receives the
+  cookie and every phrase imported. `handleStart` notices a foreign
+  listener; `import` and `sweep` do not.
+- **Medium: wallet databases are readable by other local users.**
+  `bootstrapAppData` creates the app-data and `wallets/` directories with
+  default modes; the review saw `drwxr-xr-x` directories and a `-rw-r--r--`
+  tx cache. Wallet files are inferred to match. Their encryption password is
+  the public `ObsidianSweepKey`. Same root cause as the 644 log above.
+- **Low: a rescan leaves the source `synced` for a moment.**
+  `runFreshRescan` zeroes the balance while `syncStatus` stays `synced`
+  until the first progress event, so a sweep in that window sends nothing
+  for the source and reports success. Nothing serialises two
+  `/sweep/confirm` calls, or a sweep against `/remove` or `/purge`, either.
+- **Low, suspected: a broadcast can count as sent without a hash.**
+  navcoin-js's `SendTransactionSingle` returns `undefined` when there is no
+  client, which `broadcastLeg` would count as a sent leg. No reachable
+  window was found; guarding on "every hash is a non-empty string" is
+  cheap.
+- Test gaps on these paths: `test/sweep.test.js` mocks transaction creation
+  so it always succeeds. Nothing covers a balance below the fee, a later
+  source failing after an earlier broadcast (and what the caller learns),
+  destination validation, `normalizedDetails` in replies, or `/status`
+  failing to read.
+- Not reviewed in this pass: `rescue-scan.js`, `electrum-connection.js`,
+  `wallet-database.js`, `tx-cache.js`, derivation correctness in
+  `mnemonic.js`, change-output handling for private-key sources (which use
+  the well-known container mnemonic), `xNavCreateTransaction`'s fee and
+  change logic, `tui.js` beyond `cmdSweep`, GUI views other than Sweep and
+  Import, `daemon-launch` spawning, the workflows, and Tauri's `csp: null`.
+
 ## A network blip in the release build skips the publish
 
 The v0.2.2 run failed on 2026-09-13 with

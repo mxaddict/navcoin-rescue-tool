@@ -162,6 +162,13 @@ after removing and re-importing a phrase. Every case is now a test in
   reproduces it needs minutes of load, so it was not added; a regression
   would show as an intermittent `Dexie-encrypted can't find its encryption
 table` in a wallet-creation error.
+- **`every derivation removed, then the phrase imported again` flaked once**
+  (`test/remove-reimport.test.js`), locally on 2026-11-08 during a full
+  `npm test` after the dependency refresh: `assertAllSynced` never saw
+  every source synced within the test's timeout. The file passed alone
+  twice right after, with the same dependencies. The machine was busy (load
+  around 6), so a timeout under load is the likely reading; not
+  investigated further.
 - **`daemon survives purge then re-import of same private key` flaked once**
   (`test/daemon.test.js`), reported in PR #12 on 2026-11-07: on
   `ubuntu-24.04-arm`, the `fs.rm(root, { recursive: true })` in the test's

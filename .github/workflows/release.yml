@@ -121,7 +121,8 @@ jobs:
       # saved at the end of the job — so a cache hit would restore a
       # stripped tree, skip the install and leave the Tauri CLI missing.
       - name: Install root dependencies (with dev for build tools)
-        run: npm install
+        shell: bash
+        run: .github/scripts/npm-install.sh
 
       - name: Cache GUI node_modules
         id: gui-nm-cache

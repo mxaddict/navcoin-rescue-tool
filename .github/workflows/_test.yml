@@ -47,7 +47,8 @@ jobs:
       # unknown flags, npm 12 rejects them), so it never did anything.
       - name: Install dependencies
         if: steps.nm-cache.outputs.cache-hit != 'true'
-        run: npm install
+        shell: bash
+        run: .github/scripts/npm-install.sh
 
       - name: Check formatting
         run: npm run format:check

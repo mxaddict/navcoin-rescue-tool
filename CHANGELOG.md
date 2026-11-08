@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Dependencies refreshed. Rust: `tauri` 2.12, `wry` 0.57 and 113 other
+  crates moved within their ranges, which ship inside the GUI binary. GUI:
+  `@tauri-apps/api` 2.12, `vite` 8.3, `svelte` 5.57. Root: `@tauri-apps/cli`
+  2.12, `@babel/runtime` 8.1, `chalk` 6.0.1, and `node-gyp` 13 for native
+  builds, which needs Node `^22.22.2`, `^24.15.0` or 26+. `indexeddbshim`
+  stays on 16: 19 breaks deleting a wallet (see `docs/backlog.md`).
+
 ## [0.2.8] - 2026-11-08
 
 ### Added

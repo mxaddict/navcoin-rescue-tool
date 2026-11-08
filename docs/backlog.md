@@ -239,6 +239,22 @@ failed release. Not done here because it changes the release workflow,
 which only a tag exercises — so it cannot be verified without cutting
 one.
 
+The v0.2.8 run hit the same shape on 2026-11-08 in a different download:
+`canvas` (pulled in by indexeddbshim 16) fetches a prebuilt binary from
+its GitHub release during `npm install`, and on `test (ubuntu-latest)`
+and `test (windows-2022)` that fetch failed (`No prebuilt binaries
+found` on Linux although the `linux-x64` asset exists, `Request timed
+out` on Windows). It then falls back to compiling, which cannot work on
+the runners: no `pixman-1`/`cairo` headers. The test jobs gate `build`,
+so everything after them skipped. It surfaced at release time because
+the version bump changes `package-lock.json`, which is the
+`node_modules` cache key in `_test.yml`, so the tag's run installs from
+scratch while the main runs before it hit the cache. Both workflows now
+install through `.github/scripts/npm-install.sh`, which retries; v0.2.8
+itself was built before that and does not have it, so the first tag to
+exercise it is the one after. Installing the cairo/pixman dev packages
+would also make the compile fallback work, but adds setup to every job.
+
 Also worth knowing when checking a run: `gh run watch --exit-status`
 exited 0 for that failed run. Enumerating the jobs is what caught it.
 

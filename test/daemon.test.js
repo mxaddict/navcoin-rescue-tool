@@ -559,3 +559,69 @@ test(
     }
   },
 );
+
+// From a user's log: ElectrumX answered a request with "server busy -
+// request timed out", navcoin-js left the rejection unhandled, and node
+// ended the daemon. The stub answers the request navcoin-js makes on
+// every connect with that error, so the rejection is certain to happen.
+test(
+  'daemon survives an electrum server answering busy',
+  { timeout: 120_000 },
+  async () => {
+    const busyStub = await startStubElectrumServer(null, {
+      failing: {
+        'blockchain.headers.subscribe': 'server busy - request timed out',
+      },
+    });
+    const root = await makeProjectTempDir('daemon-server-busy');
+    await bootstrapAppData(root);
+
+    const child = spawnDaemon({ root, stubPort: busyStub.port });
+
+    try {
+      await waitForReady(child);
+
+      let stderr = '';
+      const rejectionLogged = new Promise((resolve, reject) => {
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk.toString();
+          if (stderr.includes('unhandled rejection: server busy')) resolve();
+        });
+        child.once('exit', (code) =>
+          reject(
+            new Error(`daemon exited (${code}):
+${stderr}`),
+          ),
+        );
+      });
+
+      await importDaemonSource(
+        {
+          type: 'mnemonic',
+          phrase:
+            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+        },
+        root,
+      );
+
+      // Proves the busy reply reached the daemon and was rejected, so the
+      // checks below are not passing against a daemon that never saw it.
+      await rejectionLogged;
+      assert.ok(busyStub.requests('blockchain.headers.subscribe') > 0);
+
+      // Node ends the process on the tick after an unhandled rejection;
+      // a status round trip afterwards shows it outlived that.
+      const status = await getDaemonStatus(root);
+      assert.equal(status.daemon.status, 'running');
+      assert.equal(child.exitCode, null);
+
+      await stopDaemon(root);
+      await waitForExit(child);
+    } finally {
+      child.kill('SIGTERM');
+      await waitForExit(child);
+      await busyStub.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  },
+);

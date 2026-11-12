@@ -15,6 +15,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   builds, which needs Node `^22.22.2`, `^24.15.0` or 26+. `indexeddbshim`
   stays on 16: 19 breaks deleting a wallet (see `docs/backlog.md`).
 
+### Fixed
+
+- The daemon no longer exits when an electrum server answers a request with
+  an error. ElectrumX replies `server busy - request timed out` to a client
+  over its limits; navcoin-js left that rejection unhandled and node ended
+  the daemon, stopping every wallet mid-sync. It is now written to the
+  daemon log and the daemon keeps running.
+
 ## [0.2.8] - 2026-11-08
 
 ### Added

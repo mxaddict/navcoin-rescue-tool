@@ -158,6 +158,10 @@ function buildElectrumReply(msg, fixture) {
  *   Pass a stopped stub's port to bring "the same server" back up.
  * @param {string[]} [options.unanswered] - methods the stub reads and never
  *   answers, like a server that stalls mid-request.
+ * @param {Object<string, string>} [options.failing] - methods the stub
+ *   answers with a JSON-RPC error carrying this message, the way ElectrumX
+ *   answers `server busy - request timed out` when a session is over its
+ *   resource limits.
  * @param {number} [options.latencyMs] - delay before each reply, like a
  *   server across a network rather than on loopback. Concurrent requests
  *   overlap the way they do against a real server.
@@ -168,7 +172,7 @@ function buildElectrumReply(msg, fixture) {
  */
 export function startStubElectrumServer(
   fixture = null,
-  { port = 0, unanswered = [], latencyMs = 0 } = {},
+  { port = 0, unanswered = [], failing = {}, latencyMs = 0 } = {},
 ) {
   return new Promise((resolve, reject) => {
     const sockets = new Set();
@@ -262,7 +266,13 @@ export function startStubElectrumServer(
             if (unanswered.includes(msg.method)) continue;
             let result = buildElectrumReply(msg, fixture);
             let replyObj;
-            if (result === undefined) {
+            if (Object.hasOwn(failing, msg.method)) {
+              replyObj = {
+                jsonrpc: '2.0',
+                id: msg.id,
+                error: { code: -101, message: failing[msg.method] },
+              };
+            } else if (result === undefined) {
               // Unknown method — generic error fallback.
               replyObj = {
                 jsonrpc: '2.0',

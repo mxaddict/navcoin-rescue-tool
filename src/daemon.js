@@ -56,6 +56,19 @@ async function readJsonBody(request) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+// navcoin-js awaits electrum requests without handling their errors, and
+// the electrum client rejects them with the server's error message, such
+// as the "server busy - request timed out" ElectrumX sends a session over
+// its limits. Node ends the process on an unhandled rejection, so one busy
+// reply took down the daemon and every wallet in it. Log it and stay up:
+// the failed request costs the task that made it, not the whole process.
+process.on('unhandledRejection', (reason) => {
+  console.error(
+    `${new Date().toISOString()} [daemon] unhandled rejection: ` +
+      `${reason?.stack ?? reason}`,
+  );
+});
+
 async function main() {
   const root = process.env.NTR_APP_DATA || getAppDataRoot();
   const layout = getLayout(root);

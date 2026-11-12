@@ -22,6 +22,8 @@ import {
 // they installed never ran. These tests put a fake daemon on the port that
 // reports some version and check what `ntr start` and the TUI do with it.
 
+const PORT_FREE_TIMEOUT_MS = 15_000;
+
 let stub = null;
 
 before(async () => {
@@ -105,12 +107,27 @@ async function withAppData(name, body) {
   try {
     await body({ base, root });
   } finally {
-    // Whatever daemon a test left on the port is stopped through the API,
-    // so the next file finds the port free.
+    // Whatever daemon a test started is stopped through the API, and the
+    // next file waits for nothing: the port is free once this returns.
+    // Not killPortHolders: lsof also lists this process, which holds the
+    // fake daemon and keep-alive sockets on the port, and SIGKILLs it.
     await stopDaemon(root).catch(() => {});
-    killPortHolders(TEST_DAEMON_PORT);
+    await waitForPortFree(root);
     await fs.rm(base, { recursive: true, force: true });
   }
+}
+
+async function waitForPortFree(root) {
+  const deadline = Date.now() + PORT_FREE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      await getDaemonStatus(root);
+    } catch (error) {
+      if (error.cause?.cause?.code === 'ECONNREFUSED') return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`port ${TEST_DAEMON_PORT} still in use after the test`);
 }
 
 test('ntr start replaces a daemon left running by another version', async () => {

@@ -26,6 +26,7 @@ import {
   startStubElectrumServer,
   waitForDaemonReady,
   waitForExit,
+  removeDaemonDataDir,
 } from './test-helpers.js';
 
 const PHRASE =
@@ -101,7 +102,7 @@ async function withRoot(name, body) {
       child.kill('SIGTERM');
       await waitForExit(child);
     }
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 }
 

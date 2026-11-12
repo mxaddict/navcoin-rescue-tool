@@ -12,6 +12,24 @@ export async function makeProjectTempDir(prefix) {
   return fs.mkdtemp(path.join(projectTmpDir, `${prefix}-`));
 }
 
+const DATA_DIR_REMOVE_RETRIES = 20;
+const DATA_DIR_REMOVE_RETRY_DELAY_MS = 100;
+
+// Delete a directory a daemon wrote into. Stopping the daemon does not stop
+// the wallet workers it spawned for an import (`runWalletWorker` in
+// navcoin-js-adapter.js tracks none of them), so one can still be writing
+// into `wallets/` after the daemon has exited, and a single recursive delete
+// then fails with ENOTEMPTY. fs.rm retries exactly that, with a delay that
+// grows each attempt.
+export function removeDaemonDataDir(dir) {
+  return fs.rm(dir, {
+    recursive: true,
+    force: true,
+    maxRetries: DATA_DIR_REMOVE_RETRIES,
+    retryDelay: DATA_DIR_REMOVE_RETRY_DELAY_MS,
+  });
+}
+
 export function getProjectRoot() {
   return projectRoot;
 }

@@ -20,6 +20,7 @@ import {
   TEST_DAEMON_PORT,
   waitForDaemonReady,
   waitForExit,
+  removeDaemonDataDir,
 } from './test-helpers.js';
 
 const BASE_URL = `http://127.0.0.1:${TEST_DAEMON_PORT}`;
@@ -89,7 +90,7 @@ async function withDaemon(name, body) {
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(base, { recursive: true, force: true });
+    await removeDaemonDataDir(base);
   }
 }
 

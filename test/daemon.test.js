@@ -23,6 +23,7 @@ import {
   startStubElectrumServer,
   waitForDaemonReady as waitForReady,
   waitForExit,
+  removeDaemonDataDir,
 } from './test-helpers.js';
 
 const TEST_PORT = 46199;
@@ -83,7 +84,7 @@ test('daemon status requires auth cookie and supports stop', async () => {
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });
 
@@ -151,7 +152,7 @@ test('daemon import persists sources and rejects duplicates', async () => {
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });
 
@@ -190,7 +191,7 @@ test('daemon derives coinomi only once, as navcoin-js-v1', async () => {
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });
 
@@ -220,7 +221,7 @@ test('daemon private-key import works', async () => {
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });
 
@@ -268,7 +269,7 @@ test('daemon restart restores imported sources from disk', async () => {
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });
 
@@ -322,7 +323,7 @@ test('daemon survives purge then re-import of same private key', async () => {
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });
 
@@ -360,7 +361,7 @@ test('daemon status is idempotent across repeated reads', async () => {
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });
 
@@ -436,7 +437,7 @@ test('daemon rejects invalid imports without persisting broken state', async () 
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });
 
@@ -555,7 +556,7 @@ test(
       child.kill('SIGTERM');
       await waitForExit(child);
       await fixtureStub.close();
-      await fs.rm(root, { recursive: true, force: true });
+      await removeDaemonDataDir(root);
     }
   },
 );
@@ -621,7 +622,7 @@ ${stderr}`),
       child.kill('SIGTERM');
       await waitForExit(child);
       await busyStub.close();
-      await fs.rm(root, { recursive: true, force: true });
+      await removeDaemonDataDir(root);
     }
   },
 );
@@ -640,7 +641,7 @@ test('a request to a daemon that is not running names the reason', async () => {
       return true;
     });
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });
 
@@ -682,6 +683,6 @@ test('the daemon logs an uncaught exception before exiting', async () => {
   } finally {
     child.kill('SIGTERM');
     await waitForExit(child);
-    await fs.rm(root, { recursive: true, force: true });
+    await removeDaemonDataDir(root);
   }
 });

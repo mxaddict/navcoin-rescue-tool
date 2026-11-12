@@ -191,13 +191,24 @@ table` in a wallet-creation error.
   twice right after, with the same dependencies. The machine was busy (load
   around 6), so a timeout under load is the likely reading; not
   investigated further.
-- **`daemon survives purge then re-import of same private key` flaked once**
-  (`test/daemon.test.js`), reported in PR #12 on 2026-11-07: on
-  `ubuntu-24.04-arm`, the `fs.rm(root, { recursive: true })` in the test's
-  `finally` failed with `ENOTEMPTY`, and a rerun passed. Not reproduced here.
-  Guess, unverified: something was still writing into `root` while the
-  recursive delete ran, which `waitForExit` on the daemon should rule out
-  unless a file is written after the process reports exit.
+- **Daemon tests flaked with `ENOTEMPTY` deleting their data directory.**
+  `daemon survives purge then re-import of same private key` (PR #12,
+  2026-11-07, `ubuntu-24.04-arm`) and, in the v0.2.10 release run on
+  2026-11-13, the same test on `macos-15-intel` and `daemon survives an
+electrum server answering busy` on `ubuntu-24.04-arm`. Mechanism, found by
+  reading the code and not reproduced: `runWalletWorker` in
+  `navcoin-js-adapter.js` spawns a wallet worker per import and tracks none
+  of them, so a worker can still be writing into `wallets/` after the test
+  has stopped the daemon and `waitForExit` returned. Tests that run a real
+  daemon now delete through `removeDaemonDataDir` in `test/test-helpers.js`,
+  which retries `fs.rm` on that error.
+- **Stopping the daemon leaves its wallet workers running.** Same root as
+  the flake above: `performShutdown` in `daemon.js` does not stop or wait for
+  the workers `runWalletWorker` spawned, so a stop during an import leaves a
+  worker writing the wallet database until it finishes or hits its own
+  timeout (`WORKER_TIMEOUT_MS` in `wallet-worker.js`). Not seen to cause harm
+  for users; a restart right after could open a wallet a worker is still
+  writing. Not reproduced.
 - Removing a source mid-setup now logs
   `[electrum] connection setup stopped by the wallet closing: …` — expected,
   not a fault.

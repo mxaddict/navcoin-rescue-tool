@@ -1815,7 +1815,7 @@ dependencies = [
 
 [[package]]
 name = "ntr-gui"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "ntr-daemon-launch",
  "serde",

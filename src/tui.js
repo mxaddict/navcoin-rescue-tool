@@ -10,12 +10,14 @@ import {
   importDaemonSource,
   removeDaemonSource,
   stopDaemon,
+  stopDaemonFromOtherVersion,
   purgeDaemon,
   rescanDaemon,
   sweepPrepare,
   sweepConfirm,
 } from './daemon-client.js';
 import {
+  APP_VERSION,
   DAEMON_HOST,
   DAEMON_PORT,
   DAEMON_READY_TIMEOUT_MS,
@@ -408,11 +410,11 @@ async function isPortInUse() {
   }
 }
 
-async function ensureDaemonRunning(root, layout, log) {
+export async function ensureDaemonRunning(root, layout, log) {
   // First try authenticated status check.
+  let status = null;
   try {
-    await getDaemonStatus(root);
-    return true;
+    status = await getDaemonStatus(root);
   } catch {
     // Auth may have failed (missing/stale cookie) — check port directly.
     if (await isPortInUse()) {
@@ -427,7 +429,18 @@ async function ensureDaemonRunning(root, layout, log) {
     // Nothing listening — fall through to start daemon.
   }
 
-  log('  Starting daemon...');
+  if (status) {
+    try {
+      const stopped = await stopDaemonFromOtherVersion(root, status);
+      if (stopped === null) return true;
+      log(`  Stopped daemon ${stopped} left running from an earlier version.`);
+    } catch (error) {
+      log(`  ${error.message}`);
+      return false;
+    }
+  }
+
+  log(`  Starting daemon ${APP_VERSION}...`);
 
   const logFd = fs.openSync(layout.daemonLogFile, 'a');
   const child = spawn(process.execPath, [path.join(__dirname, 'daemon.js')], {

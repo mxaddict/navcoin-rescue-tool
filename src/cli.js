@@ -18,6 +18,7 @@ import {
   importDaemonSource,
   removeDaemonSource,
   stopDaemon,
+  stopDaemonFromOtherVersion,
   purgeDaemon,
   rescanDaemon,
   sweepPrepare,
@@ -75,13 +76,9 @@ async function handleStart() {
   const root = getAppDataRoot();
   const layout = await bootstrapAppData(root);
 
+  let status = null;
   try {
-    const status = await getDaemonStatus(root);
-    process.stdout.write(
-      `Daemon already running with pid ${status.daemon.pid}.\n`,
-    );
-    process.stdout.write(`App data: ${layout.root}\n`);
-    return;
+    status = await getDaemonStatus(root);
   } catch {
     // Auth may have failed — check if something is already on the port.
     try {
@@ -106,6 +103,27 @@ async function handleStart() {
       }
       // ECONNREFUSED — nothing listening, safe to start.
     }
+  }
+
+  if (status) {
+    let stopped;
+    try {
+      stopped = await stopDaemonFromOtherVersion(root, status);
+    } catch (error) {
+      process.stderr.write(`${error.message}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    if (stopped === null) {
+      process.stdout.write(
+        `Daemon already running with pid ${status.daemon.pid}.\n`,
+      );
+      process.stdout.write(`App data: ${layout.root}\n`);
+      return;
+    }
+    process.stdout.write(
+      `Stopped daemon ${stopped} left running from an earlier version.\n`,
+    );
   }
 
   const logFd = fs.openSync(layout.daemonLogFile, 'a');

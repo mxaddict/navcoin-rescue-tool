@@ -1,5 +1,10 @@
 import { readAuthCookie } from './app-data.js';
-import { DAEMON_HOST, DAEMON_PORT } from './constants.js';
+import { APP_VERSION, DAEMON_HOST, DAEMON_PORT } from './constants.js';
+
+// How long a stopped daemon gets to let go of the port. Its own shutdown
+// force-exits on a timer in `performShutdown` (daemon.js); this only has to
+// outlast that.
+const DAEMON_STOP_TIMEOUT_MS = 15_000;
 
 function buildUrl(pathname) {
   return new URL(`http://${DAEMON_HOST}:${DAEMON_PORT}${pathname}`);
@@ -63,6 +68,32 @@ export function getDaemonStatus(root) {
 
 export function stopDaemon(root) {
   return daemonRequest('/daemon/stop', { method: 'POST', root });
+}
+
+// The daemon is detached and outlives the CLI or TUI that started it, so
+// after an upgrade the old version keeps the port and the new client drives
+// it: a user on a fixed release still runs the bug. Stops a daemon whose
+// `/status` reports another version and waits until the port is free,
+// returning the version it stopped, or null when the running one is ours.
+export async function stopDaemonFromOtherVersion(root, status) {
+  if (status.version === APP_VERSION) return null;
+
+  await stopDaemon(root);
+  const deadline = Date.now() + DAEMON_STOP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      await getDaemonStatus(root);
+    } catch (error) {
+      if (error.cause?.cause?.code === 'ECONNREFUSED') {
+        return status.version ?? 'unknown';
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(
+    `The daemon on port ${DAEMON_PORT} (version ` +
+      `${status.version ?? 'unknown'}) did not stop. Stop it and try again.`,
+  );
 }
 
 export function importDaemonSource(body, root) {

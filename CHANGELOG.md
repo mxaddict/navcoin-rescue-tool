@@ -17,6 +17,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A daemon that crashes now writes a timestamped `uncaught exception` line
   to its log before exiting.
 
+### Fixed
+
+- Upgrading now actually replaces the daemon. It runs in the background and
+  outlives the TUI or CLI that started it, so after an upgrade the new TUI
+  kept driving the old version's daemon, and with it the bugs the upgrade
+  fixed. The TUI at startup and `ntr start` now stop a daemon reporting a
+  different version and start the current one.
+
 ### Changed
 
 - When the CLI or TUI cannot get a reply from the daemon, the error names

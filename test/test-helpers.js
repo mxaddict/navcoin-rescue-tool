@@ -374,8 +374,9 @@ export function spawnDaemon({
   stubPort,
   port = TEST_DAEMON_PORT,
   projectRoot: cwd = getProjectRoot(),
+  nodeArgs = [],
 }) {
-  return spawn(process.execPath, ['src/daemon.js'], {
+  return spawn(process.execPath, [...nodeArgs, 'src/daemon.js'], {
     cwd,
     env: {
       ...process.env,

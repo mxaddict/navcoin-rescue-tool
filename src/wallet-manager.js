@@ -852,22 +852,54 @@ export function prepareSweep({ force = false } = {}) {
  * Spends only from the sources `prepareSweep` would have accepted for the
  * same `force`, so what is broadcast is what the preview showed.
  */
+// One timestamped daemon-log line per sweep step. A sweep that fails,
+// hangs or loses its client mid-broadcast is otherwise invisible in a
+// user's log, and whether a transaction went out is the first thing they
+// need to know before retrying. Never logs keys or transaction hex.
+function logSweep(message) {
+  console.error(`${new Date().toISOString()} [sweep] ${message}`);
+}
+
 export async function executeSweep(destination, { force = false } = {}) {
   const { ready, blocked } = partitionSweepSources();
 
+  logSweep(
+    `start: destination=${destination} ready=${ready.length} ` +
+      `blocked=${blocked.length} force=${force}`,
+  );
+
   if (blocked.length > 0 && !force) {
+    logSweep(`refused: ${blocked.length} source(s) not ready`);
     throw new Error(`${blocked.length} source(s) are not ready to sweep.`);
   }
 
+  try {
+    const result = await sweepReadySources(ready, destination);
+    logSweep(
+      `finished: ${result.hashes.length} transaction(s), ` +
+        `sent=${result.totalSent} fee=${result.totalFee}`,
+    );
+    return result;
+  } catch (error) {
+    logSweep(`failed: ${error?.stack ?? error}`);
+    throw error;
+  }
+}
+
+async function sweepReadySources(ready, destination) {
   const hashes = [];
   let totalSent = 0;
   let totalFee = 0;
 
   for (const state of ready) {
-    if (!state.wallet) continue;
+    if (!state.wallet) {
+      logSweep(`${describeSource(state)}: skipped, wallet not open`);
+      continue;
+    }
 
     const nav = state.balance.nav.confirmed;
     const xnav = state.balance.xnav?.confirmed ?? 0;
+    logSweep(`${describeSource(state)}: nav=${nav} xnav=${xnav}`);
 
     if (nav > 0) {
       const navResult = await broadcastLeg(
@@ -916,19 +948,39 @@ export async function executeSweep(destination, { force = false } = {}) {
 }
 
 async function broadcastLeg(state, label, createTx, amount) {
+  const leg = `${describeSource(state)} ${label}`;
+
+  logSweep(`${leg}: building transaction for ${amount}`);
+  const buildStart = Date.now();
   const tx = await createTx();
   if (!tx || !tx.tx) {
+    logSweep(`${leg}: build returned no transaction`);
     throw new Error(
       `Failed to create ${label} transaction for source ${state.sourceId}`,
     );
   }
+  logSweep(
+    `${leg}: built in ${Date.now() - buildStart}ms, fee=${tx.fee ?? 0}; ` +
+      `broadcasting via ${state.server ?? 'no server'}`,
+  );
 
+  const sendStart = Date.now();
   const result = await state.wallet.SendTransaction(tx.tx);
+  // navcoin-js can send a leg as several transactions; on a failure the
+  // ones already out are only in `hashes`, which the error below drops.
+  const sentHashes = (result.hashes ?? []).filter(Boolean).join(',') || 'none';
   if (result.error) {
+    logSweep(
+      `${leg}: broadcast rejected after ${Date.now() - sendStart}ms, ` +
+        `hashes=${sentHashes}: ${result.error}`,
+    );
     throw new Error(
       `${label} broadcast failed for source ${state.sourceId}: ${result.error}`,
     );
   }
+  logSweep(
+    `${leg}: broadcast in ${Date.now() - sendStart}ms, hashes=${sentHashes}`,
+  );
 
   const fee = tx.fee ?? 0;
   return {

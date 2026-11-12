@@ -767,3 +767,128 @@ test('forcing with nothing ready refuses rather than broadcasting nothing', asyn
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+// The daemon log is the only record a user can send of what a sweep did,
+// and whether a transaction went out is what they need to know before
+// retrying. Lines are read back from console.error, which the daemon's
+// stderr writes into daemon.log.
+function captureSweepLog(t) {
+  const lines = [];
+  const original = console.error;
+  t.mock.method(console, 'error', (...args) => {
+    const line = args.join(' ');
+    if (line.includes('[sweep]')) lines.push(line);
+    else original(...args);
+  });
+  return lines;
+}
+
+test('a sweep logs each leg it builds and broadcasts', async (t) => {
+  const root = await makeProjectTempDir('sweep-log');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: 'src-log', type: 'mnemonic', label: 'Log' };
+    await openSourceWallet(
+      source,
+      root,
+      makeNavWallet({
+        _balance: {
+          nav: { confirmed: 4_0000_0000, pending: 0 },
+          xnav: { confirmed: 6_0000_0000, pending: 0 },
+          staked: { confirmed: 0, pending: 0 },
+        },
+        _txResult: { tx: 'navhex', fee: 12_000 },
+        _xnavTxResult: { tx: 'xnavhex', fee: 25_000 },
+        _sendResultQueue: [
+          { hashes: ['nav-hash'], error: null },
+          { hashes: ['xnav-hash'], error: null },
+        ],
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const lines = captureSweepLog(t);
+    await executeSweep('NDestinationAddr1');
+
+    const expected = [
+      /^\d{4}-\d\d-\d\dT[\d:.]+Z \[sweep\] start: destination=NDestinationAddr1 ready=1 blocked=0 force=false$/,
+      /\[sweep\] src-log: nav=400000000 xnav=600000000$/,
+      /\[sweep\] src-log NAV: building transaction for 400000000$/,
+      /\[sweep\] src-log NAV: built in \d+ms, fee=12000; broadcasting via mock-server:40004$/,
+      /\[sweep\] src-log NAV: broadcast in \d+ms, hashes=nav-hash$/,
+      /\[sweep\] src-log xNAV: building transaction for 600000000$/,
+      /\[sweep\] src-log xNAV: built in \d+ms, fee=25000; broadcasting via mock-server:40004$/,
+      /\[sweep\] src-log xNAV: broadcast in \d+ms, hashes=xnav-hash$/,
+      /\[sweep\] finished: 2 transaction\(s\), sent=999963000 fee=37000$/,
+    ];
+    assert.equal(lines.length, expected.length, lines.join('\n'));
+    expected.forEach((pattern, i) => assert.match(lines[i], pattern));
+
+    // The transaction hex is the signed spend; it has no place in a log
+    // users are asked to send.
+    assert.ok(!lines.some((line) => /navhex|xnavhex/.test(line)));
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a failed broadcast is logged with what already went out', async (t) => {
+  const root = await makeProjectTempDir('sweep-log-fail');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: 'src-log-fail', type: 'mnemonic', label: 'Log' };
+    await openSourceWallet(
+      source,
+      root,
+      makeNavWallet({
+        _balance: {
+          nav: { confirmed: 4_0000_0000, pending: 0 },
+          xnav: { confirmed: 6_0000_0000, pending: 0 },
+          staked: { confirmed: 0, pending: 0 },
+        },
+        _xnavTxResult: { tx: 'xnavhex', fee: 25_000 },
+        _sendResultQueue: [
+          { hashes: ['nav-hash'], error: null },
+          // One transaction of the leg out, the next refused.
+          { hashes: ['xnav-hash-1'], error: 'server busy - request timed out' },
+        ],
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const lines = captureSweepLog(t);
+    await assert.rejects(
+      () => executeSweep('NDestinationAddr1'),
+      /xNAV broadcast failed/,
+    );
+
+    const log = lines.join('\n');
+    // The NAV leg went out before the xNAV leg failed; the log has to say
+    // so, because the error the user sees does not.
+    assert.match(log, /src-log-fail NAV: broadcast in \d+ms, hashes=nav-hash/);
+    assert.match(
+      log,
+      /src-log-fail xNAV: broadcast rejected after \d+ms, hashes=xnav-hash-1: server busy - request timed out/,
+    );
+    assert.match(log, /\[sweep\] failed: Error: xNAV broadcast failed/);
+    assert.doesNotMatch(log, /finished:/);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

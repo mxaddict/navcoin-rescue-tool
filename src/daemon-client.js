@@ -5,19 +5,34 @@ function buildUrl(pathname) {
   return new URL(`http://${DAEMON_HOST}:${DAEMON_PORT}${pathname}`);
 }
 
+function describeFetchFailure(error) {
+  const cause = error?.cause;
+  if (!cause) return error?.message ?? String(error);
+  const reason = [cause.code, cause.message].filter(Boolean).join(': ');
+  return `${error.message} (${reason})`;
+}
+
 export async function daemonRequest(
   pathname,
   { method = 'GET', root, body } = {},
 ) {
   const authCookie = await readAuthCookie(root);
-  const response = await fetch(buildUrl(pathname), {
-    method,
-    headers: {
-      Authorization: authCookie,
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response;
+  try {
+    response = await fetch(buildUrl(pathname), {
+      method,
+      headers: {
+        Authorization: authCookie,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    // fetch reports every network failure as "fetch failed" and keeps
+    // the reason (refused, reset, timed out) on `cause`; name it, or a
+    // daemon that died reads the same as one that was too slow to reply.
+    throw new Error(describeFetchFailure(error), { cause: error });
+  }
 
   if (!response.ok) {
     const text = await response.text();

@@ -69,6 +69,18 @@ process.on('unhandledRejection', (reason) => {
   );
 });
 
+// A throw outside any promise still ends the process, as it should: the
+// state it left behind is unknown. Node prints the stack without a time,
+// so record when it happened, to line it up with the sweep and electrum
+// lines around it.
+process.on('uncaughtException', (error) => {
+  console.error(
+    `${new Date().toISOString()} [daemon] uncaught exception, exiting: ` +
+      `${error?.stack ?? error}`,
+  );
+  process.exit(1);
+});
+
 async function main() {
   const root = process.env.NTR_APP_DATA || getAppDataRoot();
   const layout = getLayout(root);

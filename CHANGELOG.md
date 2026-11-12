@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The daemon log now records every sweep step with a timestamp: the start,
+  each source's balance, building and broadcasting each NAV and xNAV
+  transaction with how long it took and which server it went through, the
+  transaction hashes, and the outcome. A failed or interrupted sweep's log
+  now shows whether anything was already broadcast. No keys or transaction
+  data are logged.
+- A daemon that crashes now writes a timestamped `uncaught exception` line
+  to its log before exiting.
+
+### Changed
+
+- When the CLI or TUI cannot get a reply from the daemon, the error names
+  the reason, such as `fetch failed (ECONNREFUSED: …)` or a timeout,
+  instead of a bare `fetch failed`.
+
 ## [0.2.9] - 2026-11-13
 
 ### Changed

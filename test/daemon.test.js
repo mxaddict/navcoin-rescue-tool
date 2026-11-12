@@ -625,3 +625,63 @@ ${stderr}`),
     }
   },
 );
+
+// fetch reports every network failure as a bare "fetch failed", which is
+// what a user saw when a sweep's request to the daemon broke. The reason
+// rides on `cause` and has to reach the message they read.
+test('a request to a daemon that is not running names the reason', async () => {
+  const root = await makeProjectTempDir('daemon-unreachable');
+  await bootstrapAppData(root);
+
+  try {
+    await assert.rejects(getDaemonStatus(root), (error) => {
+      assert.match(error.message, /^fetch failed \(ECONNREFUSED/);
+      assert.equal(error.cause?.cause?.code, 'ECONNREFUSED');
+      return true;
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+// A throw outside any promise still ends the daemon, but it must leave a
+// timestamped line in the log to match against the sweep and electrum
+// lines around it. The preload throws from a timer once the daemon has
+// written "ready", after daemon.js has installed its handlers.
+test('the daemon logs an uncaught exception before exiting', async () => {
+  const root = await makeProjectTempDir('daemon-uncaught');
+  await bootstrapAppData(root);
+
+  const preload =
+    'const write = process.stdout.write.bind(process.stdout);' +
+    'process.stdout.write = (chunk, ...rest) => {' +
+    '  if (String(chunk).includes("ready")) {' +
+    '    setTimeout(() => { throw new Error("boom from test"); }, 0);' +
+    '  }' +
+    '  return write(chunk, ...rest);' +
+    '};';
+  const child = spawnDaemon({
+    root,
+    stubPort,
+    nodeArgs: [`--import=data:text/javascript,${encodeURIComponent(preload)}`],
+  });
+
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+
+  try {
+    const code = await exited;
+    assert.equal(code, 1);
+    assert.match(
+      stderr,
+      /^\d{4}-\d\d-\d\dT[\d:.]+Z \[daemon\] uncaught exception, exiting: Error: boom from test$/m,
+    );
+  } finally {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

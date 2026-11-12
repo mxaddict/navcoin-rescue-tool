@@ -121,6 +121,29 @@ log showed a wallet retrying one dead server forever. What it leaves open:
   purpose: the indexeddb shim keeps its sqlite files open for the life of
   the test process, so it is cleared at the start of the next run instead.
 
+- **navcoin-js reconnects in a tight loop when a server answers busy.**
+  `ManageElectrumError` in navcoin-js `wallet.js` calls `sleep(1)` and
+  `sleep(5)` without awaiting them, so it reconnects with no delay at all.
+  Against a local stub that answers every `blockchain.scripthash.subscribe`
+  with the ElectrumX busy error, the three wallets of one imported phrase
+  opened 9040 connections in 60 s (measured 2026-11-12). A user's log from
+  2026-11-11 shows the same burst of `close connect` lines against
+  `electrum.nav.community`. Hammering a server that is already over its
+  limits likely keeps it refusing us. Fixing it needs either a navcoin-js release
+  or supervision of `ManageElectrumError` from `electrum-connection.js`.
+- **Every scan restarts from address 0.** `walkBranch` in
+  `rescue-scan.js` starts `scannedIdx` at 0 on every run and nothing
+  records how far a scan got; the derived keys (the `Nav`/`NavChange`
+  counters) are kept, so a rerun skips derivation but not the lookups.
+  On servers that reset the connection within seconds, as in the
+  2026-11-11 log, a large wallet may never finish (inferred, not reproduced). Resuming would mean
+  persisting `scannedIdx` and `lastUsedIdx` per branch after each batch,
+  and `reapStaleUtxos` would then have to skip a resumed scan, or the
+  outpoints seen before the drop would have to be persisted too, because
+  it reaps whatever the current pass did not see. `concurrency` in the
+  scan config (25 parallel lookups per wallet) is a likely contributor to
+  servers dropping us and is untested against a real server.
+
 ## Remove and re-import: what is left
 
 Fixed 2026-10-08 (see the changelog), from a user log full of `AddTx` errors
@@ -255,10 +278,12 @@ reading, and no test was written or run for any of them.
   dropped, so the user sees "Sweep failed" after coins moved. A retry hits
   the same dust source every time. Balances just above the fee (a dust
   output) are suspected to fail the same way, not checked.
-- **Medium: a failed read in `GET /status` crashes the daemon.**
-  Re-checked. The request handler passed to `http.createServer` is async,
-  the `/status` branch awaits `readStatus` with no try/catch (every other
-  route has one), and `daemon.js` has no `unhandledRejection` handler.
+- **Medium: a failed read in `GET /status` never gets a reply.** The
+  request handler passed to `http.createServer` is async and the `/status`
+  branch awaits `readStatus` with no try/catch (every other route has one).
+  Until the `unhandledRejection` handler in `daemon.js` (added for the
+  server-busy crash) this ended the daemon; now the rejection is logged and
+  the request is left open with no response. Not re-tested since.
   `readJsonFileWithRetry` in `app-data.js` rethrows non-`SyntaxError`
   errors (EPERM/EBUSY from antivirus on Windows, EMFILE) and a persistent
   `SyntaxError`. The GUI polls `/status` throughout a sweep.

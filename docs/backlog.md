@@ -10,16 +10,15 @@ entry when it ships — `git log` is the history.
   `ObsidianSweepKey` encryption claim, embed vs drop the xNAV bootstrap cache,
   and sign-off on the proposed crate list. Not started.
 
-## Stale daemon after upgrade, CLI and TUI halves
+## Stale daemon after upgrade: what is left
 
-- The GUI half shipped: `/status` reports `version` and `ensure_daemon`
-  replaces a daemon that reports a different one. `daemon-client.js` and the
-  TUI's `ensureDaemonRunning` still reuse whatever is on the port without
-  looking at the version, so `ntr` run from a checkout that has moved on keeps
-  driving the old daemon. Same fix shape: compare against `APP_VERSION` from
-  `src/constants.js` and offer a restart. Left out of the GUI change to keep it
-  reviewable — the CLI can prompt, which the GUI's headless `--daemon-check`
-  path cannot.
+The TUI at startup and `ntr start` now stop a daemon whose `/status`
+reports another version and start their own (`stopDaemonFromOtherVersion`
+in `daemon-client.js`). Every other CLI command (`ntr status`, `ntr sweep`,
+`ntr import`, …) still talks to whatever daemon holds the port without
+looking at its version, and so does a TUI session that was already running
+when the daemon was swapped. They need `ntr start` to have run first, which
+is when the check happens; a warning on a mismatch would close the gap.
 
 ## Coverage gaps
 
@@ -250,6 +249,49 @@ table` in a wallet-creation error.
   (`computeBalance`), deliberately diverging from navcoin-js. Documented in the
   function's comment; noted here because it surprises anyone comparing against
   `navcoin-cli` output.
+
+## Sweep "fetch failed": what is known and not fixed
+
+A user on v0.2.9 (macOS Intel) saw `Sweep failed: fetch failed` after
+"Broadcasting...". Their daemon log has no v0.2.9 start in it: the v0.2.8
+daemon started on 2026-11-11 was still running, and the v0.2.9 TUI reused
+it without checking its version (fixed, see the section above), so the
+sweep ran on v0.2.8 code with no sweep logging. The log shows that
+daemon's connection still resetting every few seconds to its last line. Sweep-step
+logging and the fetch cause in client errors were added so the next report
+can tell the cases below apart. A read-only review of the sweep path
+(2026-11-13) ranked the causes; the first two items were re-checked by
+reading navcoin-js 1.1.182 and electrum-client-js 0.1.14.
+
+- **A broadcast in flight when the connection drops never settles.**
+  `onClose` in electrum-client-js `socket_client.js` deletes every pending
+  callback without calling it, and our failover deliberately leaves them
+  (see "Electrum failover: what is left"). `executeSweep` then waits
+  forever, `/sweep/confirm` never replies, and the client's fetch gives up
+  after undici's 300 s `headersTimeout`, reported as `fetch failed`. The
+  server may already have the transaction. The most likely cause given
+  servers that reset within seconds; not reproduced. A fix needs a
+  timeout on each sweep request that still reports what may have gone
+  out, not just a rejection, because the outcome is unknown.
+- **`SendTransactionSingle` reports success with no hash when there is no
+  client** (`if (!this.client) return;`), so `broadcastLeg` counts a leg
+  that never went out. The sweep log shows it as `hashes=none`; nothing
+  refuses it yet.
+- **Nothing stops a second sweep while one runs.** `executeSweep` has no
+  in-flight lock and does not stop when its client disconnects, so a user
+  who retries after `fetch failed` can start a concurrent sweep over the
+  same UTXOs while the first is still pending. From the review; not
+  reproduced.
+- **A leg's partial hashes are lost on failure.** When `SendTransaction`
+  sends several transactions and a later one fails, it returns
+  `{ hashes: [first], error }`; `broadcastLeg` throws without them, so the
+  error reply drops a hash that did go out. The return shape was read in
+  `SendTransaction`; the sweep log now records those hashes, the reply to
+  the client still does not. Whether a sweep leg is ever sent as several
+  transactions was not checked.
+- **Coverage gap:** the review used Node 26 and the repo's undici 6.28 as
+  stand-ins for the Node 22.11 the release bundles; the 300 s default there
+  is assumed, not checked.
 
 ## Codebase review 2026-11-08: findings not fixed
 

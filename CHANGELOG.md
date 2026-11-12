@@ -29,6 +29,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Dependencies refreshed within their ranges. Rust: `wry` 0.57.2, with 24
+  other crates updated or added, which ship inside the GUI binary. GUI:
+  `vite` 8.3.8. Root: `@babel/runtime` 8.1.2 and `websql-configurable`
+  3.1.0, the sqlite layer under `indexeddbshim`.
 - When the CLI or TUI cannot get a reply from the daemon, the error names
   the reason, such as `fetch failed (ECONNREFUSED: …)` or a timeout,
   instead of a bare `fetch failed`.

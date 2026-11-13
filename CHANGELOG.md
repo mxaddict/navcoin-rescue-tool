@@ -13,6 +13,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- A source is no longer shown as synced when part of its scan failed. If a
+  server answered an error for an address, a coin's transaction or a
+  staking partner, the scan skipped it and still ended "synced", and a
+  sweep then left those coins behind. The scan is now run again, up to
+  five times with a pause between, redoing only what failed; if lookups
+  are still failing the source shows an error that says to rescan, and a
+  sweep refuses it until it is rescanned or skipped with `--force`.
 - Coins beyond a long run of used-up addresses are now found. The scan
   stops after 100 unused addresses in a row, but it counted an address as
   used only while it still held coins. A wallet that had spent from 100

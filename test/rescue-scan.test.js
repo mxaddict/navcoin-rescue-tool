@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
-import { rescueScan, SCAN_CHECKPOINT_MAX_AGE_MS } from '../src/rescue-scan.js';
+import {
+  rescueScan,
+  SCAN_CHECKPOINT_MAX_AGE_MS,
+  ScanIncompleteError,
+} from '../src/rescue-scan.js';
 
 const ADDRESSES = [
   { address: 'addr-one', path: "m/44'/130'/0'/0/0", change: false },
@@ -76,14 +80,40 @@ test('a clean scan reaps UTXOs the chain no longer reports as unspent', async ()
   );
 });
 
-test('a scan with a failed lookup reaps nothing', async () => {
+test('a scan with a failed lookup ends incomplete and reaps nothing', async () => {
   // 'addr-two' errors out, so this scan cannot tell "spent" from
   // "not looked up" — marking UTXOs spent here would hide live coins
-  // from the sweep, and the db keeps them marked spent afterwards.
+  // from the sweep, and the db keeps them marked spent afterwards. Nor
+  // can it be called finished: whatever is on 'addr-two' is unknown.
   const wallet = new FakeWallet({ failing: 'sh:addr-two' });
+  let finished = false;
+  wallet.on('sync_finished', () => (finished = true));
 
-  await rescueScan(wallet, { skipDerive: true });
+  await assert.rejects(rescueScan(wallet, { skipDerive: true }), (error) => {
+    assert.ok(error instanceof ScanIncompleteError);
+    // Both lookups for the address are counted once: the history one
+    // failed, so the unspent one was never made.
+    assert.equal(error.failures, 1);
+    return true;
+  });
 
+  assert.deepEqual(wallet.spent, []);
+  assert.equal(finished, false);
+});
+
+// The server listed the coin but would not give its transaction, so it is
+// not in the balance. A scan that finished on that would be swept without
+// the coin.
+test('a coin whose transaction cannot be fetched makes the scan incomplete', async () => {
+  const wallet = new FakeWallet();
+  wallet.GetTx = async () => {
+    throw new Error('server busy - request timed out');
+  };
+
+  await assert.rejects(
+    rescueScan(wallet, { skipDerive: true }),
+    ScanIncompleteError,
+  );
   assert.deepEqual(wallet.spent, []);
 });
 
@@ -359,19 +389,26 @@ test('staking discovery is skipped on resume only if it fully succeeded', async 
     ];
     wallet.onStakingKeys = onStakingKeys;
     const checkpoint = memoryCheckpoint();
-    await rescueScan(wallet, { ...WALK, checkpoint });
+    const outcome = await rescueScan(wallet, { ...WALK, checkpoint }).catch(
+      (error) => error,
+    );
     assert.equal(wallet.stakingLookups, 2);
-    return checkpoint.saves.some((saved) => saved.stakingDiscovered);
+    return {
+      outcome,
+      recorded: checkpoint.saves.some((saved) => saved.stakingDiscovered),
+    };
   };
 
-  assert.equal(await discovered(null), true);
-  assert.equal(
-    await discovered((hash) => {
-      if (hash === '01') throw new Error('server busy - request timed out');
-      return [];
-    }),
-    false,
-  );
+  assert.deepEqual(await discovered(null), { outcome: true, recorded: true });
+
+  // A partner the server would not name is a cold-staking address never
+  // scanned: the scan is incomplete, and the pass is not recorded as done.
+  const failed = await discovered((hash) => {
+    if (hash === '01') throw new Error('server busy - request timed out');
+    return [];
+  });
+  assert.ok(failed.outcome instanceof ScanIncompleteError);
+  assert.equal(failed.recorded, false);
 
   // And a checkpoint that says it was discovered skips the pass.
   const wallet = new WalkWallet();
@@ -407,4 +444,30 @@ test('an address that was used and emptied still extends the walk', async () => 
   // The change branch saw no history and stops after one.
   assert.equal(wallet.lookupsOf('c-9'), 1);
   assert.equal(wallet.lookupsOf('c-10'), 0);
+});
+
+// The rerun after an incomplete scan must not redo the whole walk: it
+// keeps the checkpoint, so only the address that failed is looked up again.
+test('an incomplete scan keeps its checkpoint for the rerun', async () => {
+  const wallet = new WalkWallet();
+  const checkpoint = memoryCheckpoint();
+  wallet.onHistory.set('sh:r-2', () => {
+    throw new Error('server busy - request timed out');
+  });
+
+  await assert.rejects(
+    rescueScan(wallet, { ...WALK, checkpoint }),
+    ScanIncompleteError,
+  );
+  assert.deepEqual(
+    checkpoint.value.walks.receive.finished,
+    [0, 1, 3, 4, 5, 6, 7, 8, 9],
+  );
+
+  wallet.onHistory.clear();
+  assert.equal(await rescueScan(wallet, { ...WALK, checkpoint }), true);
+  assert.equal(wallet.lookupsOf('r-2'), 2);
+  assert.equal(wallet.lookupsOf('r-0'), 1);
+  assert.equal(wallet.lookupsOf('c-0'), 1);
+  assert.equal(checkpoint.value, null);
 });

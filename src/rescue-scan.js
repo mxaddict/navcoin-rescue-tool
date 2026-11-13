@@ -111,15 +111,28 @@ async function openProgress(cfg) {
  * rotated value.
  *
  * `failures` counts lookups that came back as an error rather than an
- * answer. Not seeing an outpoint then means "we don't know", not "it was
- * spent", so the reap has to be held back — see rescueScan.
+ * answer: an address's history or unspent outputs, the transaction of an
+ * output being added, a staking partner. Any of them makes the scan
+ * incomplete — see the end of rescueScan.
  */
 function createScan() {
   return { outpointsSeen: new Set(), failures: 0 };
 }
 
-// Resolves true once the scan has run to the end, false when there was no
-// connection to scan with and nothing was done.
+// Thrown by rescueScan when it ran to the end with lookups that failed.
+// What it found is in the wallet; what it could not look up is not.
+export class ScanIncompleteError extends Error {
+  constructor(failures) {
+    super(`${failures} lookup(s) failed, so the scan is incomplete`);
+    this.name = 'ScanIncompleteError';
+    this.failures = failures;
+  }
+}
+
+// Resolves true once the scan has run to the end with every lookup
+// answered, false when there was no connection to scan with and nothing
+// was done. Rejects with ScanIncompleteError when it ran to the end but
+// some lookups failed.
 export async function rescueScan(wallet, opts = {}) {
   if (!wallet.client) {
     return false;
@@ -171,19 +184,22 @@ export async function rescueScan(wallet, opts = {}) {
     await scanXNav(wallet, cfg, scan);
   }
 
-  // Reaping on an incomplete scan would mark coins spent that we simply
-  // failed to look up, and a UTXO marked spent stays that way in the db.
-  // Overcounting until the next clean scan is recoverable; hiding a live
-  // UTXO from the sweep is not.
   cfg.signal?.throwIfAborted();
+  // A lookup that failed is an address, a coin or a staking partner this
+  // scan knows nothing about. Calling the wallet synced now would let a
+  // sweep run on a balance with coins missing and leave them behind, so
+  // the scan ends as incomplete: nothing is reaped, since not seeing an
+  // outpoint means "not looked up" rather than "spent", and the checkpoint
+  // is kept so a rerun retries only what failed.
   if (scan.failures > 0) {
-    console.error(
-      `[rescue-scan] ${scan.failures} lookup(s) failed — skipping stale-UTXO reap`,
-    );
-  } else if (progress.resumed) {
+    throw new ScanIncompleteError(scan.failures);
+  }
+  if (progress.resumed) {
     // The addresses the earlier attempt finished were not looked up again,
     // so their outpoints are not in `outpointsSeen` and would be reaped as
-    // spent. Same trade as above: overcount rather than hide live coins.
+    // spent, and a UTXO marked spent stays that way in the db. Overcounting
+    // until the next scan that runs start to finish is recoverable; hiding
+    // a live UTXO from the sweep is not.
     console.error('[rescue-scan] resumed scan — skipping stale-UTXO reap');
   } else {
     await reapStaleUtxos(wallet, scan.outpointsSeen);
@@ -358,6 +374,7 @@ async function scanAndHydrateAddr(wallet, address, scan) {
       console.error(
         `[rescue-scan] hydrate failed for ${outpoint}: ${err.message}`,
       );
+      scan.failures += 1;
       ok = false;
     }
   }
@@ -385,7 +402,7 @@ function parsePathIndex(path) {
 // what wallet.GetScriptHashes() (no arg) does internally, but without
 // any progress reporting — for 10k+ addr wallets that's a long silent
 // pause. Doing it ourselves so we can emit progress.
-async function discoverStakingPartners(wallet, cfg, progress) {
+async function discoverStakingPartners(wallet, cfg, scan, progress) {
   if (wallet.requestedStakingKeys) return;
 
   const addrs = await wallet.db.GetNavAddresses();
@@ -416,6 +433,7 @@ async function discoverStakingPartners(wallet, cfg, progress) {
         `[rescue-scan] staking_getKeys failed for ${addr.address}: ${err.message}`,
       );
       failed++;
+      scan.failures += 1;
     }
     scanned++;
     if (scanned % cfg.progressInterval === 0 || scanned === addrs.length) {
@@ -433,7 +451,7 @@ async function discoverStakingPartners(wallet, cfg, progress) {
 }
 
 async function scanStaking(wallet, cfg, scan, progress) {
-  await discoverStakingPartners(wallet, cfg, progress);
+  await discoverStakingPartners(wallet, cfg, scan, progress);
 
   wallet.emit('utxo_phase', 'stake');
 
@@ -471,6 +489,7 @@ async function scanStaking(wallet, cfg, scan, progress) {
         console.error(
           `[rescue-scan] staking hydrate failed for ${outpoint}: ${err.message}`,
         );
+        scan.failures += 1;
       }
     }
     scanned++;

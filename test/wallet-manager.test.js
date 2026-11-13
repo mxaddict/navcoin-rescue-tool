@@ -11,6 +11,8 @@ import {
   getAllSourceStates,
   getSourceState,
   resetElectrumNodeSelectionCache,
+  SCAN_ATTEMPTS,
+  SCAN_RETRY_DELAY_MS,
 } from '../src/wallet-manager.js';
 import { makeProjectTempDir } from './test-helpers.js';
 
@@ -1050,4 +1052,151 @@ test('wallets opened together are spread across electrum nodes', async () => {
     resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+// A wallet a real rescueScan can run against: it has an electrum client
+// and one imported address, and its history lookup fails as long as
+// `failing()` says so. The other mocks here have no client, so no scan of
+// ours ever runs on them.
+class ScanningWalletFile extends EventEmitter {
+  static failing = () => false;
+  static lookups = 0;
+
+  constructor() {
+    super();
+    this.mvk = null; // no xNAV keys — skips the xNAV pass
+    this.electrumNodes = [];
+    const keys = { where: () => keys, equals: () => keys, filter: () => keys };
+    keys.delete = async () => {};
+    this.db = {
+      db: { keys },
+      GetNavReceivingAddresses: async () => [
+        { address: 'imported-1', path: 'imported', change: false },
+      ],
+      GetNavAddresses: async () => [],
+      GetUtxos: async () => [],
+    };
+  }
+
+  async Load() {}
+
+  async Connect() {
+    this.client = {
+      blockchain_scripthash_getHistory: async () => {
+        ScanningWalletFile.lookups += 1;
+        if (ScanningWalletFile.failing()) {
+          throw new Error('server busy - request timed out');
+        }
+        return [];
+      },
+      blockchain_scripthash_listunspent: async () => [],
+      blockchain_staking_getKeys: async () => [],
+    };
+    this.emit('connected', 'mock-server:40004');
+  }
+
+  async NavReceivingAddresses() {
+    return [];
+  }
+
+  async xNavReceivingAddresses() {
+    return [];
+  }
+
+  AddressToScriptHash(address) {
+    return `sh:${address}`;
+  }
+
+  async GetStakingAddresses() {
+    return [];
+  }
+
+  ClearNodeList() {
+    this.electrumNodes = [];
+  }
+
+  AddNode(host, port, proto) {
+    this.electrumNodes.push({ host, port, proto });
+  }
+
+  Disconnect() {}
+  CloseDb() {}
+}
+
+async function settleScan() {
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+async function withScanningSource(t, name, body) {
+  const root = await makeProjectTempDir(`wm-${name}`);
+  const OriginalWebSocket = global.WebSocket;
+  ScanningWalletFile.lookups = 0;
+  // The pause between scan attempts is real time otherwise.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: `scan-${name}`, type: 'private-key' };
+    await openSourceWallet(source, root, { WalletFile: ScanningWalletFile });
+    await settleScan();
+    await body(getSourceState(source.id));
+  } finally {
+    t.mock.timers.reset();
+    ScanningWalletFile.failing = () => false;
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+// A server answering "busy" to a lookup left that address unscanned, and
+// the source was recorded as synced anyway: a sweep then ran on a balance
+// with coins missing.
+test('a scan with failed lookups is run again instead of ending synced', async (t) => {
+  ScanningWalletFile.failing = () => ScanningWalletFile.lookups <= 2;
+
+  await withScanningSource(t, 'retry', async (state) => {
+    assert.equal(ScanningWalletFile.lookups, 1);
+    assert.notEqual(state.syncStatus, 'synced');
+
+    t.mock.timers.tick(SCAN_RETRY_DELAY_MS);
+    await settleScan();
+    assert.equal(ScanningWalletFile.lookups, 2);
+    assert.notEqual(state.syncStatus, 'synced');
+
+    t.mock.timers.tick(SCAN_RETRY_DELAY_MS);
+    await settleScan();
+    assert.equal(ScanningWalletFile.lookups, 3);
+    assert.equal(state.syncStatus, 'synced');
+    assert.equal(state.error, null);
+  });
+});
+
+test('a scan that keeps failing ends in error and stays there', async (t) => {
+  ScanningWalletFile.failing = () => true;
+
+  await withScanningSource(t, 'give-up', async (state) => {
+    for (let attempt = 1; attempt < SCAN_ATTEMPTS; attempt += 1) {
+      assert.notEqual(state.syncStatus, 'error', `attempt ${attempt}`);
+      t.mock.timers.tick(SCAN_RETRY_DELAY_MS);
+      await settleScan();
+    }
+
+    assert.equal(ScanningWalletFile.lookups, SCAN_ATTEMPTS);
+    assert.equal(state.syncStatus, 'error');
+    assert.match(state.error, /The scan could not finish: 1 lookup\(s\)/);
+    assert.match(state.error, /Run a rescan/);
+
+    // navcoin-js reports its own sync finished on every connect. After a
+    // scan of ours failed, that must not turn the source synced.
+    state.wallet.emit('sync_finished');
+    await settleScan();
+    assert.equal(state.syncStatus, 'error');
+  });
 });

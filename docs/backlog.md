@@ -98,11 +98,6 @@ log showed a wallet retrying one dead server forever. What it leaves open:
   the rejections ended the process. Each drop therefore strands whatever was
   in flight — our scan is abandoned through its abort signal, navcoin-js's
   own tasks just stay pending.
-- **navcoin-js's connect-time `sync_finished` still marks a source synced
-  when no scan is running.** That covers a source whose last scan failed: on
-  the next reconnect it would show `synced` and be recorded as synced, so the
-  failed scan is skipped next start. Unchanged behaviour, found by reading
-  `wallet.on('sync_finished')` in `wallet-manager.js`; not reproduced.
 - **The supervision depends on electrum-client-js 0.1.x internals**
   (`persistencePolicy`, the `subscribe` emitter, `Connect()` creating the
   client synchronously). `assertClientShape` fails loudly if they change;
@@ -325,20 +320,21 @@ badly each can cost a user coins. No test was written for any of them yet.
   open on `new_mnemonic`, skip sources with `status: 'error'` in `main`,
   and record that a source's wallet was built so an unbuilt one is rebuilt
   rather than opened.
-- **High: a scan with failed lookups is still recorded as synced.** Read
-  in `rescueScan`: a failed history or unspent lookup is counted in
-  `scan.failures`, which only holds back the stale-UTXO reap; the scan
-  returns true and `runScan` marks the source synced. Not counted at all:
-  a failed `GetTx` while hydrating an output (`scanAndHydrateAddr`,
-  `scanStaking`), which leaves a seen coin out of the balance, and a failed
-  `blockchain_staking_getKeys` (`discoverStakingPartners`), which leaves a
-  cold-staking partner unknown. A server answering "busy" for some
-  requests therefore yields a synced source with coins missing, and the
-  sweep leaves them behind without a word. The entry under "Electrum
-  failover" about navcoin-js's own `sync_finished` is the same hole from
-  another side.
-  Not reproduced. Fix: retry the failed lookups, and end the scan as
-  incomplete, not synced, if any still fail.
+- **A scan that ends with failed lookups: what is left.** It now ends as
+  incomplete (`ScanIncompleteError` in `rescue-scan.js`), `runScan` in
+  `wallet-manager.js` runs it again after a pause, and the source goes into
+  error when lookups still fail after the last attempt. Left open:
+  - `SCAN_ATTEMPTS` and `SCAN_RETRY_DELAY_MS` are guesses, not measured
+    against a server that answers "busy".
+  - An output whose transaction the server returns empty, rather than
+    failing, is still skipped without counting (`if (!tx?.hex) continue` in
+    `scanAndHydrateAddr` and `scanStaking`). Whether a real server ever
+    does that for an output it lists as unspent is not known.
+  - A source that reached error this way stays there until a manual
+    rescan; nothing retries it later by itself.
+  - navcoin-js's own connect-time `sync_finished` still marks a source
+    synced when no scan of ours ever ran or failed on it, which is how the
+    test mocks without an electrum client become synced.
 - **High: a sweep cannot see a source that has no open wallet.**
   `prepareSweep` and `executeSweep` in `sweep.js` look only at
   `listSourceStates()`, and a source has no live state until its wallet

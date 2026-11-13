@@ -7,7 +7,7 @@ import {
   connectWithFailover,
   describeElectrumNode,
 } from './electrum-connection.js';
-import { rescueScan } from './rescue-scan.js';
+import { rescueScan, ScanIncompleteError } from './rescue-scan.js';
 import { markSourceSynced } from './source-registry.js';
 import { cacheTransactionsOnce } from './tx-cache.js';
 
@@ -148,6 +148,10 @@ function makeInitialState(sourceId, root) {
     // Set when the connection drops under a running scan: that scan is
     // abandoned and runScan starts it over once reconnected.
     scanInterrupted: false,
+    // Set when the last scan ended in an error rather than a clean finish:
+    // navcoin-js reporting its own connect-time sync as finished must not
+    // then mark the source synced.
+    scanFailed: false,
     // Interrupts the sweep step waiting on this source, if any (sweep.js):
     // a request pending when the connection drops is never answered.
     sweepAbort: null,
@@ -279,19 +283,41 @@ function scanCheckpointStore(wallet) {
   };
 }
 
+// How many times a scan that ended with failed lookups is run before the
+// source is put in error, and how long to wait between runs. A server
+// answering "busy" may answer the next time, and a rerun resumes from the scan's
+// checkpoint, so it retries only what failed.
+export const SCAN_ATTEMPTS = 5;
+export const SCAN_RETRY_DELAY_MS = 10_000;
+
 // Run rescueScan to a clean finish, then record the source as synced. A
 // scan the connection dropped under is run again once there is a
-// connection, because its failed lookups make it an incomplete picture,
-// not a finished one. The rerun resumes from the scan's checkpoint.
+// connection, and one that ended with lookups that failed is run again
+// after a pause: either way it is an incomplete picture, not a finished
+// one, and a source recorded as synced on it would be swept with coins
+// missing. The reruns resume from the scan's checkpoint.
 async function runScan(state, opts) {
+  state.scanFailed = false;
+  try {
+    await runScanAttempts(state, opts);
+  } catch (err) {
+    state.scanFailed = true;
+    throw err;
+  }
+}
+
+async function runScanAttempts(state, opts) {
   let completed = false;
-  do {
+  let incompleteRuns = 0;
+
+  for (;;) {
     await waitForConnected(state);
     if (state.closing || !state.wallet) return;
 
     const controller = new AbortController();
     state.scanAbort = controller;
     state.scanInterrupted = false;
+    let incomplete = null;
     try {
       // A scan the drop cut off can be stuck on a lookup the dead socket
       // will never answer, so stop waiting for it the moment it is
@@ -306,11 +332,35 @@ async function runScan(state, opts) {
         whenAborted(controller.signal).then(() => false),
       ]);
     } catch (err) {
-      if (!controller.signal.aborted) throw err;
+      if (controller.signal.aborted) {
+        // Cut off by a drop: whatever it threw on the way out, it is rerun.
+      } else if (err instanceof ScanIncompleteError) {
+        incomplete = err;
+      } else {
+        throw err;
+      }
     } finally {
       if (state.scanAbort === controller) state.scanAbort = null;
     }
-  } while (state.scanInterrupted && !state.closing);
+
+    if (state.closing) return;
+    if (state.scanInterrupted) continue;
+    if (!incomplete) break;
+
+    incompleteRuns += 1;
+    if (incompleteRuns >= SCAN_ATTEMPTS) {
+      throw new Error(
+        `The scan could not finish: ${incomplete.failures} lookup(s) were ` +
+          `still failing after ${SCAN_ATTEMPTS} attempts, so the balance may ` +
+          `be missing coins. Run a rescan to try again.`,
+      );
+    }
+    console.error(
+      `[rescue-scan] ${describeSource(state)}: ${incomplete.message}; ` +
+        `running it again in ${SCAN_RETRY_DELAY_MS / 1000}s`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, SCAN_RETRY_DELAY_MS));
+  }
 
   if (completed && !state.closing) await finishSync(state);
 }
@@ -514,8 +564,12 @@ export async function openSourceWallet(source, root, navWallet) {
     // finished, usually long before a scan of ours is. While one runs,
     // only that scan's clean finish counts — runScan reports it — or the
     // source is recorded as synced mid-scan and skips the scan next start.
+    //
+    // Nor does it count after a scan of ours failed: the source would go
+    // from error to synced on the next reconnect, with the coins that scan
+    // could not look up still missing.
     wallet.on('sync_finished', () => {
-      if (state.rescanInFlight) return;
+      if (state.rescanInFlight || state.scanFailed) return;
       void finishSync(state);
     });
 

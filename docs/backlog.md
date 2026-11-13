@@ -342,15 +342,6 @@ badly each can cost a user coins. No test was written for any of them yet.
   - navcoin-js's own connect-time `sync_finished` still marks a source
     synced when no scan of ours ever ran or failed on it, which is how the
     test mocks without an electrum client become synced.
-- **Medium: `/remove` or `/purge` during a background wallet creation.**
-  The creation chain in the `/import` handler is not tracked, the two
-  routes do not wait for it, and its `.then` opens the source without
-  checking it is still registered. A removal in that window can leave a
-  wallet open under an id no longer in `sources.json`: invisible on
-  `/status`, but counted by the sweep guard. From the reviewer, control
-  flow read, neither platform outcome run. Fix: track the creation promise
-  per source, have the routes await it, and re-check the registry before
-  opening.
 - **Private-key imports: what is left.** A key that is not a key is now
   refused, and so is a key another private-key source already holds
   (`isImportablePrivateKey` and the overlap check in `importSources`, in

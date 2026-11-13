@@ -143,6 +143,10 @@ async function main() {
   let shuttingDown = false;
   let shutdownPromise = null;
   const sockets = new Set();
+  // The wallets being built after an import, by source id: each a promise
+  // that settles, never rejecting, once the source is built and open or
+  // recorded as failed. /remove and /purge wait for them.
+  const creatingWallets = new Map();
 
   async function performShutdown() {
     if (shutdownPromise) return shutdownPromise;
@@ -281,7 +285,7 @@ async function main() {
         // independent, so one failing must not stop the others — the whole
         // point of deriving several is that only some of them are real.
         for (const source of sources) {
-          createImportedWallet(source, root)
+          const creation = createImportedWallet(source, root)
             .then(() => {
               console.log(
                 `[daemon] wallet created for ${source.id} ` +
@@ -291,11 +295,16 @@ async function main() {
             })
             .then((navWallet) => {
               console.log(`[daemon] opening wallet and syncing...`);
-              openRegisteredSource(source, root, navWallet).catch((err) => {
-                console.log(
-                  `[daemon] failed to open wallet ${source.id}: ${err.message}`,
-                );
-              });
+              // Part of the chain, so that whoever waits for the creation
+              // finds the source open rather than about to be opened.
+              return openRegisteredSource(source, root, navWallet).catch(
+                (err) => {
+                  console.log(
+                    `[daemon] failed to open wallet ${source.id}: ` +
+                      `${err.message}`,
+                  );
+                },
+              );
             })
             .catch(async (err) => {
               console.log(
@@ -313,6 +322,13 @@ async function main() {
                 },
               );
             });
+
+          creatingWallets.set(source.id, creation);
+          creation.finally(() => {
+            if (creatingWallets.get(source.id) === creation) {
+              creatingWallets.delete(source.id);
+            }
+          });
         }
 
         sendJson(response, 200, { importId, sources });
@@ -332,6 +348,10 @@ async function main() {
     if (request.method === 'POST' && request.url === '/remove') {
       try {
         const body = await readJsonBody(request);
+        // A wallet still being built is written by its worker, and opened
+        // by this process when the worker is done. Deleting it meanwhile
+        // left a wallet open under an id no longer in the registry.
+        await creatingWallets.get(body.sourceId);
         await closeSourceWallet(body.sourceId);
         // Deleted here rather than in a worker: only this process can
         // close the files it has open, or a re-import of the same source
@@ -349,6 +369,8 @@ async function main() {
 
     if (request.method === 'POST' && request.url === '/purge') {
       try {
+        // As for /remove: every wallet being built is let finish first.
+        await Promise.all(creatingWallets.values());
         await closeAllWallets();
         await purgeAllWallets();
         const result = await purgeAllSources(root);

@@ -793,3 +793,68 @@ test(
     }
   },
 );
+
+// Removing the derivations you do not want straight after an import is
+// the natural thing to do, and their wallets are still being built then.
+// The removal deleted the database under the worker writing it; the
+// worker finished anyway, and the daemon opened a wallet for an id no
+// longer in the registry.
+test(
+  'removing a source while its wallet is being built removes all of it',
+  { timeout: 120_000 },
+  async () => {
+    const root = await makeProjectTempDir('daemon-remove-building');
+    await bootstrapAppData(root);
+
+    const child = spawnDaemon({ root, stubPort });
+    let output = '';
+    child.stdout.on('data', (chunk) => (output += chunk));
+
+    try {
+      await waitForReady(child);
+
+      const imported = await importDaemonSource(
+        {
+          type: 'mnemonic',
+          phrase:
+            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+        },
+        root,
+      );
+      const [removed, ...kept] = imported.sources;
+      // Straight away: the import returns before any wallet is built.
+      await removeDaemonSource(removed.id, root);
+
+      // Every other derivation finishes building and opens.
+      const deadline = Date.now() + 90_000;
+      for (;;) {
+        const status = await getDaemonStatus(root);
+        assert.deepEqual(
+          status.sources.map((source) => source.id).sort(),
+          kept.map((source) => source.id).sort(),
+        );
+        if (status.sources.every((source) => source.connected)) break;
+        assert.ok(Date.now() < deadline, `not all opened: ${output}`);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+
+      // The removed one left nothing behind: no database a later worker or
+      // open would find.
+      const { dataFile } = getWalletStorageDetails(removed.id, root);
+      await assert.rejects(fs.access(dataFile), { code: 'ENOENT' });
+      // And its wallet really was being built when the removal came in,
+      // or this test would pass without the case it is about.
+      assert.ok(
+        output.includes(`wallet created for ${removed.id}`),
+        `its wallet was not being built: ${output}`,
+      );
+
+      await stopDaemon(root);
+      await waitForExit(child);
+    } finally {
+      child.kill('SIGTERM');
+      await waitForExit(child);
+      await removeDaemonDataDir(root);
+    }
+  },
+);

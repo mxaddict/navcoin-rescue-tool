@@ -650,6 +650,12 @@ async function handleSweep(argv) {
   try {
     const response = await sweepConfirm(destination, 'SEND MY COINS', root, {
       force,
+      onLostReply: (error) => {
+        process.stderr.write(
+          `Lost the daemon's reply: ${error.message}\n` +
+            `The sweep may still be running there. Waiting for its outcome...\n`,
+        );
+      },
     });
     const result = response.result;
 
@@ -669,7 +675,10 @@ async function handleSweep(argv) {
       }
     }
   } catch (error) {
-    if (isDaemonUnreachable(error)) {
+    // Only a refused connection means no daemon. isDaemonUnreachable also
+    // matches any "fetch failed", which here is a sweep whose reply was
+    // lost and whose error says what may already have been broadcast.
+    if (error?.cause?.cause?.code === 'ECONNREFUSED') {
       process.stderr.write(
         `No running daemon found. Run \`${CLI_NAME} start\` first.\n`,
       );

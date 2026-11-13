@@ -115,20 +115,6 @@ export function prepareSweep({ force = false } = {}) {
   };
 }
 
-/**
- * Execute the sweep: for each source with a non-zero confirmed balance,
- * broadcast a NAV leg and/or an xNAV leg to the destination.
- *
- * Returns:
- *   { hashes: string[], totalSent: number, totalFee: number }
- *
- * Throws if any broadcast fails. Already-broadcast legs from earlier sources
- * cannot be undone — partial-success state is the responsibility of callers
- * to surface.
- *
- * Spends only from the sources `prepareSweep` would have accepted for the
- * same `force`, so what is broadcast is what the preview showed.
- */
 // One timestamped daemon-log line per sweep step. A sweep that fails,
 // hangs or loses its client mid-broadcast is otherwise invisible in a
 // user's log, and whether a transaction went out is the first thing they
@@ -137,7 +123,116 @@ function logSweep(message) {
   console.error(`${new Date().toISOString()} [sweep] ${message}`);
 }
 
-export async function executeSweep(destination, { force = false } = {}) {
+// How long one step of a leg may go unanswered before the sweep gives up
+// on it. Building can be slow for real — an xNAV transaction is heavy
+// arithmetic, and it fetches input transactions on the way — so it gets
+// far longer than the single request a broadcast is. These are the last
+// resort for a server that stays connected and never answers; a dropped
+// connection interrupts the step at once through `state.sweepAbort`.
+export const SWEEP_BUILD_TIMEOUT_MS = 10 * 60_000;
+export const SWEEP_BROADCAST_TIMEOUT_MS = 2 * 60_000;
+
+// The sweep running now, or the last one that ran: what the daemon reports
+// on /status, so a client that lost the reply to its request can still
+// learn what was broadcast. Kept in memory only.
+let sweepRecord = null;
+let sweepRunning = false;
+
+export function getSweepStatus() {
+  return sweepRecord ? structuredClone(sweepRecord) : null;
+}
+
+// A step of a leg that stopped waiting: the connection dropped, the wallet
+// closed, or the server never answered. The request itself may still be
+// in flight, which is why a broadcast interrupted this way has an unknown
+// outcome rather than a failed one.
+class SweepStepInterrupted extends Error {}
+
+// Settle with `promise`, unless the source loses its connection or
+// `timeoutMs` passes first. navcoin-js's electrum client drops a pending
+// request without settling it when the socket closes, so a step caught by
+// a drop would otherwise wait forever and the sweep with it.
+function untilInterrupted(promise, state, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    state.sweepAbort = controller;
+
+    const finish = (settle, value) => {
+      clearTimeout(timer);
+      if (state.sweepAbort === controller) state.sweepAbort = null;
+      settle(value);
+    };
+    const timer = setTimeout(
+      () =>
+        finish(
+          reject,
+          new SweepStepInterrupted(
+            `the server did not answer within ${timeoutMs / 1000}s`,
+          ),
+        ),
+      timeoutMs,
+    );
+    controller.signal.addEventListener(
+      'abort',
+      () =>
+        finish(
+          reject,
+          new SweepStepInterrupted('the server connection dropped'),
+        ),
+      { once: true },
+    );
+
+    promise.then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error),
+    );
+  });
+}
+
+// What already went out, for the error of a sweep that then failed: the
+// legs after the failure are never attempted, and without this the caller
+// sees only the failure and nothing of the coins that moved before it.
+function describeBroadcastLegs(record) {
+  return record.legs
+    .filter((leg) => leg.hashes.length > 0)
+    .map(
+      (leg) => `  ${leg.label} from ${leg.source}: ${leg.hashes.join(', ')}`,
+    );
+}
+
+/**
+ * Execute the sweep: for each source with a non-zero confirmed balance,
+ * broadcast a NAV leg and/or an xNAV leg to the destination.
+ *
+ * Returns:
+ *   { hashes: string[], totalSent: number, totalFee: number }
+ *
+ * Throws if any leg fails, with the legs already broadcast listed in the
+ * message: they cannot be undone, and the sources after the failure are
+ * not attempted. A leg whose broadcast was interrupted before the server
+ * answered throws with code SWEEP_OUTCOME_UNKNOWN. Only one sweep runs at a
+ * time; a second one throws with code SWEEP_IN_PROGRESS.
+ *
+ * Spends only from the sources `prepareSweep` would have accepted for the
+ * same `force`, so what is broadcast is what the preview showed.
+ *
+ * `id` names the sweep in `getSweepStatus`, so a client can tell the sweep
+ * it asked for from an earlier one.
+ */
+export async function executeSweep(
+  destination,
+  { force = false, id = null } = {},
+) {
+  if (sweepRunning) {
+    logSweep('refused: another sweep is still running');
+    const error = new Error(
+      'A sweep is already running. Wait for it to finish before starting ' +
+        'another: its outcome is in the daemon status and the daemon log.',
+    );
+    error.code = 'SWEEP_IN_PROGRESS';
+    throw error;
+  }
+
   const { ready, blocked } = partitionSweepSources();
 
   logSweep(
@@ -150,20 +245,46 @@ export async function executeSweep(destination, { force = false } = {}) {
     throw new Error(`${blocked.length} source(s) are not ready to sweep.`);
   }
 
+  const record = {
+    id,
+    state: 'running',
+    destination,
+    force,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    legs: [],
+    result: null,
+    error: null,
+  };
+  sweepRecord = record;
+  sweepRunning = true;
+
   try {
-    const result = await sweepReadySources(ready, destination);
+    const result = await sweepReadySources(ready, destination, record);
     logSweep(
       `finished: ${result.hashes.length} transaction(s), ` +
         `sent=${result.totalSent} fee=${result.totalFee}`,
     );
+    record.state = 'finished';
+    record.result = result;
     return result;
   } catch (error) {
     logSweep(`failed: ${error?.stack ?? error}`);
+    const sent = describeBroadcastLegs(record);
+    if (sent.length > 0) {
+      error.message +=
+        `\nAlready broadcast before this, and not undone:\n` + sent.join('\n');
+    }
+    record.state = 'failed';
+    record.error = error.message;
     throw error;
+  } finally {
+    record.finishedAt = new Date().toISOString();
+    sweepRunning = false;
   }
 }
 
-async function sweepReadySources(ready, destination) {
+async function sweepReadySources(ready, destination, record) {
   const hashes = [];
   let totalSent = 0;
   let totalFee = 0;
@@ -195,6 +316,7 @@ async function sweepReadySources(ready, destination) {
             OUT_NAV | OUT_STAKED,
           ),
         nav,
+        record,
       );
       hashes.push(...navResult.hashes);
       totalSent += navResult.sent;
@@ -214,6 +336,7 @@ async function sweepReadySources(ready, destination) {
             true,
           ),
         xnav,
+        record,
       );
       hashes.push(...xnavResult.hashes);
       totalSent += xnavResult.sent;
@@ -224,12 +347,55 @@ async function sweepReadySources(ready, destination) {
   return { hashes, totalSent, totalFee };
 }
 
-async function broadcastLeg(state, label, createTx, amount) {
-  const leg = `${describeSource(state)} ${label}`;
+async function broadcastLeg(state, label, createTx, amount, record) {
+  const source = describeSource(state);
+  // 'building', then 'broadcasting', then 'broadcast'; or 'failed' when the
+  // leg certainly did not go out, or 'unknown' when it may have.
+  const legRecord = {
+    source,
+    label,
+    amount,
+    status: 'building',
+    hashes: [],
+    error: null,
+  };
+  record.legs.push(legRecord);
+
+  try {
+    return await runLeg(state, label, createTx, amount, legRecord);
+  } catch (error) {
+    if (legRecord.status !== 'unknown') legRecord.status = 'failed';
+    legRecord.error = error.message;
+    throw error;
+  }
+}
+
+async function runLeg(state, label, createTx, amount, legRecord) {
+  const leg = `${legRecord.source} ${label}`;
+
+  // Without a connection navcoin-js has no client: it builds from what the
+  // wallet database holds and then reports a broadcast that sent nothing.
+  if (!state.connected) {
+    logSweep(`${leg}: not started, no server connection`);
+    throw new Error(
+      `${label} for source ${state.sourceId} was not broadcast: the wallet ` +
+        `has no server connection. Wait for it to reconnect and sweep again.`,
+    );
+  }
 
   logSweep(`${leg}: building transaction for ${amount}`);
   const buildStart = Date.now();
-  const tx = await createTx();
+  let tx;
+  try {
+    tx = await untilInterrupted(createTx(), state, SWEEP_BUILD_TIMEOUT_MS);
+  } catch (error) {
+    if (!(error instanceof SweepStepInterrupted)) throw error;
+    logSweep(`${leg}: build interrupted, ${error.message}`);
+    throw new Error(
+      `${label} for source ${state.sourceId} was not broadcast: ` +
+        `${error.message} while the transaction was being built.`,
+    );
+  }
   if (!tx || !tx.tx) {
     logSweep(`${leg}: build returned no transaction`);
     throw new Error(
@@ -241,11 +407,45 @@ async function broadcastLeg(state, label, createTx, amount) {
       `broadcasting via ${state.server ?? 'no server'}`,
   );
 
+  legRecord.status = 'broadcasting';
   const sendStart = Date.now();
-  const result = await state.wallet.SendTransaction(tx.tx);
+  const sending = state.wallet.SendTransaction(tx.tx);
+  let result;
+  try {
+    result = await untilInterrupted(sending, state, SWEEP_BROADCAST_TIMEOUT_MS);
+  } catch (error) {
+    if (!(error instanceof SweepStepInterrupted)) throw error;
+    logSweep(
+      `${leg}: broadcast outcome unknown after ${Date.now() - sendStart}ms, ` +
+        `${error.message}`,
+    );
+    // The request was already sent. If an answer still arrives, the log is
+    // the only place left that can record it.
+    sending.then(
+      (late) =>
+        logSweep(
+          `${leg}: late broadcast answer, hashes=` +
+            `${(late?.hashes ?? []).filter(Boolean).join(',') || 'none'}` +
+            `${late?.error ? ` error=${late.error}` : ''}`,
+        ),
+      (lateError) => logSweep(`${leg}: late broadcast error: ${lateError}`),
+    );
+    legRecord.status = 'unknown';
+    const unknown = new Error(
+      `${label} broadcast for source ${state.sourceId} has an unknown ` +
+        `outcome: ${error.message} before it confirmed the transaction. ` +
+        `It may or may not have gone out. Check the destination address on ` +
+        `a block explorer before sweeping again.`,
+    );
+    unknown.code = 'SWEEP_OUTCOME_UNKNOWN';
+    throw unknown;
+  }
+
   // navcoin-js can send a leg as several transactions; on a failure the
-  // ones already out are only in `hashes`, which the error below drops.
-  const sentHashes = (result.hashes ?? []).filter(Boolean).join(',') || 'none';
+  // ones already out are only in `hashes`.
+  const hashes = (result.hashes ?? []).filter(Boolean);
+  legRecord.hashes = hashes;
+  const sentHashes = hashes.join(',') || 'none';
   if (result.error) {
     logSweep(
       `${leg}: broadcast rejected after ${Date.now() - sendStart}ms, ` +
@@ -255,13 +455,23 @@ async function broadcastLeg(state, label, createTx, amount) {
       `${label} broadcast failed for source ${state.sourceId}: ${result.error}`,
     );
   }
+  // navcoin-js reports success with no transaction id when its client is
+  // gone, having sent nothing.
+  if (hashes.length === 0) {
+    logSweep(`${leg}: broadcast returned no transaction id; nothing sent`);
+    throw new Error(
+      `${label} for source ${state.sourceId} was not broadcast: the wallet ` +
+        `lost its server connection. Wait for it to reconnect and sweep again.`,
+    );
+  }
   logSweep(
     `${leg}: broadcast in ${Date.now() - sendStart}ms, hashes=${sentHashes}`,
   );
 
+  legRecord.status = 'broadcast';
   const fee = tx.fee ?? 0;
   return {
-    hashes: result.hashes ?? [],
+    hashes,
     sent: amount - fee,
     fee,
   };

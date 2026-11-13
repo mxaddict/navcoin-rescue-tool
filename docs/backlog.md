@@ -251,48 +251,44 @@ electrum server answering busy` on `ubuntu-24.04-arm`. Mechanism, found by
   function's comment; noted here because it surprises anyone comparing against
   `navcoin-cli` output.
 
-## Sweep "fetch failed": what is known and not fixed
+## Sweep guards: what is left
 
-A user on v0.2.9 (macOS Intel) saw `Sweep failed: fetch failed` after
-"Broadcasting...". Their daemon log has no v0.2.9 start in it: the v0.2.8
-daemon started on 2026-11-11 was still running, and the v0.2.9 TUI reused
-it without checking its version (fixed, see the section above), so the
-sweep ran on v0.2.8 code with no sweep logging. The log shows that
-daemon's connection still resetting every few seconds to its last line. Sweep-step
-logging and the fetch cause in client errors were added so the next report
-can tell the cases below apart. A read-only review of the sweep path
-(2026-11-13) ranked the causes; the first two items were re-checked by
-reading navcoin-js 1.1.182 and electrum-client-js 0.1.14.
+A user on v0.2.9 saw `Sweep failed: fetch failed` after "Broadcasting...",
+from a sweep that hung on a broadcast the server never answered. `sweep.js`
+now interrupts a leg when its source loses the connection or the server
+stays silent past a timeout, refuses a second sweep while one runs, treats
+a broadcast with no transaction id as not sent, lists the legs already
+broadcast in the error of a sweep that then fails, and keeps the last
+sweep's record for `/status`, which the CLI and TUI follow when the reply
+to `/sweep/confirm` is lost. What that leaves open:
 
-- **A broadcast in flight when the connection drops never settles.**
-  `onClose` in electrum-client-js `socket_client.js` deletes every pending
-  callback without calling it, and our failover deliberately leaves them
-  (see "Electrum failover: what is left"). `executeSweep` then waits
-  forever, `/sweep/confirm` never replies, and the client's fetch gives up
-  after undici's 300 s `headersTimeout`, reported as `fetch failed`. The
-  server may already have the transaction. The most likely cause given
-  servers that reset within seconds; not reproduced. A fix needs a
-  timeout on each sweep request that still reports what may have gone
-  out, not just a rejection, because the outcome is unknown.
-- **`SendTransactionSingle` reports success with no hash when there is no
-  client** (`if (!this.client) return;`), so `broadcastLeg` counts a leg
-  that never went out. The sweep log shows it as `hashes=none`; nothing
-  refuses it yet.
-- **Nothing stops a second sweep while one runs.** `executeSweep` has no
-  in-flight lock and does not stop when its client disconnects, so a user
-  who retries after `fetch failed` can start a concurrent sweep over the
-  same UTXOs while the first is still pending. From the review; not
-  reproduced.
-- **A leg's partial hashes are lost on failure.** When `SendTransaction`
-  sends several transactions and a later one fails, it returns
-  `{ hashes: [first], error }`; `broadcastLeg` throws without them, so the
-  error reply drops a hash that did go out. The return shape was read in
-  `SendTransaction`; the sweep log now records those hashes, the reply to
-  the client still does not. Whether a sweep leg is ever sent as several
-  transactions was not checked.
-- **Coverage gap:** the review used Node 26 and the repo's undici 6.28 as
-  stand-ins for the Node 22.11 the release bundles; the 300 s default there
-  is assumed, not checked.
+- **An interrupted broadcast is reported as outcome unknown, with no
+  transaction id.** Considered and declined: computing the id locally from
+  the signed transaction, so the user could look it up. It could not be
+  verified here that `@aguycalled/bitcore-lib` yields the network's id for
+  NavCoin transactions (the fixture transactions are fakes and need the
+  BLS library initialised to parse), and a wrong id is worse than none.
+  Worth doing if it can be checked against a real broadcast.
+- **The timeouts are guesses.** `SWEEP_BUILD_TIMEOUT_MS` and
+  `SWEEP_BROADCAST_TIMEOUT_MS` in `sweep.js` were not measured against a
+  real xNAV build on slow hardware or a real server. A build that honestly
+  takes longer than its timeout is reported as not broadcast, which is
+  true, but that source cannot be swept until the constant is raised.
+  Nothing was broadcast in that case, so raising it is safe.
+- **The GUI does not follow a lost sweep.** `sweepConfirm` in
+  `gui/src/lib/daemon.js` is its own client and sends no sweep id; it shows
+  the error and stops. The record is on `/status` for it to use.
+- **The sweep record is lost on a daemon restart.** It lives in memory in
+  `sweep.js`. A client following a sweep then reports that the daemon has
+  no record of it and to check the log, which does survive.
+- **Coverage gap: the `/sweep/confirm` route's part is not run end to
+  end.** `executeSweep`, `getSweepStatus` and the client's following are
+  tested against mock wallets and a fake daemon; that `daemon.js` passes
+  `sweepId` through and puts `code` on its error reply was read, not
+  exercised by a test with a real daemon and a real sweep.
+- **Coverage gap:** the 300 s after which fetch gives up waiting for the
+  reply was read in the repo's undici 6.28, not in the Node 22.11 the
+  release bundles.
 
 ## Codebase review 2026-11-08: findings not fixed
 

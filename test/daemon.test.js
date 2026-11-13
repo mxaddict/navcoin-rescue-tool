@@ -72,6 +72,9 @@ test('daemon status requires auth cookie and supports stop', async () => {
     // to sit at the top level of the reply and carry the real version.
     const reply = await authorized.json();
     assert.equal(reply.version, APP_VERSION);
+    // Present and null before any sweep, so a client following a sweep
+    // can tell "none yet" from a daemon too old to report one.
+    assert.equal(reply.sweep, null);
 
     const status = await getDaemonStatus(root);
     assert.equal(status.daemon.status, 'running');

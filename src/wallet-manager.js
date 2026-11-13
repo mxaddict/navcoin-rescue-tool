@@ -148,6 +148,9 @@ function makeInitialState(sourceId, root) {
     // Set when the connection drops under a running scan: that scan is
     // abandoned and runScan starts it over once reconnected.
     scanInterrupted: false,
+    // Interrupts the sweep step waiting on this source, if any (sweep.js):
+    // a request pending when the connection drops is never answered.
+    sweepAbort: null,
     refreshPending: false,
     refreshInFlight: false,
     refreshTimer: null,
@@ -454,6 +457,7 @@ export async function openSourceWallet(source, root, navWallet) {
         state.scanInterrupted = true;
         state.scanAbort.abort();
       }
+      state.sweepAbort?.abort();
       state.statusOnConnect ??= state.syncStatus;
       setConnectionStatus(state, 'connecting');
       state.connectingAt = Date.now();
@@ -686,6 +690,7 @@ export async function closeSourceWallet(sourceId) {
   if (!state) return;
   state.closing = true;
   state.scanAbort?.abort();
+  state.sweepAbort?.abort();
 
   clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;

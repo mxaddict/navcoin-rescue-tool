@@ -792,6 +792,14 @@ export async function cmdSweep(C, root, log, ask) {
   try {
     const response = await sweepConfirm(destination, 'SEND MY COINS', root, {
       force,
+      onLostReply: (error) => {
+        log(C.pink(`  Lost the daemon's reply: ${error.message}`));
+        log(
+          C.muted(
+            '  The sweep may still be running there. Waiting for its outcome...',
+          ),
+        );
+      },
     });
     const result = response.result;
     log(C.teal('  Sweep broadcast successfully.'));
@@ -803,7 +811,11 @@ export async function cmdSweep(C, root, log, ask) {
       for (const h of result.hashes) log(`    ${C.magenta(h)}`);
     }
   } catch (error) {
-    log(C.pink(`  Sweep failed: ${error.message}`));
+    // The message can run to several lines: a sweep that failed part-way
+    // lists what was already broadcast.
+    const [first, ...rest] = String(error.message).split('\n');
+    log(C.pink(`  Sweep failed: ${first}`));
+    for (const line of rest) log(C.pink(`  ${line}`));
   }
 }
 

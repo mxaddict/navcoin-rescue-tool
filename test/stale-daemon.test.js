@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
-import http from 'node:http';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
@@ -13,6 +12,7 @@ import {
   getProjectRoot,
   killPortHolders,
   makeProjectTempDir,
+  startFakeDaemon,
   startStubElectrumServer,
   TEST_DAEMON_PORT,
 } from './test-helpers.js';
@@ -49,34 +49,12 @@ function appDataRoot(base) {
 
 // Answers /status with the given version and, like the real one, replies
 // to /daemon/stop and then lets go of the port.
-function startFakeDaemon(version) {
-  const requests = [];
-  const server = http.createServer((request, response) => {
-    requests.push(`${request.method} ${request.url}`);
-    response.writeHead(200, { 'Content-Type': 'application/json' });
-    if (request.url === '/daemon/stop') {
-      response.end(JSON.stringify({ ok: true }), () => {
-        server.close();
-        server.closeAllConnections();
-      });
-      return;
-    }
-    response.end(JSON.stringify({ version, daemon: { pid: 4739 } }));
-  });
-  const closed = new Promise((resolve) => server.once('close', resolve));
-  return new Promise((resolve) => {
-    server.listen(TEST_DAEMON_PORT, '127.0.0.1', () =>
-      resolve({
-        requests,
-        closed,
-        close: () => {
-          server.close();
-          server.closeAllConnections();
-          return closed;
-        },
-      }),
-    );
-  });
+function startVersionedDaemon(version) {
+  return startFakeDaemon(({ url }) =>
+    url === '/daemon/stop'
+      ? { stop: true, json: { ok: true } }
+      : { version, daemon: { pid: 4739 } },
+  );
 }
 
 function runCli(base, args) {
@@ -132,7 +110,7 @@ async function waitForPortFree(root) {
 
 test('ntr start replaces a daemon left running by another version', async () => {
   await withAppData('stale-cli', async ({ base, root }) => {
-    const fake = await startFakeDaemon('0.2.8');
+    const fake = await startVersionedDaemon('0.2.8');
 
     const result = await runCli(base, ['start']);
     assert.equal(result.code, 0, result.stderr);
@@ -150,7 +128,7 @@ test('ntr start replaces a daemon left running by another version', async () => 
 
 test('ntr start leaves a daemon of the same version running', async () => {
   await withAppData('current-cli', async ({ base }) => {
-    const fake = await startFakeDaemon(APP_VERSION);
+    const fake = await startVersionedDaemon(APP_VERSION);
     try {
       const result = await runCli(base, ['start']);
       assert.equal(result.code, 0, result.stderr);
@@ -164,7 +142,7 @@ test('ntr start leaves a daemon of the same version running', async () => {
 
 test('the TUI replaces a daemon left running by another version', async () => {
   await withAppData('stale-tui', async ({ root }) => {
-    const fake = await startFakeDaemon('0.2.8');
+    const fake = await startVersionedDaemon('0.2.8');
     const lines = [];
     const previousNodes = process.env.NTR_ELECTRUM_NODES;
     process.env.NTR_ELECTRUM_NODES = `127.0.0.1:${stub.port}:ws`;

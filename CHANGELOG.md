@@ -13,6 +13,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- A sweep no longer hangs when a server drops the connection or stops
+  answering while a transaction is being broadcast. It ends with "unknown
+  outcome", at once on a drop and after two minutes of silence, and says to
+  check the destination address before sweeping again, since the
+  transaction may have gone out. A drop while a transaction is still being
+  built ends with "was not broadcast".
+- A sweep that fails part-way now lists the transactions already
+  broadcast, in the error itself. Before, only the failure was shown.
+- A broadcast from a wallet with no server connection is reported as not
+  sent. navcoin-js reported it as a success with no transaction id.
+- Only one sweep runs at a time. A second one, such as a retry after a
+  lost reply, is refused until the first has ended.
+- When the CLI or TUI loses the daemon's reply to a sweep, it waits for
+  the sweep's outcome and shows it, instead of `fetch failed`. The CLI no
+  longer reports that case as "No running daemon found".
+
+### Added
+
+- `/status` reports the running or last sweep as `sweep`: its state, each
+  leg with its transaction ids, and the result or error.
 
 ## [0.2.10] - 2026-11-13
 

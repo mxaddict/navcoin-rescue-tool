@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 
@@ -434,4 +435,56 @@ export function waitForExit(child) {
     return Promise.resolve();
   }
   return new Promise((resolve) => child.once('exit', resolve));
+}
+
+// A stand-in for the daemon on the test port, for tests of how a client
+// treats what a daemon says. `handle({ method, url, body })` returns the
+// JSON to answer with, or an object with `status` and `json`; returning
+// `{ destroy: true }` drops the connection unanswered, and `{ stop: true }`
+// answers and then lets go of the port, the way /daemon/stop does.
+// Resolves to { requests, closed, close }: the "METHOD url" of every
+// request so far, a promise for the port being released, and a way to
+// release it.
+export function startFakeDaemon(handle) {
+  const requests = [];
+  const release = () => {
+    server.close();
+    server.closeAllConnections();
+  };
+  const server = http.createServer(async (request, response) => {
+    requests.push(`${request.method} ${request.url}`);
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const text = Buffer.concat(chunks).toString('utf8');
+
+    const answer = await handle({
+      method: request.method,
+      url: request.url,
+      body: text ? JSON.parse(text) : null,
+    });
+    if (answer.destroy) {
+      request.socket.destroy();
+      return;
+    }
+    response.writeHead(answer.status ?? 200, {
+      'Content-Type': 'application/json',
+    });
+    response.end(
+      JSON.stringify(answer.json ?? answer),
+      answer.stop ? release : undefined,
+    );
+  });
+  const closed = new Promise((resolve) => server.once('close', resolve));
+  return new Promise((resolve) => {
+    server.listen(TEST_DAEMON_PORT, '127.0.0.1', () =>
+      resolve({
+        requests,
+        closed,
+        close: () => {
+          release();
+          return closed;
+        },
+      }),
+    );
+  });
 }

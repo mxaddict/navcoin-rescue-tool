@@ -4,7 +4,13 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 
 import { bootstrapAppData } from '../src/app-data.js';
-import { executeSweep, prepareSweep } from '../src/sweep.js';
+import {
+  executeSweep,
+  getSweepStatus,
+  prepareSweep,
+  SWEEP_BROADCAST_TIMEOUT_MS,
+  SWEEP_BUILD_TIMEOUT_MS,
+} from '../src/sweep.js';
 import {
   openSourceWallet,
   closeSourceWallet,
@@ -890,4 +896,235 @@ test('a failed broadcast is logged with what already went out', async (t) => {
     resetElectrumNodeSelectionCache();
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+// One open, synced mock source per test, with the wallet options given.
+async function withSweepSource(name, walletOpts, body) {
+  const root = await makeProjectTempDir(`sweep-${name}`);
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: `src-${name}`, type: 'mnemonic', label: name };
+    await openSourceWallet(source, root, makeNavWallet(walletOpts));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await body(getSourceState(source.id));
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+// A request the server never answers: what navcoin-js's electrum client
+// leaves behind when the socket closes under it.
+const NEVER = new Promise(() => {});
+
+async function untilLegStatus(status) {
+  while (getSweepStatus()?.legs.at(-1)?.status !== status) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+// From a user's sweep that ended in "fetch failed": the broadcast was in
+// flight when the server reset the connection, the request was never
+// answered, and the sweep waited on it for ever.
+test('a broadcast caught by a dropped connection ends as outcome unknown', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource('drop-send', { _sendResult: NEVER }, async (state) => {
+    const sweeping = executeSweep('NDestinationAddr1', { id: 'sweep-1' });
+    await untilLegStatus('broadcasting');
+    state.wallet.emit('disconnected');
+
+    await assert.rejects(sweeping, (error) => {
+      assert.equal(error.code, 'SWEEP_OUTCOME_UNKNOWN');
+      assert.match(error.message, /unknown outcome/);
+      assert.match(error.message, /the server connection dropped/);
+      assert.match(error.message, /block explorer before sweeping again/);
+      return true;
+    });
+
+    const sweep = getSweepStatus();
+    assert.equal(sweep.id, 'sweep-1');
+    assert.equal(sweep.state, 'failed');
+    assert.equal(sweep.legs.length, 1);
+    assert.equal(sweep.legs[0].status, 'unknown');
+    assert.ok(sweep.finishedAt);
+  });
+});
+
+test('a build caught by a dropped connection broadcasts nothing', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource('drop-build', { _txResult: NEVER }, async (state) => {
+    const sweeping = executeSweep('NDestinationAddr1');
+    await untilLegStatus('building');
+    state.wallet.emit('disconnected');
+
+    await assert.rejects(sweeping, (error) => {
+      assert.equal(error.code, undefined);
+      assert.match(error.message, /was not broadcast/);
+      assert.match(error.message, /while the transaction was being built/);
+      return true;
+    });
+    assert.equal(state.wallet._lastSentTx, undefined);
+    assert.equal(getSweepStatus().legs[0].status, 'failed');
+  });
+});
+
+// The last resort, for a server that keeps the connection open and says
+// nothing: without it the sweep, and the lock that keeps a second one
+// out, would be held until the daemon restarts.
+test('a broadcast the server never answers times out as outcome unknown', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource('silent-send', { _sendResult: NEVER }, async () => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const sweeping = executeSweep('NDestinationAddr1');
+    await untilLegStatus('broadcasting');
+
+    t.mock.timers.tick(SWEEP_BROADCAST_TIMEOUT_MS - 1);
+    assert.equal(getSweepStatus().state, 'running');
+    t.mock.timers.tick(1);
+
+    await assert.rejects(sweeping, (error) => {
+      assert.equal(error.code, 'SWEEP_OUTCOME_UNKNOWN');
+      assert.match(error.message, /did not answer within/);
+      return true;
+    });
+    t.mock.timers.reset();
+  });
+});
+
+test('a build the server never answers times out without broadcasting', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource('silent-build', { _txResult: NEVER }, async (state) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const sweeping = executeSweep('NDestinationAddr1');
+    await untilLegStatus('building');
+
+    t.mock.timers.tick(SWEEP_BUILD_TIMEOUT_MS);
+
+    await assert.rejects(
+      sweeping,
+      /was not broadcast: the server did not answer/,
+    );
+    assert.equal(state.wallet._lastSentTx, undefined);
+    t.mock.timers.reset();
+  });
+});
+
+// A user who retries after a failed request must not start a second sweep
+// over the same coins while the first is still waiting on its broadcast.
+test('a second sweep is refused while one is running, and allowed after', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource('lock', { _sendResult: NEVER }, async (state) => {
+    const first = executeSweep('NDestinationAddr1', { id: 'first' });
+    await untilLegStatus('broadcasting');
+
+    await assert.rejects(executeSweep('NDestinationAddr1', { id: 'second' }), {
+      code: 'SWEEP_IN_PROGRESS',
+    });
+    // The refused attempt must not replace the record of the running one.
+    assert.equal(getSweepStatus().id, 'first');
+    assert.equal(getSweepStatus().state, 'running');
+
+    state.wallet.emit('disconnected');
+    await assert.rejects(first, { code: 'SWEEP_OUTCOME_UNKNOWN' });
+
+    // The lock goes with the sweep, even one that failed. The source has
+    // just lost its connection, so this attempt fails too, but no longer
+    // as a second sweep.
+    await assert.rejects(executeSweep('NDestinationAddr1'), (error) => {
+      assert.notEqual(error.code, 'SWEEP_IN_PROGRESS');
+      return true;
+    });
+  });
+});
+
+// navcoin-js builds from the wallet database and then reports success
+// with no transaction id when it has no client: nothing was sent.
+test('a source with no connection is not reported as swept', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource('offline', {}, async (state) => {
+    state.connected = false;
+
+    await assert.rejects(
+      executeSweep('NDestinationAddr1'),
+      /was not broadcast: the wallet has no server connection/,
+    );
+    assert.equal(state.wallet._lastSentTx, undefined);
+  });
+});
+
+test('a broadcast answered with no transaction id is not a success', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource(
+    'no-hash',
+    { _sendResult: { hashes: [undefined], error: undefined } },
+    async () => {
+      await assert.rejects(
+        executeSweep('NDestinationAddr1'),
+        /was not broadcast: the wallet lost its server connection/,
+      );
+      assert.equal(getSweepStatus().legs[0].status, 'failed');
+    },
+  );
+});
+
+test('a sweep that fails names the legs already broadcast', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource(
+    'partial',
+    {
+      _balance: {
+        nav: { confirmed: 4_0000_0000, pending: 0 },
+        xnav: { confirmed: 6_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _xnavTxResult: { tx: 'xnavhex', fee: 25_000 },
+      _sendResultQueue: [
+        { hashes: ['nav-hash'], error: null },
+        { hashes: [], error: 'server busy - request timed out' },
+      ],
+    },
+    async () => {
+      await assert.rejects(executeSweep('NDestinationAddr1'), (error) => {
+        assert.match(error.message, /xNAV broadcast failed/);
+        assert.match(
+          error.message,
+          /Already broadcast before this, and not undone:\n {2}NAV from src-partial: nav-hash$/,
+        );
+        return true;
+      });
+
+      const sweep = getSweepStatus();
+      assert.deepEqual(
+        sweep.legs.map((leg) => [leg.label, leg.status, leg.hashes]),
+        [
+          ['NAV', 'broadcast', ['nav-hash']],
+          ['xNAV', 'failed', []],
+        ],
+      );
+      assert.match(sweep.error, /Already broadcast before this/);
+    },
+  );
+});
+
+test('a finished sweep is kept as the daemon status record', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource('record', {}, async () => {
+    const result = await executeSweep('NDestinationAddr1', { id: 'done-1' });
+
+    const sweep = getSweepStatus();
+    assert.equal(sweep.id, 'done-1');
+    assert.equal(sweep.state, 'finished');
+    assert.equal(sweep.destination, 'NDestinationAddr1');
+    assert.deepEqual(sweep.result, result);
+    assert.deepEqual(sweep.result.hashes, ['abc123']);
+    assert.equal(sweep.legs[0].status, 'broadcast');
+    assert.equal(sweep.error, null);
+  });
 });

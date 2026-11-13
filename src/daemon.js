@@ -26,7 +26,7 @@ import {
   readSources,
   purgeAllSources,
 } from './source-registry.js';
-import { executeSweep, prepareSweep } from './sweep.js';
+import { executeSweep, getSweepStatus, prepareSweep } from './sweep.js';
 import {
   openSourceWallet,
   closeSourceWallet,
@@ -221,6 +221,10 @@ async function main() {
         sourceCount: sources.length,
         appData: status.layout.root,
         sources,
+        // The sweep running now or the last one run, null before the
+        // first: how a client that lost the reply to /sweep/confirm finds
+        // out what was broadcast.
+        sweep: getSweepStatus(),
       });
       return;
     }
@@ -368,10 +372,18 @@ async function main() {
         const force = body.force === true;
         prepareSweep({ force });
 
-        const result = await executeSweep(body.destination, { force });
+        const result = await executeSweep(body.destination, {
+          force,
+          id: typeof body.sweepId === 'string' ? body.sweepId : null,
+        });
         sendJson(response, 200, { result });
       } catch (error) {
-        sendJson(response, 400, { error: error.message });
+        // `code` tells a client a sweep already running, or one whose
+        // outcome is unknown, from an ordinary failure.
+        sendJson(response, 400, {
+          error: error.message,
+          ...(error.code ? { code: error.code } : {}),
+        });
       }
       return;
     }

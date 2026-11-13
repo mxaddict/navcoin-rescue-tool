@@ -16,21 +16,39 @@ function sweepBlockReason(state) {
   return null;
 }
 
-// Split the open wallets into the ones a sweep can spend from and the
-// ones it cannot. Both `prepareSweep` and `executeSweep` go through this
-// so the preview and the broadcast can never disagree about which
-// sources are in.
-function partitionSweepSources() {
+// Split the sources into the ones a sweep can spend from and the ones it
+// cannot. Both `prepareSweep` and `executeSweep` go through this so the
+// preview and the broadcast can never disagree about which sources are in.
+//
+// `registered` is every source in the registry. One with no open wallet
+// has no live state to look at: its wallet is still being built after an
+// import, or failed to build. It holds an unknown balance like any other
+// unsynced source, so it blocks the sweep the same way instead of being
+// left out without a word.
+function partitionSweepSources(registered) {
   const ready = [];
   const blocked = [];
+  const open = new Set();
 
   for (const state of listSourceStates()) {
+    open.add(state.sourceId);
     const reason = sweepBlockReason(state);
     if (reason) {
       blocked.push({ state, reason });
     } else {
       ready.push(state);
     }
+  }
+
+  for (const source of registered) {
+    if (open.has(source.id)) continue;
+    blocked.push({
+      // Just enough of a state for the messages that name a blocker.
+      state: { sourceId: source.id, walletType: source.walletType ?? null },
+      reason: source.error
+        ? `wallet could not be opened: ${source.error}`
+        : 'wallet not opened yet',
+    });
   }
 
   return { ready, blocked };
@@ -50,15 +68,17 @@ function partitionSweepSources() {
  *
  * Throws if a source is not synced, unless `force` is set — then that
  * source is excluded from the sweep and reported in `skipped`.
+ *
+ * `registered` is every source in the registry, so that one whose wallet
+ * is not open counts as not synced too.
  */
-export function prepareSweep({ force = false } = {}) {
-  const states = listSourceStates();
+export function prepareSweep({ force = false, registered = [] } = {}) {
+  const { ready, blocked } = partitionSweepSources(registered);
+  const total = ready.length + blocked.length;
 
-  if (states.length === 0) {
+  if (total === 0) {
     throw new Error('No imported sources. Import a wallet before sweeping.');
   }
-
-  const { ready, blocked } = partitionSweepSources();
 
   // An unsynced source has an unknown balance, so sweeping around it can
   // leave coins behind with nothing saying so. Every blocker is listed
@@ -70,7 +90,7 @@ export function prepareSweep({ force = false } = {}) {
     );
 
     throw new Error(
-      `${blocked.length} of ${states.length} sources are not ready to sweep:\n` +
+      `${blocked.length} of ${total} sources are not ready to sweep:\n` +
         `${lines.join('\n')}\n` +
         `Wait for them to finish syncing, or force the sweep to skip them ` +
         `and send only what the ${ready.length} ready source(s) hold.`,
@@ -217,11 +237,11 @@ function describeBroadcastLegs(record) {
  * same `force`, so what is broadcast is what the preview showed.
  *
  * `id` names the sweep in `getSweepStatus`, so a client can tell the sweep
- * it asked for from an earlier one.
+ * it asked for from an earlier one. `registered` is as for `prepareSweep`.
  */
 export async function executeSweep(
   destination,
-  { force = false, id = null } = {},
+  { force = false, id = null, registered = [] } = {},
 ) {
   if (sweepRunning) {
     logSweep('refused: another sweep is still running');
@@ -233,7 +253,7 @@ export async function executeSweep(
     throw error;
   }
 
-  const { ready, blocked } = partitionSweepSources();
+  const { ready, blocked } = partitionSweepSources(registered);
 
   logSweep(
     `start: destination=${destination} ready=${ready.length} ` +

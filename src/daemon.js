@@ -376,7 +376,11 @@ async function main() {
     if (request.method === 'POST' && request.url === '/sweep/prepare') {
       try {
         const body = await readJsonBody(request);
-        const preview = prepareSweep({ force: body.force === true });
+        const { sources: registered } = await readSources(root);
+        const preview = prepareSweep({
+          force: body.force === true,
+          registered,
+        });
         sendJson(response, 200, { preview });
       } catch (error) {
         sendJson(response, 400, { error: error.message });
@@ -403,10 +407,12 @@ async function main() {
         // has to be asked for again rather than inherited from the
         // preview the user was shown.
         const force = body.force === true;
-        prepareSweep({ force });
+        const { sources: registered } = await readSources(root);
+        prepareSweep({ force, registered });
 
         const result = await executeSweep(body.destination, {
           force,
+          registered,
           id: typeof body.sweepId === 'string' ? body.sweepId : null,
         });
         sendJson(response, 200, { result });

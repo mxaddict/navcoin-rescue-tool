@@ -1128,3 +1128,72 @@ test('a finished sweep is kept as the daemon status record', async (t) => {
     assert.equal(sweep.error, null);
   });
 });
+
+// A source has no live state until its wallet is built and opened. The
+// sweep looked only at live states, so sweeping while a just-imported
+// phrase was still being built, or after a wallet failed to build, swept
+// the others and reported success with that source nowhere in sight.
+test('a registered source with no open wallet blocks the sweep', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource('registered', {}, async (state) => {
+    const registered = [
+      { id: state.sourceId },
+      { id: 'still-building', walletType: 'navpay' },
+      { id: 'never-built', walletType: 'next', error: 'worker timed out' },
+    ];
+
+    assert.throws(
+      () => prepareSweep({ registered }),
+      (error) => {
+        assert.match(error.message, /^2 of 3 sources are not ready to sweep:/);
+        assert.match(
+          error.message,
+          /still-building \(navpay\) — wallet not opened yet/,
+        );
+        assert.match(
+          error.message,
+          /never-built \(next\) — wallet could not be opened: worker timed out/,
+        );
+        return true;
+      },
+    );
+    await assert.rejects(
+      executeSweep('NDestinationAddr1', { registered }),
+      /2 source\(s\) are not ready to sweep/,
+    );
+    assert.equal(state.wallet._lastSentTx, undefined);
+
+    // Forced, it sweeps what is ready and names what it left out.
+    const preview = prepareSweep({ force: true, registered });
+    assert.deepEqual(
+      preview.sources.map((source) => source.sourceId),
+      [state.sourceId],
+    );
+    assert.deepEqual(
+      preview.skipped.map((source) => [source.sourceId, source.walletType]),
+      [
+        ['still-building', 'navpay'],
+        ['never-built', 'next'],
+      ],
+    );
+    const result = await executeSweep('NDestinationAddr1', {
+      force: true,
+      registered,
+    });
+    assert.deepEqual(result.hashes, ['abc123']);
+  });
+});
+
+test('registered sources with no wallet open at all are not "no sources"', async () => {
+  const registered = [{ id: 'still-building', walletType: 'navpay' }];
+
+  assert.throws(
+    () => prepareSweep({ registered }),
+    /Error: 1 of 1 sources are not ready to sweep:/,
+  );
+  assert.throws(
+    () => prepareSweep({ force: true, registered }),
+    /No source is ready to sweep/,
+  );
+  assert.throws(() => prepareSweep(), /No imported sources/);
+});

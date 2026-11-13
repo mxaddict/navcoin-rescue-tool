@@ -190,6 +190,16 @@ table` in a wallet-creation error.
   twice right after, with the same dependencies. The machine was busy (load
   around 6), so a timeout under load is the likely reading; not
   investigated further.
+- **`daemon imports known mnemonic and discovers NAV+xNAV balance from
+stub` stalled once** (`test/daemon.test.js`), locally on 2026-11-13 in a
+  full `npm test`: after its 90 s limit the funded source was still
+  `syncing`, in the change walk. The file then passed alone and as a whole
+  file, twice, on the same tree. Cause unknown: the test did not capture
+  the daemon's log, where a dropped connection or a scan run again after
+  failed lookups would show. It now prints the log's last lines when it
+  times out. A scan that ends with failed lookups is rerun after
+  `SCAN_RETRY_DELAY_MS`, so two such reruns alone would pass the limit;
+  whether that is what happened is a guess.
 - **Daemon tests flaked with `ENOTEMPTY` deleting their data directory.**
   `daemon survives purge then re-import of same private key` (PR #12,
   2026-11-07, `ubuntu-24.04-arm`) and, in the v0.2.10 release run on
@@ -332,15 +342,6 @@ badly each can cost a user coins. No test was written for any of them yet.
   - navcoin-js's own connect-time `sync_finished` still marks a source
     synced when no scan of ours ever ran or failed on it, which is how the
     test mocks without an electrum client become synced.
-- **High: a sweep cannot see a source that has no open wallet.**
-  `prepareSweep` and `executeSweep` in `sweep.js` look only at
-  `listSourceStates()`, and a source has no live state until its wallet
-  worker finishes. Sweeping while a just-imported phrase is still being
-  built, or after a wallet failed to build, previews and sweeps the other
-  sources and reports success, with the missing one neither blocking nor
-  listed under `skipped`. From the reviewer, by reading; not run. Fix: in
-  both sweep routes, treat every registered source without live state as
-  blocked.
 - **Medium: `/remove` or `/purge` during a background wallet creation.**
   The creation chain in the `/import` handler is not tracked, the two
   routes do not wait for it, and its `.then` opens the source without

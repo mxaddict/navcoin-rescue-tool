@@ -13,6 +13,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- A sweep no longer leaves out a source whose wallet is not open yet.
+  Sweeping while a just-imported phrase was still being set up, or after a
+  wallet failed to build, swept the other sources and reported success,
+  with that source neither blocking the sweep nor listed as skipped. It
+  now blocks the sweep like any unsynced source, and is listed under
+  skipped when the sweep is forced.
 - A source whose wallet was never built no longer shows as an empty,
   synced wallet. If the daemon or computer stopped during an import, or a
   wallet failed to build, the source was left registered with no wallet

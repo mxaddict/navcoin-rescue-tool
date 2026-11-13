@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { bootstrapAppData } from '../src/app-data.js';
 import { getNavWallet } from '../src/navcoin-js-adapter.js';
+import { cacheTransactionsOnce } from '../src/tx-cache.js';
 import {
   closeAllWallets,
   getSourceState,
@@ -109,4 +110,36 @@ test('concurrent lookups of one transaction store it once, without error', async
   const cached = await wallet.db.GetTx(txid);
   assert.equal(cached.hex, fixture.transactions[txid]);
   assert.ok(cached.height > 0, 'the cached copy kept its height');
+});
+
+// navcoin-js's own AddTx logs a failed insert and returns; its callers
+// await it without handling a rejection. The replacement threw every
+// failure but a duplicate key into them.
+test('a cache insert that fails for another reason is logged, not thrown', async (t) => {
+  const failure = new Error('disk is full');
+  failure.name = 'UnknownError';
+  const wallet = {
+    db: {
+      AddTx: async () => true,
+      dbTx: {
+        txs: {
+          add: async () => {
+            throw failure;
+          },
+        },
+      },
+    },
+  };
+  cacheTransactionsOnce(wallet);
+
+  const logged = [];
+  t.mock.method(console, 'error', (...args) => logged.push(args.join(' ')));
+
+  assert.equal(await wallet.db.AddTx({ txid: 'abc', hex: '00' }), true);
+  assert.deepEqual(logged, ['AddTx error: disk is full']);
+
+  // A duplicate key is the expected outcome and says nothing.
+  failure.name = 'ConstraintError';
+  assert.equal(await wallet.db.AddTx({ txid: 'abc', hex: '00' }), true);
+  assert.equal(logged.length, 1);
 });

@@ -367,20 +367,19 @@ badly each can cost a user coins. No test was written for any of them yet.
   in-session; the window between `waitForConnected` and the scan starting
   is small and it was not reproduced.
 - **Low, from the reviewer, by reading:**
-  - `main` in `daemon.js` ends the open-every-source chain with an empty
-    catch, so a failure of `getNavWallet` or `readSources` at start logs
-    nothing and every source shows `wallet-created` with no balance.
   - A second daemon that loses the port writes `status: 'error'` into the
     shared `daemon.json` while the first is running.
-  - `/daemon/stop` does not wait for a running sweep, and both the GUI's
-    `ensure_daemon` and `stopDaemonFromOtherVersion` send it on a version
-    mismatch.
+  - `/daemon/stop`, `/purge` and `/remove` do not wait for a running
+    sweep, and both the GUI's `ensure_daemon` and
+    `stopDaemonFromOtherVersion` send a stop on a version mismatch. Closing
+    a wallet mid-broadcast now ends that leg as "outcome unknown" rather
+    than hanging. Refusing the three routes while `getSweepStatus()` is
+    running is a few lines; it was left out because a test needs a real
+    daemon holding a sweep open, which nothing in the suite sets up yet.
   - `stopDaemonFromOtherVersion` and the GUI's `wait_for_daemon_gone` take
     "port refused" for "gone", but `performShutdown` closes the listener
     before the wallets, so the replacement can start while the old process
     is still closing them.
-  - The header comment in `tx-cache.js` says a failed `AddTx` surfaces as
-    before; `addTxOnce` rethrows where upstream logged and returned.
 - **Not reviewed:** indexeddbshim internals behind `wallet-database.js`;
   key derivation per wallet type in `mnemonic.js` and `wallet-worker.js`;
   `tui.js` against blessed's real behaviour; `src-tauri/daemon-launch`

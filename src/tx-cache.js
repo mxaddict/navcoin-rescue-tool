@@ -10,7 +10,8 @@
 //
 // The row that won is the one wanted — a transaction never changes — so
 // the cache insert is made idempotent instead: a key already present is
-// the expected outcome, and any other failure still surfaces as before.
+// the expected outcome, and any other failure is logged as navcoin-js logs
+// it, without rejecting: its callers do not expect AddTx to.
 
 // Replace this wallet's insert into the transaction cache with one that
 // treats "already cached" as done.
@@ -35,7 +36,9 @@ export function cacheTransactionsOnce(wallet) {
     try {
       await this.dbTx.txs.add(tx);
     } catch (err) {
-      if (err?.name !== 'ConstraintError') throw err;
+      if (err?.name !== 'ConstraintError') {
+        console.error(`AddTx error: ${err?.message ?? err}`);
+      }
     }
     return true;
   };

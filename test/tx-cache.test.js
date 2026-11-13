@@ -13,7 +13,11 @@ import {
   openSourceWallet,
   resetElectrumNodeSelectionCache,
 } from '../src/wallet-manager.js';
-import { getProjectRoot, startStubElectrumServer } from './test-helpers.js';
+import {
+  buildWalletForSource,
+  getProjectRoot,
+  startStubElectrumServer,
+} from './test-helpers.js';
 
 // Cleared when the run starts, not when it ends: the indexeddb shim keeps
 // its sqlite files open for the life of the process.
@@ -83,6 +87,7 @@ test('concurrent lookups of one transaction store it once, without error', async
     walletType: 'navcoin-js-v1',
     lastSyncedAt: new Date().toISOString(),
   };
+  await buildWalletForSource(navWallet, source.id);
   await openSourceWallet(source, root, navWallet);
   const { wallet } = getSourceState(source.id);
   const [txid] = Object.keys(fixture.transactions);

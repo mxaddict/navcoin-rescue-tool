@@ -18,7 +18,11 @@ import {
   rescanAllSources,
   resetElectrumNodeSelectionCache,
 } from '../src/wallet-manager.js';
-import { getProjectRoot, startStubElectrumServer } from './test-helpers.js';
+import {
+  buildWalletForSource,
+  getProjectRoot,
+  startStubElectrumServer,
+} from './test-helpers.js';
 
 // Comfortably past the manager's failover delay and one connect attempt
 // against a refusing node, which fails at once.
@@ -110,6 +114,7 @@ async function openWallet({ scanned = true } = {}) {
     return registry;
   }, root);
 
+  await buildWalletForSource(navWallet, source.id);
   await openSourceWallet(source, root, navWallet);
   const state = getSourceState(source.id);
   opened.push(state);

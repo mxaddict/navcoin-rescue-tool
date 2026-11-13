@@ -98,6 +98,10 @@ async function computeBalance(wallet, outputs = undefined) {
   };
 }
 
+export const WALLET_DATABASE_MISSING =
+  'The wallet database for this source is missing or incomplete, so its ' +
+  'balance cannot be read. Remove the source and import it again.';
+
 // Per-source wallet state held in daemon memory.
 // Not persisted - rebuilt on every daemon start.
 const walletState = new Map();
@@ -152,6 +156,10 @@ function makeInitialState(sourceId, root) {
     // navcoin-js reporting its own connect-time sync as finished must not
     // then mark the source synced.
     scanFailed: false,
+    // Set when the source's wallet database turned out to be missing or
+    // half-built. The wallet navcoin-js made in its place must be deleted
+    // by whoever opened the source, and the source recorded as failed.
+    walletMissing: false,
     // Interrupts the sweep step waiting on this source, if any (sweep.js):
     // a request pending when the connection drops is never answered.
     sweepAbort: null,
@@ -577,6 +585,16 @@ export async function openSourceWallet(source, root, navWallet) {
       requestRefresh(source.id, wallet);
     });
 
+    // navcoin-js creates a wallet with a random phrase when the database
+    // it is asked to open has no master key, and says so with this event.
+    // A source is only ever opened after its wallet was built from the
+    // user's phrase or keys, so that is never wanted here: it means the
+    // database is missing or was left half-built.
+    let createdNewWallet = false;
+    wallet.on('new_mnemonic', () => {
+      createdNewWallet = true;
+    });
+
     wallet.on('db_load_error', (error) => {
       if (state.closing) return;
 
@@ -593,6 +611,12 @@ export async function openSourceWallet(source, root, navWallet) {
         minPoolSize: getSourceMinPoolSize(source),
         skipInitialHistorySync: true,
       });
+      if (createdNewWallet) {
+        // Not the user's wallet: scanning it would show a synced source
+        // with nothing in it, in place of the one that may hold the coins.
+        state.walletMissing = true;
+        throw new Error(WALLET_DATABASE_MISSING);
+      }
       await prunePrivateKeyPool(wallet, source);
       cacheTransactionsOnce(wallet);
       await configureElectrumNodes(wallet);

@@ -13,6 +13,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- A source whose wallet was never built no longer shows as an empty,
+  synced wallet. If the daemon or computer stopped during an import, or a
+  wallet failed to build, the source was left registered with no wallet
+  database; on the next start a new wallet with a random phrase was created
+  in its place, scanned, and shown as synced with a zero balance, and
+  importing the phrase again was refused as a duplicate. Such a source now
+  shows an error telling you to remove it and import it again.
 - A source is no longer shown as synced when part of its scan failed. If a
   server answered an error for an address, a coin's transaction or a
   staking partner, the scan skipped it and still ended "synced", and a

@@ -171,10 +171,10 @@ after removing and re-importing a phrase. Every case is now a test in
   rewriting `destroyDatabase` for the new handle and re-checking
   `SQLITE_BUSY_TIMEOUT_MS`, which is passed as the shim's `sqlBusyTimeout`.
 - **A wallet whose creation failed is still forgotten through the worker**
-  (`deleteWalletForSource` in `createImportedWallet`). That assumed the
-  daemon never opens such a wallet. It does, on the next start (see the
-  first finding of the 2026-11-13 review), so that path needs
-  `deleteOpenedWallet` too once the open is fixed.
+  (`deleteWalletForSource` in `createImportedWallet`). That is right while
+  the daemon never opens such a wallet, which holds again now that `main`
+  skips sources recorded as failed; if it ever does, that path needs
+  `deleteOpenedWallet` too.
 - **The sqlite busy timeout has no test in the suite.** Parallel wallet
   creation under load (four processes each creating the fixture phrase's
   derivations, fourteen rounds) failed 13 of 168 creations at the default
@@ -206,9 +206,9 @@ electrum server answering busy` on `ubuntu-24.04-arm`. Mechanism, found by
   the workers `runWalletWorker` spawned, so a stop during an import leaves a
   worker writing the wallet database until it finishes or hits its own
   timeout (`WORKER_TIMEOUT_MS` in `wallet-worker.js`). A restart right after
-  opens a wallet the worker is still writing, and if its master key is not
-  in yet, navcoin-js writes a random one into it (the first finding of the
-  2026-11-13 review). Not reproduced.
+  opens a wallet the worker is still writing. If its master key is not in
+  yet the open now fails and the source is recorded as failed, which is
+  safe but loses an import that was about to succeed. Not reproduced.
 - Removing a source mid-setup now logs
   `[electrum] connection setup stopped by the wallet closing: …` — expected,
   not a fault.
@@ -303,23 +303,20 @@ full in-session; everything else by a read-only reviewer whose report was
 then checked against the code where marked "re-checked". Ordered by how
 badly each can cost a user coins. No test was written for any of them yet.
 
-- **High: a source with no wallet database is opened as a new random
-  wallet and shown as synced with nothing in it.** Re-checked.
-  `openSourceWallet` in `wallet-manager.js` builds `WalletFile` without a
-  phrase, and navcoin-js `Load` then generates a random one and emits
-  `new_mnemonic` whenever the database has no `masterPubKey`. `main` in
-  `daemon.js` opens every record in `sources.json` whatever its `status`,
-  and `/import` writes the record before any wallet exists. So a source
-  whose wallet was never built (the daemon or its worker died during the
-  import, or creation failed and was rolled back), or whose database was
-  deleted while the registry write failed, becomes on the next start an
-  empty wallet that scans, reads "synced, 0", and gets `lastSyncedAt`.
-  Re-importing the phrase is refused as a duplicate. The reviewer
-  reproduced the missing-database case with the daemon's own `Load`
-  options; the half-built timings are inferred. Smallest fix: fail the
-  open on `new_mnemonic`, skip sources with `status: 'error'` in `main`,
-  and record that a source's wallet was built so an unbuilt one is rebuilt
-  rather than opened.
+- **A source with no wallet database: what is left.** `openSourceWallet`
+  now fails the open when navcoin-js reports it created a wallet
+  (`new_mnemonic`), `openRegisteredSource` in `daemon.js` deletes that
+  wallet and records the source as failed, and `main` no longer opens
+  sources recorded as failed. Left open:
+  - Nothing rebuilds such a source. The user has to remove it and import
+    the phrase again, which the error says; a "wallet built" flag in the
+    registry would let the daemon rebuild it from `normalizedDetails`.
+  - A private-key source whose worker died after the container wallet was
+    created but before its keys were imported has a master key, so it is
+    not caught: it opens as an empty wallet. From the reviewer, inferred
+    from the order of steps in `wallet-worker.js`, not reproduced.
+  - A source the user removes while its database is already gone still
+    goes through `removeSource`; not tested.
 - **A scan that ends with failed lookups: what is left.** It now ends as
   incomplete (`ScanIncompleteError` in `rescue-scan.js`), `runScan` in
   `wallet-manager.js` runs it again after a pause, and the source goes into

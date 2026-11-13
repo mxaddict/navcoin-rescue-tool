@@ -16,6 +16,8 @@ import {
   stopDaemon,
 } from '../src/daemon-client.js';
 import { APP_VERSION } from '../src/constants.js';
+import { getWalletStorageDetails } from '../src/navcoin-js-adapter.js';
+import { importSources } from '../src/source-registry.js';
 import {
   killPortHolders,
   makeProjectTempDir,
@@ -465,6 +467,13 @@ test(
     await bootstrapAppData(root);
 
     const child = spawnDaemon({ root, stubPort: fixtureStub.port });
+    // Kept for the timeout message below: this test stalled once in a full
+    // run with nothing to show why, the daemon's log being the only place
+    // a dropped connection or a scan being run again is recorded.
+    let daemonLog = '';
+    child.stderr.on('data', (chunk) => {
+      daemonLog += chunk.toString();
+    });
 
     try {
       await waitForReady(child);
@@ -495,6 +504,7 @@ test(
       // sync_finished.
       const SYNC_TIMEOUT_MS = 90_000;
       const POLL_INTERVAL_MS = 500;
+      const DAEMON_LOG_TAIL_LINES = 60;
       const expectedNav = fixture.expectedNavConfirmed;
       const expectedXNav = fixture.expectedXNavConfirmed;
       const start = Date.now();
@@ -508,7 +518,8 @@ test(
                 status?.sources?.find(
                   (source) => source.id === fundedSource.id,
                 ),
-              )}`,
+              )}\nDaemon log, last lines:\n` +
+              daemonLog.split('\n').slice(-DAEMON_LOG_TAIL_LINES).join('\n'),
           );
         }
 
@@ -689,3 +700,96 @@ test('the daemon logs an uncaught exception before exiting', async () => {
     await removeDaemonDataDir(root);
   }
 });
+
+// The registry is written before any wallet is built, so a daemon or
+// worker that dies during an import leaves sources with no database.
+// navcoin-js, asked to open one, makes a new wallet with a random phrase:
+// the source then scanned, read "synced" with nothing in it, and
+// re-importing the phrase was refused as a duplicate.
+test(
+  'a source whose wallet was never built reports that, on every start',
+  { timeout: 180_000 },
+  async () => {
+    const root = await makeProjectTempDir('daemon-wallet-missing');
+    await bootstrapAppData(root);
+
+    // Registered the way the daemon's /import does it, with the wallets
+    // left unbuilt.
+    const { sources } = await importSources(
+      {
+        type: 'mnemonic',
+        phrase:
+          'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      },
+      root,
+      { createImportedWallet: async () => ({}) },
+    );
+    assert.ok(sources.length > 0);
+
+    const untilEverySourceFailed = async () => {
+      const deadline = Date.now() + 90_000;
+      for (;;) {
+        const status = await getDaemonStatus(root);
+        if (
+          status.sources.length === sources.length &&
+          status.sources.every((source) => source.liveError)
+        ) {
+          return status;
+        }
+        // Never synced on the way, however briefly.
+        for (const source of status.sources) {
+          assert.notEqual(source.syncStatus, 'synced', source.id);
+        }
+        assert.ok(Date.now() < deadline, 'sources never reported an error');
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    };
+
+    const assertFailed = (status) => {
+      for (const source of status.sources) {
+        assert.equal(source.syncStatus, 'error', source.id);
+        assert.match(
+          source.liveError,
+          /wallet database .* missing or incomplete/,
+        );
+        assert.match(source.liveError, /Remove the source and import it again/);
+      }
+    };
+
+    let child = spawnDaemon({ root, stubPort });
+    try {
+      await waitForReady(child);
+      assertFailed(await untilEverySourceFailed());
+      await stopDaemon(root);
+      await waitForExit(child);
+
+      // The random wallet navcoin-js made in each one's place is gone: a
+      // later open would find a database with a master key and take it
+      // for the user's.
+      for (const source of sources) {
+        const { dataFile } = getWalletStorageDetails(source.id, root);
+        await assert.rejects(fs.access(dataFile), { code: 'ENOENT' });
+      }
+
+      child = spawnDaemon({ root, stubPort });
+      let output = '';
+      child.stdout.on('data', (chunk) => (output += chunk));
+      await waitForReady(child);
+      const deadline = Date.now() + 30_000;
+      while (
+        (output.match(/not opening source/g) ?? []).length < sources.length
+      ) {
+        assert.ok(Date.now() < deadline, `sources were opened:\n${output}`);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assertFailed(await getDaemonStatus(root));
+
+      await stopDaemon(root);
+      await waitForExit(child);
+    } finally {
+      child.kill('SIGTERM');
+      await waitForExit(child);
+      await removeDaemonDataDir(root);
+    }
+  },
+);

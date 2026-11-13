@@ -5,6 +5,8 @@ import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 
+import { STATIC_WALLET_PASSWORD } from '../src/constants.js';
+
 const projectRoot = path.join(import.meta.dirname, '..');
 const projectTmpDir = path.join(projectRoot, 'tmp');
 
@@ -29,6 +31,28 @@ export function removeDaemonDataDir(dir) {
     maxRetries: DATA_DIR_REMOVE_RETRIES,
     retryDelay: DATA_DIR_REMOVE_RETRY_DELAY_MS,
   });
+}
+
+const TEST_WALLET_PHRASE =
+  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+
+// Build the wallet database a source is opened from, the way the wallet
+// worker does before the daemon ever opens it. openSourceWallet refuses a
+// source with no database (navcoin-js would make up a wallet with a
+// random phrase), so a test that opens one directly builds it first.
+export async function buildWalletForSource(navWallet, sourceId) {
+  const wallet = new navWallet.WalletFile({
+    file: `${sourceId}.db`,
+    mnemonic: TEST_WALLET_PHRASE,
+    type: 'navcoin-js-v1',
+    password: STATIC_WALLET_PASSWORD,
+    spendingPassword: STATIC_WALLET_PASSWORD,
+    network: 'mainnet',
+    log: false,
+  });
+  await wallet.Load({ useP2p: false, minPoolSize: 10 });
+  wallet.Disconnect();
+  wallet.CloseDb();
 }
 
 export function getProjectRoot() {

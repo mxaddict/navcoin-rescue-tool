@@ -34,6 +34,7 @@ import {
   getSourceState,
   purgeAllWallets,
   rescanAllSources,
+  WALLET_DATABASE_MISSING,
 } from './wallet-manager.js';
 
 function sendJson(response, statusCode, payload) {
@@ -80,6 +81,24 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
+// Open a source from the registry. When its wallet database turns out to
+// be missing or half-built, navcoin-js has by then created a new wallet
+// with a random phrase in its place: that one is deleted, and the source
+// recorded as failed, so it reports the problem instead of reading as a
+// synced wallet with nothing in it, now and after the next start.
+async function openRegisteredSource(source, root, navWallet) {
+  const state = await openSourceWallet(source, root, navWallet);
+  if (!state.walletMissing) return;
+
+  console.log(
+    `[daemon] wallet database of ${source.id} is missing or incomplete; ` +
+      `recording the source as failed`,
+  );
+  await closeSourceWallet(source.id);
+  await deleteOpenedWallet(source.id, root);
+  await markSourceFailed(source.id, WALLET_DATABASE_MISSING, root);
+}
+
 async function main() {
   const root = process.env.NTR_APP_DATA || getAppDataRoot();
   const layout = getLayout(root);
@@ -93,15 +112,29 @@ async function main() {
       const stored = await readSources(root);
       console.log(`[daemon] opening ${stored.sources.length} source(s)...`);
       for (const source of stored.sources) {
+        // A source recorded as failed has no wallet to open: its creation
+        // was rolled back, or its database was found missing. Opening it
+        // would have navcoin-js make a new, empty wallet in its place.
+        if (source.status === 'error') {
+          console.log(
+            `[daemon] not opening source ${source.id}: ${source.error}`,
+          );
+          continue;
+        }
         console.log(`[daemon] opening source: ${source.id} (${source.type})`);
-        openSourceWallet(source, root, navWallet).catch((err) => {
+        openRegisteredSource(source, root, navWallet).catch((err) => {
           console.log(
             `[daemon] failed to open wallet ${source.id}: ${err.message}`,
           );
         });
       }
     })
-    .catch(() => {});
+    .catch((err) => {
+      // Without this line every source just shows as never opened.
+      console.log(
+        `[daemon] could not open the stored sources: ${err?.stack ?? err}`,
+      );
+    });
 
   const logStream = fs.createWriteStream(layout.daemonLogFile, { flags: 'a' });
 
@@ -258,7 +291,7 @@ async function main() {
             })
             .then((navWallet) => {
               console.log(`[daemon] opening wallet and syncing...`);
-              openSourceWallet(source, root, navWallet).catch((err) => {
+              openRegisteredSource(source, root, navWallet).catch((err) => {
                 console.log(
                   `[daemon] failed to open wallet ${source.id}: ${err.message}`,
                 );

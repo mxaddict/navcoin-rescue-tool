@@ -312,7 +312,7 @@ reading, and no test was written or run for any of them.
   that is not a valid mainnet NAV or xNAV address in the daemon before
   `executeSweep`.
 - **Medium: a source below the fee aborts the sweep and hides what was
-  already sent.** Re-checked. `executeSweep` in `wallet-manager.js` spends
+  already sent.** Re-checked. `executeSweep` in `sweep.js` spends
   any `nav > 0`, with subtract-fee on and navcoin-js's default fee. In
   `NavCreateTransaction`, `amount < fee` adds no destination output and,
   since inputs equal the amount, no change either; the signed transaction

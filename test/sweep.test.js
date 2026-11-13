@@ -4,12 +4,11 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 
 import { bootstrapAppData } from '../src/app-data.js';
+import { executeSweep, prepareSweep } from '../src/sweep.js';
 import {
   openSourceWallet,
   closeSourceWallet,
   closeAllWallets,
-  prepareSweep,
-  executeSweep,
   getSourceState,
   resetElectrumNodeSelectionCache,
 } from '../src/wallet-manager.js';

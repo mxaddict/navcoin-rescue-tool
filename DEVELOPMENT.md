@@ -57,7 +57,8 @@ src/
   daemon.js             HTTP daemon entrypoint
   daemon-client.js      typed client wrappers for the daemon API
   navcoin-js-adapter.js isolated navcoin-js boundary; patches WS frame size
-  wallet-manager.js     in-memory per-source sync state, sweep logic, rescan
+  wallet-manager.js     in-memory per-source sync state, rescan
+  sweep.js              sweep preview, broadcast of each leg, sweep log
   rescue-scan.js        adaptive gap-walk + inline hydrate scan engine
   source-registry.js    source CRUD, fingerprinting, dedup, sources.json
   wallet-worker.js      child-process wallet creation (avoids blocking daemon)

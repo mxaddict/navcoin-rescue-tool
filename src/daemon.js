@@ -26,13 +26,12 @@ import {
   readSources,
   purgeAllSources,
 } from './source-registry.js';
+import { executeSweep, prepareSweep } from './sweep.js';
 import {
   openSourceWallet,
   closeSourceWallet,
   closeAllWallets,
   getSourceState,
-  prepareSweep,
-  executeSweep,
   purgeAllWallets,
   rescanAllSources,
 } from './wallet-manager.js';

@@ -71,7 +71,7 @@ crates/
     tx/                    NavCoin tx (de)serialization, sighash, signing
     electrum/              async JSON-RPC client over TCP/TLS
     scan/                  port of rescue-scan.js
-    wallet/                per-source state, balances, sweep (wallet-manager.js)
+    wallet/                per-source state, balances, sweep (wallet-manager.js, sweep.js)
     registry/              sources.json, fingerprints (source-registry.js)
     appdata/               paths, auth cookie, daemon.json (app-data.js)
     daemon/                HTTP API + lifecycle (daemon.js)

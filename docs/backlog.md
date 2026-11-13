@@ -120,16 +120,6 @@ log showed a wallet retrying one dead server forever. What it leaves open:
   purpose: the indexeddb shim keeps its sqlite files open for the life of
   the test process, so it is cleared at the start of the next run instead.
 
-- **navcoin-js reconnects in a tight loop when a server answers busy.**
-  `ManageElectrumError` in navcoin-js `wallet.js` calls `sleep(1)` and
-  `sleep(5)` without awaiting them, so it reconnects with no delay at all.
-  Against a local stub that answers every `blockchain.scripthash.subscribe`
-  with the ElectrumX busy error, the three wallets of one imported phrase
-  opened 9040 connections in 60 s (measured 2026-11-12). A user's log from
-  2026-11-11 shows the same burst of `close connect` lines against
-  `electrum.nav.community`. Hammering a server that is already over its
-  limits likely keeps it refusing us. Fixing it needs either a navcoin-js release
-  or supervision of `ManageElectrumError` from `electrum-connection.js`.
 - **Every scan restarts from address 0.** `walkBranch` in
   `rescue-scan.js` starts `scannedIdx` at 0 on every run and nothing
   records how far a scan got; the derived keys (the `Nav`/`NavChange`

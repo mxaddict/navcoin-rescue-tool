@@ -29,6 +29,12 @@ const RECOVERY_WITHIN_MS = 20_000;
 // per address.
 const SCAN_WITHIN_MS = 120_000;
 
+// Long enough to see several of navcoin-js's reconnects after a busy
+// reply, and the most it may open in that time: one per backoff step from
+// the shortest delay, with room for the few retries already in flight.
+const BUSY_WINDOW_MS = 5_000;
+const BUSY_MAX_CONNECTIONS = 10;
+
 const POLL_MS = 100;
 // How long navcoin-js gets to finish setting up a fresh connection.
 const SETTLE_WITHIN_MS = 10_000;
@@ -284,5 +290,38 @@ test('a scan run after connecting still derives new addresses', async () => {
   assert.ok(
     (await receiving()) > before,
     `the rescan derived past the ${before} addresses it started with`,
+  );
+});
+
+// ElectrumX answers a session over its limits with this error and then
+// drops it. navcoin-js handles it by reconnecting and retrying at once —
+// its own waits are never awaited — which against one busy server opened
+// thousands of connections a minute and kept the server refusing us.
+test('a server answering busy is not reconnected to in a tight loop', async () => {
+  const busy = await startStub({
+    failing: {
+      'blockchain.scripthash.subscribe': 'server busy - request timed out',
+    },
+  });
+  useNodes(busy);
+
+  const state = await openWallet();
+  // Not waited for at teardown: connection setup ends with a scripthash
+  // subscription, which this server never grants, so it never finishes.
+  opened.splice(opened.indexOf(state), 1);
+
+  await waitFor(
+    'navcoin-js to hit the busy reply',
+    () => busy.requests('blockchain.scripthash.subscribe') > 0,
+    SETTLE_WITHIN_MS,
+  );
+  const before = busy.connections();
+  await sleep(BUSY_WINDOW_MS);
+  const connections = busy.connections() - before;
+
+  assert.ok(
+    connections <= BUSY_MAX_CONNECTIONS,
+    `${connections} connections in ${BUSY_WINDOW_MS}ms to a server ` +
+      `answering busy`,
   );
 });

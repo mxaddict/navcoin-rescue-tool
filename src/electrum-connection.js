@@ -248,6 +248,49 @@ function superviseConnects(wallet) {
     containSetupAfterClose(this, this.client);
     return result;
   };
+
+  throttleElectrumErrorHandling(wallet);
+}
+
+// navcoin-js answers a failed request (a dropped connection, or the
+// "server busy" ElectrumX sends a session over its limits) by reconnecting
+// in ManageElectrumError, and its callers retry the request as soon as it
+// returns. Its own pauses there are never awaited, so against a busy server
+// it reconnected and retried with no delay at all: thousands of
+// connections a minute to a server already refusing us. Each call now waits
+// first, longer the more errors arrive in a row, and back to the shortest
+// wait once the errors stop for a while.
+const ELECTRUM_ERROR_MIN_DELAY_MS = 1_000;
+const ELECTRUM_ERROR_MAX_DELAY_MS = 30_000;
+const ELECTRUM_ERROR_QUIET_MS = 60_000;
+
+function throttleElectrumErrorHandling(wallet) {
+  // A wallet without the method has no such loop to throttle. That a
+  // navcoin-js upgrade keeps the loop under another name is what the
+  // busy-server test in electrum-failover.test.js catches.
+  if (typeof wallet.ManageElectrumError !== 'function') return;
+
+  const manageElectrumError = wallet.ManageElectrumError;
+  let delayMs = 0;
+  let lastErrorAt = 0;
+
+  wallet.ManageElectrumError = async function throttledManageElectrumError(
+    ...args
+  ) {
+    const now = Date.now();
+    delayMs =
+      now - lastErrorAt > ELECTRUM_ERROR_QUIET_MS
+        ? ELECTRUM_ERROR_MIN_DELAY_MS
+        : Math.min(delayMs * 2, ELECTRUM_ERROR_MAX_DELAY_MS);
+    lastErrorAt = now;
+
+    // Unref'd: a wait for a wallet nobody needs any more must not keep the
+    // process alive.
+    await new Promise((resolve) => setTimeout(resolve, delayMs).unref());
+    // Closed while waiting: reconnecting now would bring it back online.
+    if (closedWallets.has(this)) return;
+    return manageElectrumError.apply(this, args);
+  };
 }
 
 // navcoin-js sets each connection up in an async 'ready' listener that

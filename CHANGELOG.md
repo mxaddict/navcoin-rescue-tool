@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A busy electrum server is no longer hammered with reconnects. When a
+  server answered `server busy - request timed out`, navcoin-js reconnected
+  and retried with no pause, over a hundred times a second, which kept an
+  overloaded server refusing the wallet. Each retry now waits first,
+  starting at one second and growing to thirty while the errors continue.
+
 ## [0.2.10] - 2026-11-13
 
 ### Added

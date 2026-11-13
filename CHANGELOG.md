@@ -13,6 +13,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- A phrase typed with capital letters is accepted. A keyboard that
+  capitalises the first word made a correct phrase fail with "at least one
+  word is wrong".
+- A 24-word phrase containing a word that is not in the BIP39 word list is
+  refused at import, and no longer offered the unchecked-mnemonic option,
+  which could not work for it and only failed later in the background.
 - A sweep no longer leaves out a source whose wallet is not open yet.
   Sweeping while a just-imported phrase was still being set up, or after a
   wallet failed to build, swept the other sources and reported success,

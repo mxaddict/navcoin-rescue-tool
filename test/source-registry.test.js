@@ -519,3 +519,20 @@ test('the same phrase imported twice at once is registered once', async () => {
     );
   });
 });
+
+// A phone keyboard capitalises the first word. Every wordlist is
+// lowercase, so the phrase was rejected as failing its checksum.
+test('a phrase typed with capitals is the same phrase', () => {
+  const capitalised = VALID_12.replace(/^\w/, (first) => first.toUpperCase());
+  assert.notEqual(capitalised, VALID_12);
+
+  const typed = validateImportInput({ type: 'mnemonic', phrase: capitalised });
+  const plain = validateImportInput({ type: 'mnemonic', phrase: VALID_12 });
+  assert.ok(plain.walletTypes.length > 0);
+  assert.deepEqual(typed, plain);
+
+  assert.deepEqual(
+    validateImportInput({ type: 'mnemonic', phrase: VALID_12.toUpperCase() }),
+    plain,
+  );
+});

@@ -19,8 +19,11 @@ import {
   getEligibleWalletTypes,
 } from './mnemonic.js';
 
+// Lowercased: every wordlist a phrase is checked against is lowercase, and
+// a keyboard that capitalises the first word otherwise turns a correct
+// phrase into "at least one word is wrong".
 function normalizeMnemonic(phrase) {
-  return phrase.trim().split(/\s+/).filter(Boolean).join('\n');
+  return phrase.toLowerCase().trim().split(/\s+/).filter(Boolean).join('\n');
 }
 
 function normalizePrivateKeys(keys) {

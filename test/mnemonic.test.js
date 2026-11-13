@@ -243,3 +243,22 @@ test('no explanation ever contains the phrase', () => {
     }
   }
 });
+
+// The waiver is for a wrong checksum. A word that is not a word has no
+// entropy to derive from: navcoin-core's derivation returns nothing for
+// it, which used to surface only when the background worker failed.
+test('a word outside the wordlist is refused, and not as waivable', () => {
+  const notAWord = BROKEN_BIP39_24.replace(/zoo$/, 'zooo');
+
+  for (const options of [{}, { allowUnchecked: true }]) {
+    const error = rejection(notAWord, 'navcoin-core', options);
+    assert.ok(error, JSON.stringify(options));
+    assert.equal(error.code, MNEMONIC_CHECKSUM_ERROR);
+    assert.equal(error.waivable, false);
+    assert.match(error.message, /not in the BIP39 word list/);
+    assert.ok(!error.message.includes('zooo'));
+  }
+
+  // A wrong word that is a word is still the waivable case.
+  assert.equal(rejection(BROKEN_BIP39_24, 'navcoin-core').waivable, true);
+});

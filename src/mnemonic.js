@@ -116,6 +116,22 @@ export function assertMnemonicAccepted(
     throw error;
   }
 
+  // The waiver is for a phrase whose checksum is wrong. One with a word
+  // that is not in the wordlist at all has no entropy to derive from, so
+  // waiving the checksum would only move the failure into the background
+  // worker; it is refused here, and not offered as waivable.
+  if (waivable && Mnemonic.mnemonicToData(phrase) === false) {
+    const error = new Error(
+      'This phrase contains a word that is not in the BIP39 word list, so ' +
+        'no wallet can be derived from it. Check the phrase against your ' +
+        'backup — a single mistyped word is enough.',
+    );
+    error.code = MNEMONIC_CHECKSUM_ERROR;
+    error.check = check;
+    error.waivable = false;
+    throw error;
+  }
+
   if (waivable && allowUnchecked) return;
   if (isPhraseValid(phrase, check)) return;
 

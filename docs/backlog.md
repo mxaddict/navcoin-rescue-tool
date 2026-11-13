@@ -351,15 +351,6 @@ badly each can cost a user coins. No test was written for any of them yet.
   flow read, neither platform outcome run. Fix: track the creation promise
   per source, have the routes await it, and re-check the registry before
   opening.
-- **Medium: a phrase with a capital letter is rejected as a checksum
-  failure.** `normalizeMnemonic` in `source-registry.js` does not
-  lowercase, so a correct phrase from an autocapitalising keyboard fails.
-  For 24 words the failure is offered as waivable; waived, it imports only
-  as `navcoin-core` and then fails in the worker, because
-  `assertMnemonicAccepted` in `mnemonic.js` returns on the waiver before
-  any wordlist check. The reviewer ran the validation; the worker failure
-  is inferred. Fix: lowercase, and require a wordlist match under the
-  waiver too.
 - **Low-medium: an empty `auth.cookie` turns authentication off.**
   `ensureAuthCookie` in `app-data.js` accepts any existing file and writes
   it non-atomically; a zero-byte file gives an empty cookie, and a request

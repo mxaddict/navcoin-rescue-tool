@@ -35,6 +35,11 @@ const SCAN_WITHIN_MS = 120_000;
 const BUSY_WINDOW_MS = 5_000;
 const BUSY_MAX_CONNECTIONS = 10;
 
+// History lookups in a whole scan of a fresh wallet against these stubs,
+// measured: one per address of the first batch of each branch, which
+// finds nothing and so ends the walk, and one for the xNAV anchor.
+const WHOLE_SCAN_LOOKUPS = 201;
+
 const POLL_MS = 100;
 // How long navcoin-js gets to finish setting up a fresh connection.
 const SETTLE_WITHIN_MS = 10_000;
@@ -323,5 +328,52 @@ test('a server answering busy is not reconnected to in a tight loop', async () =
     connections <= BUSY_MAX_CONNECTIONS,
     `${connections} connections in ${BUSY_WINDOW_MS}ms to a server ` +
       `answering busy`,
+  );
+});
+
+// The scan's progress is kept in the wallet's own database, so this is
+// the one place that shows the real navcoin-js store holding it and the
+// rerun reading it back: a scan cut off by a dead server used to start
+// again from the first address on the next one.
+test('a scan cut off by a server dying resumes on the next', async () => {
+  // Slow enough that the scan is still in the first branch when the
+  // checkpoint is seen and the server stopped.
+  const a = await startStub({ latencyMs: 200 });
+  const b = await startStub();
+  useNodes(a, b);
+
+  const state = await openWallet({ scanned: false });
+  assert.equal(state.server, address(a));
+
+  // waitFor takes a synchronous check, and this one reads the database.
+  let saved = 0;
+  const deadline = Date.now() + SCAN_WITHIN_MS;
+  while (saved === 0) {
+    assert.ok(Date.now() < deadline, 'the scan never saved a checkpoint');
+    await sleep(POLL_MS);
+    const checkpoint = await state.wallet.db.GetValue('ntr_scan_checkpoint');
+    saved = checkpoint?.walks?.receive?.finished.length ?? 0;
+  }
+  assert.notEqual(state.syncStatus, 'synced', 'still scanning');
+  await stopStub(a);
+
+  await waitFor(
+    'the resumed scan to finish on the next server',
+    () => state.syncStatus === 'synced' && !state.rescanInFlight,
+    SCAN_WITHIN_MS,
+  );
+  assert.equal(state.server, address(b));
+
+  const lookups = b.requests('blockchain.scripthash.get_history');
+  assert.ok(lookups > 0, 'the rerun looked nothing up');
+  assert.ok(
+    lookups <= WHOLE_SCAN_LOOKUPS - saved,
+    `${lookups} lookups on the second server, with ${saved} addresses ` +
+      `already finished out of ${WHOLE_SCAN_LOOKUPS} lookups in a whole scan`,
+  );
+  assert.equal(
+    await state.wallet.db.GetValue('ntr_scan_checkpoint'),
+    null,
+    'the checkpoint is cleared once the scan finishes',
   );
 });

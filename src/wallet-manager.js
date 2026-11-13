@@ -237,6 +237,9 @@ async function runFreshRescan(state) {
     // grows the balance over successive rescans because new stake-reward
     // outpoints accumulate on top of old ones that were never cleared.
     await state.wallet.db.ZapWalletTxes();
+    // The checkpoint marks addresses whose coins were just wiped as already
+    // scanned; resuming from it would skip them.
+    await scanCheckpointStore(state.wallet)?.clear();
 
     // Reset displayed balance immediately so the user sees the rescan
     // start from zero rather than showing stale numbers until the first
@@ -259,10 +262,27 @@ async function runFreshRescan(state) {
   }
 }
 
+const SCAN_CHECKPOINT_KEY = 'ntr_scan_checkpoint';
+
+// Where a scan keeps its progress: the wallet's own settings table, so it
+// is removed with the wallet. Undefined for a wallet whose db has no
+// settings store (the test fakes), which then scans from the start.
+function scanCheckpointStore(wallet) {
+  const db = wallet.db;
+  if (typeof db?.GetValue !== 'function' || typeof db?.SetValue !== 'function')
+    return undefined;
+
+  return {
+    load: () => db.GetValue(SCAN_CHECKPOINT_KEY),
+    save: (checkpoint) => db.SetValue(SCAN_CHECKPOINT_KEY, checkpoint),
+    clear: () => db.SetValue(SCAN_CHECKPOINT_KEY, null),
+  };
+}
+
 // Run rescueScan to a clean finish, then record the source as synced. A
 // scan the connection dropped under is run again once there is a
 // connection, because its failed lookups make it an incomplete picture,
-// not a finished one.
+// not a finished one. The rerun resumes from the scan's checkpoint.
 async function runScan(state, opts) {
   let completed = false;
   do {
@@ -281,6 +301,7 @@ async function runScan(state, opts) {
           ...opts,
           password: STATIC_WALLET_PASSWORD,
           signal: controller.signal,
+          checkpoint: scanCheckpointStore(state.wallet),
         }),
         whenAborted(controller.signal).then(() => false),
       ]);

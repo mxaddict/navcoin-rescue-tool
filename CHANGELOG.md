@@ -13,6 +13,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- A scan cut off by a dropped connection resumes where it stopped instead
+  of starting again from the first address. On servers that reset the
+  connection every few seconds, a large wallet could redo the same lookups
+  on every reconnect and never finish. The addresses already looked up are
+  recorded in the wallet's database and skipped on the next attempt; a
+  manual rescan still starts from the beginning.
 - A sweep no longer hangs when a server drops the connection or stops
   answering while a transaction is being broadcast. It ends with "unknown
   outcome", at once on a drop and after two minutes of silence, and says to

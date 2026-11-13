@@ -120,18 +120,31 @@ log showed a wallet retrying one dead server forever. What it leaves open:
   purpose: the indexeddb shim keeps its sqlite files open for the life of
   the test process, so it is cleared at the start of the next run instead.
 
-- **Every scan restarts from address 0.** `walkBranch` in
-  `rescue-scan.js` starts `scannedIdx` at 0 on every run and nothing
-  records how far a scan got; the derived keys (the `Nav`/`NavChange`
-  counters) are kept, so a rerun skips derivation but not the lookups.
-  On servers that reset the connection within seconds, as in the
-  2026-11-11 log, a large wallet may never finish (inferred, not reproduced). Resuming would mean
-  persisting `scannedIdx` and `lastUsedIdx` per branch after each batch,
-  and `reapStaleUtxos` would then have to skip a resumed scan, or the
-  outpoints seen before the drop would have to be persisted too, because
-  it reaps whatever the current pass did not see. `concurrency` in the
-  scan config (25 parallel lookups per wallet) is a likely contributor to
-  servers dropping us and is untested against a real server.
+- **Scan resume: what it does not cover.** A scan cut off by a drop now
+  resumes from a checkpoint in the wallet's settings table (`openProgress`
+  in `rescue-scan.js`, `scanCheckpointStore` in `wallet-manager.js`): the
+  receive and change walks skip the addresses already looked up. Left open:
+  - Staking-partner discovery (`discoverStakingPartners`) is recorded only
+    as done or not. Cut off part-way, it asks about every address again,
+    one request each, so on a large wallet behind servers that reset within
+    seconds it may never finish. Not reproduced.
+  - The staking scan (`scanStaking`) and the xNAV pass (`scanXNav`) always
+    run again in full. The xNAV pass reads transaction keys it already
+    fetched from the wallet's cache (`loadTxKeys`); the staking scan asks
+    the server again for everything.
+  - Private-key sources (`scanExistingNavAddrs`) are not checkpointed.
+  - A resumed scan skips `reapStaleUtxos`, because it did not see the
+    outpoints of the addresses it skipped. A UTXO that was in the wallet
+    before the scan began and was spent since stays counted until the next
+    scan that runs start to finish.
+  - `SCAN_CHECKPOINT_MAX_AGE_MS` is a guess. An address finished early in
+    a scan is not looked at again by it, so coins that arrive there later
+    in the same scan are missed until the next one; that was already true
+    of one long scan, and the limit bounds how long a resumed one can
+    stretch it. Not measured against a real long scan.
+  - `concurrency` in the scan config, the parallel lookups per wallet, is a
+    likely contributor to servers dropping us and is untested against a
+    real server.
 
 ## Remove and re-import: what is left
 

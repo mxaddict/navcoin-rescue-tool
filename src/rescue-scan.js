@@ -27,7 +27,77 @@ const DEFAULT_OPTS = {
   // finishes, which it runs on every connect, and a blank password makes
   // address derivation quietly do nothing.
   password: undefined,
+  // Where to keep the scan's progress so a scan cut off by a dropped
+  // connection picks up where it stopped: `{ load, save, clear }`, each
+  // async. Without one every scan starts from the first address.
+  checkpoint: undefined,
 };
+
+const SCAN_CHECKPOINT_VERSION = 1;
+// A checkpoint older than this is not resumed. Addresses it marks as done
+// were looked at when it was written, and coins that reached them since
+// would be skipped, so the older it is the less it can be trusted.
+export const SCAN_CHECKPOINT_MAX_AGE_MS = 6 * 60 * 60_000;
+
+// The resumable part of a scan: which addresses of each branch walk were
+// looked up, and whether staking partners were discovered. Loaded from
+// `cfg.checkpoint` when it holds a recent one, saved back as the scan
+// advances, cleared when the scan finishes.
+async function openProgress(cfg) {
+  const store = cfg.checkpoint;
+  let saved = null;
+  if (store) {
+    try {
+      saved = await store.load();
+    } catch (err) {
+      console.error(`[rescue-scan] checkpoint not readable: ${err.message}`);
+    }
+  }
+
+  const age = saved ? Date.now() - Date.parse(saved.startedAt) : NaN;
+  const resumed =
+    saved?.version === SCAN_CHECKPOINT_VERSION &&
+    age >= 0 &&
+    age < SCAN_CHECKPOINT_MAX_AGE_MS;
+  const state = resumed
+    ? saved
+    : {
+        version: SCAN_CHECKPOINT_VERSION,
+        startedAt: new Date().toISOString(),
+        walks: {},
+        stakingDiscovered: false,
+      };
+
+  // One write at a time, each of the state as it is when its turn comes:
+  // overlapping writes could land out of order and leave an older one last.
+  let writing = Promise.resolve();
+
+  return {
+    resumed,
+    state,
+    walk(phase) {
+      return (state.walks[phase] ??= { finished: [], lastUsedIdx: -1 });
+    },
+    // A scan that was aborted is being replaced by a new one; it must not
+    // overwrite what its replacement saves.
+    save() {
+      if (!store) return writing;
+      writing = writing.then(async () => {
+        if (cfg.signal?.aborted) return;
+        try {
+          await store.save(structuredClone(state));
+        } catch (err) {
+          console.error(`[rescue-scan] checkpoint not saved: ${err.message}`);
+        }
+      });
+      return writing;
+    },
+    async clear() {
+      await writing;
+      if (store) await store.clear();
+    },
+  };
+}
 
 /**
  * Scan bookkeeping shared by every pass.
@@ -62,12 +132,19 @@ export async function rescueScan(wallet, opts = {}) {
   }
 
   const scan = createScan();
+  const progress = await openProgress(cfg);
+  if (progress.resumed) {
+    console.error(
+      `[rescue-scan] resuming the scan started ${progress.state.startedAt}`,
+    );
+  }
 
   // Reset the staking-partner discovery cache so each scan re-queries
   // blockchain_staking_getKeys for every address. Without this, partners
   // introduced after the first sync (a new pool joins, a new cold-stake
-  // contract is set up) are never discovered until daemon restart.
-  wallet.requestedStakingKeys = false;
+  // contract is set up) are never discovered until daemon restart. A
+  // resumed scan that already discovered them keeps what it stored.
+  wallet.requestedStakingKeys = progress.state.stakingDiscovered;
 
   wallet.emit('bootstrap_started');
 
@@ -84,11 +161,11 @@ export async function rescueScan(wallet, opts = {}) {
   if (cfg.skipDerive) {
     await scanExistingNavAddrs(wallet, cfg, scan);
   } else {
-    await walkBranch(wallet, password, RECEIVE_BRANCH, cfg, scan);
-    await walkBranch(wallet, password, CHANGE_BRANCH, cfg, scan);
+    await walkBranch(wallet, password, RECEIVE_BRANCH, cfg, scan, progress);
+    await walkBranch(wallet, password, CHANGE_BRANCH, cfg, scan, progress);
   }
 
-  await scanStaking(wallet, cfg, scan);
+  await scanStaking(wallet, cfg, scan, progress);
 
   if (cfg.skipXNav !== true) {
     await scanXNav(wallet, cfg, scan);
@@ -103,11 +180,17 @@ export async function rescueScan(wallet, opts = {}) {
     console.error(
       `[rescue-scan] ${scan.failures} lookup(s) failed — skipping stale-UTXO reap`,
     );
+  } else if (progress.resumed) {
+    // The addresses the earlier attempt finished were not looked up again,
+    // so their outpoints are not in `outpointsSeen` and would be reaped as
+    // spent. Same trade as above: overcount rather than hide live coins.
+    console.error('[rescue-scan] resumed scan — skipping stale-UTXO reap');
   } else {
     await reapStaleUtxos(wallet, scan.outpointsSeen);
   }
 
   cfg.signal?.throwIfAborted();
+  await progress.clear();
   wallet.emit('bootstrap_finished');
   wallet.emit('sync_finished');
   return true;
@@ -117,13 +200,20 @@ export async function rescueScan(wallet, opts = {}) {
 // each batch via history + listunspent + GetTx + AddOutput inline. The
 // confirmed balance climbs during the scan instead of only at the end.
 // Walks until scannedIdx - 1 - lastUsedIdx >= gapLimit.
-async function walkBranch(wallet, password, branch, cfg, scan) {
+//
+// A resumed scan walks the same addresses from the start, but skips the
+// lookups for those `progress` records as finished: an address is recorded
+// only once every lookup for it succeeded, so one that failed or was cut
+// off by a drop is looked up again.
+async function walkBranch(wallet, password, branch, cfg, scan, progress) {
   const counterName = branch === CHANGE_BRANCH ? 'NavChange' : 'Nav';
   const phase = branch === CHANGE_BRANCH ? 'change' : 'receive';
 
   wallet.emit('utxo_phase', phase);
 
-  let lastUsedIdx = -1;
+  const walk = progress.walk(phase);
+  const finished = new Set(walk.finished);
+  let lastUsedIdx = walk.lastUsedIdx;
   let scannedIdx = 0;
   let derivedIdx = (await wallet.db.GetCounter(counterName)) ?? 0;
 
@@ -161,10 +251,16 @@ async function walkBranch(wallet, password, branch, cfg, scan) {
       );
       if (batch.length === 0) break;
 
-      let inBatchScanned = 0;
-      await mapConcurrent(batch, cfg, async (addr) => {
-        const found = await scanAndHydrateAddr(wallet, addr.address, scan);
-        if (found > 0 && addr.idx > lastUsedIdx) lastUsedIdx = addr.idx;
+      const pending = batch.filter((addr) => !finished.has(addr.idx));
+      let inBatchScanned = batch.length - pending.length;
+      await mapConcurrent(pending, cfg, async (addr) => {
+        const { ok, added } = await scanAndHydrateAddr(
+          wallet,
+          addr.address,
+          scan,
+        );
+        if (added > 0 && addr.idx > lastUsedIdx) lastUsedIdx = addr.idx;
+        if (ok) finished.add(addr.idx);
         inBatchScanned++;
         if (
           inBatchScanned % cfg.progressInterval === 0 ||
@@ -175,6 +271,9 @@ async function walkBranch(wallet, password, branch, cfg, scan) {
             scannedIdx + inBatchScanned,
             Math.max(scannedIdx + inBatchScanned, derivedIdx),
           );
+          walk.finished = [...finished];
+          walk.lastUsedIdx = lastUsedIdx;
+          await progress.save();
         }
       });
 
@@ -209,7 +308,8 @@ async function scanExistingNavAddrs(wallet, cfg, scan) {
 // Scan one address: history → listunspent → GetTx + AddOutput inline.
 // wallet.GetTx fetches the merkle proof so tx.height is set in the db,
 // which is required for GetBalance to return a confirmed (vs pending)
-// balance. Returns the number of UTXOs added.
+// balance. Returns `added`, the number of UTXOs added, and `ok`: false when
+// a lookup or a hydration failed, so the address was not fully scanned.
 async function scanAndHydrateAddr(wallet, address, scan) {
   const sh = wallet.AddressToScriptHash(address);
 
@@ -220,9 +320,9 @@ async function scanAndHydrateAddr(wallet, address, scan) {
   } catch (err) {
     console.error(`[rescue-scan] history failed ${address}: ${err.message}`);
     scan.failures += 1;
-    return 0;
+    return { ok: false, added: 0 };
   }
-  if (history.length === 0) return 0;
+  if (history.length === 0) return { ok: true, added: 0 };
 
   let list;
   try {
@@ -232,10 +332,11 @@ async function scanAndHydrateAddr(wallet, address, scan) {
       `[rescue-scan] listunspent failed ${address}: ${err.message}`,
     );
     scan.failures += 1;
-    return 0;
+    return { ok: false, added: 0 };
   }
-  if (list.length === 0) return 0;
+  if (list.length === 0) return { ok: true, added: 0 };
 
+  let ok = true;
   let added = 0;
   for (const u of list) {
     const outpoint = `${u.tx_hash}:${u.tx_pos}`;
@@ -253,9 +354,10 @@ async function scanAndHydrateAddr(wallet, address, scan) {
       console.error(
         `[rescue-scan] hydrate failed for ${outpoint}: ${err.message}`,
       );
+      ok = false;
     }
   }
-  return added;
+  return { ok, added };
 }
 
 async function getBranchAddrs(wallet, branch) {
@@ -279,7 +381,7 @@ function parsePathIndex(path) {
 // what wallet.GetScriptHashes() (no arg) does internally, but without
 // any progress reporting — for 10k+ addr wallets that's a long silent
 // pause. Doing it ourselves so we can emit progress.
-async function discoverStakingPartners(wallet, cfg) {
+async function discoverStakingPartners(wallet, cfg, progress) {
   if (wallet.requestedStakingKeys) return;
 
   const addrs = await wallet.db.GetNavAddresses();
@@ -292,6 +394,7 @@ async function discoverStakingPartners(wallet, cfg) {
   wallet.emit('scripthash_progress', 0, addrs.length);
 
   let scanned = 0;
+  let failed = 0;
   await mapConcurrent(addrs, cfg, async (addr) => {
     try {
       const stakingAddresses = await wallet.client.blockchain_staking_getKeys(
@@ -308,6 +411,7 @@ async function discoverStakingPartners(wallet, cfg) {
       console.error(
         `[rescue-scan] staking_getKeys failed for ${addr.address}: ${err.message}`,
       );
+      failed++;
     }
     scanned++;
     if (scanned % cfg.progressInterval === 0 || scanned === addrs.length) {
@@ -316,10 +420,16 @@ async function discoverStakingPartners(wallet, cfg) {
   });
 
   wallet.requestedStakingKeys = true;
+  // The partners found are in the wallet database, so a resumed scan can
+  // skip this pass, but only one in which every address was answered.
+  if (failed === 0) {
+    progress.state.stakingDiscovered = true;
+    await progress.save();
+  }
 }
 
-async function scanStaking(wallet, cfg, scan) {
-  await discoverStakingPartners(wallet, cfg);
+async function scanStaking(wallet, cfg, scan, progress) {
+  await discoverStakingPartners(wallet, cfg, progress);
 
   wallet.emit('utxo_phase', 'stake');
 

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-11-13
+
 ### Fixed
 
 - A wallet holding many unspent outputs can now be swept. The sweep asked
@@ -490,7 +492,8 @@ mismatch between the manifests. Its fix ships in 0.2.7.
 - `Release` can be dispatched with no tag to build and smoke-test a ref without
   publishing anything.
 
-[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.11...HEAD
+[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.12...HEAD
+[0.2.12]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.8...v0.2.9

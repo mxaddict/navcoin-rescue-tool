@@ -13,6 +13,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- Coins beyond a long run of used-up addresses are now found. The scan
+  stops after 100 unused addresses in a row, but it counted an address as
+  used only while it still held coins. A wallet that had spent from 100
+  addresses in a row, as its change addresses are after that many
+  payments, ended the scan there and never looked at the addresses after
+  them, while still reading as fully synced. An address now counts as used
+  when it has any history. Run a rescan to pick up coins missed this way.
 - A scan cut off by a dropped connection resumes where it stopped instead
   of starting again from the first address. On servers that reset the
   connection every few seconds, a large wallet could redo the same lookups

@@ -387,3 +387,24 @@ test('staking discovery is skipped on resume only if it fully succeeded', async 
   });
   assert.equal(wallet.stakingLookups, 0);
 });
+
+// A change branch after many payments is a long run of addresses that
+// were used and emptied, with the current coins beyond them. Counting the
+// gap from the last address still holding coins stopped the walk inside
+// that run.
+test('an address that was used and emptied still extends the walk', async () => {
+  const wallet = new WalkWallet();
+  // History, and nothing unspent: the fake's listunspent is always empty.
+  wallet.onHistory.set('sh:r-5', () => [{ tx_hash: 'old-tx', height: 10 }]);
+
+  await rescueScan(wallet, WALK);
+
+  // The gap is counted from r-5, so the walk goes a second batch.
+  assert.equal(wallet.lookupsOf('r-9'), 1);
+  assert.equal(wallet.lookupsOf('r-10'), 1);
+  assert.equal(wallet.lookupsOf('r-19'), 1);
+  assert.equal(wallet.lookupsOf('r-20'), 0);
+  // The change branch saw no history and stops after one.
+  assert.equal(wallet.lookupsOf('c-9'), 1);
+  assert.equal(wallet.lookupsOf('c-10'), 0);
+});

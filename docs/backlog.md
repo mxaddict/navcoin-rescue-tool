@@ -325,15 +325,6 @@ badly each can cost a user coins. No test was written for any of them yet.
   open on `new_mnemonic`, skip sources with `status: 'error'` in `main`,
   and record that a source's wallet was built so an unbuilt one is rebuilt
   rather than opened.
-- **High: the branch walk stops at the gap limit counted from the last
-  address holding unspent coins, not the last used one.** Read in
-  `walkBranch` in `rescue-scan.js`: `lastUsedIdx` moves only when
-  `scanAndHydrateAddr` added an output, and an address with history but
-  nothing unspent adds none. A wallet whose first `gapLimit` addresses of
-  a branch were all used and emptied, as a change branch is after that
-  many payments, ends the walk there, and coins on a later address are
-  never looked for. The source still reads synced. Not reproduced against
-  a real wallet. Fix: count an address as used when it has history.
 - **High: a scan with failed lookups is still recorded as synced.** Read
   in `rescueScan`: a failed history or unspent lookup is counted in
   `scan.failures`, which only holds back the stale-UTXO reap; the scan

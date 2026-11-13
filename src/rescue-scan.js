@@ -201,6 +201,11 @@ export async function rescueScan(wallet, opts = {}) {
 // confirmed balance climbs during the scan instead of only at the end.
 // Walks until scannedIdx - 1 - lastUsedIdx >= gapLimit.
 //
+// "Used" means the address has history, whether or not anything on it is
+// still unspent. Counting only addresses that hold coins ends the walk
+// early in a wallet that has spent from a long run of them, as a change
+// branch has after that many payments, and misses whatever lies beyond.
+//
 // A resumed scan walks the same addresses from the start, but skips the
 // lookups for those `progress` records as finished: an address is recorded
 // only once every lookup for it succeeded, so one that failed or was cut
@@ -254,12 +259,12 @@ async function walkBranch(wallet, password, branch, cfg, scan, progress) {
       const pending = batch.filter((addr) => !finished.has(addr.idx));
       let inBatchScanned = batch.length - pending.length;
       await mapConcurrent(pending, cfg, async (addr) => {
-        const { ok, added } = await scanAndHydrateAddr(
+        const { ok, used } = await scanAndHydrateAddr(
           wallet,
           addr.address,
           scan,
         );
-        if (added > 0 && addr.idx > lastUsedIdx) lastUsedIdx = addr.idx;
+        if (used && addr.idx > lastUsedIdx) lastUsedIdx = addr.idx;
         if (ok) finished.add(addr.idx);
         inBatchScanned++;
         if (
@@ -308,8 +313,9 @@ async function scanExistingNavAddrs(wallet, cfg, scan) {
 // Scan one address: history → listunspent → GetTx + AddOutput inline.
 // wallet.GetTx fetches the merkle proof so tx.height is set in the db,
 // which is required for GetBalance to return a confirmed (vs pending)
-// balance. Returns `added`, the number of UTXOs added, and `ok`: false when
-// a lookup or a hydration failed, so the address was not fully scanned.
+// balance. Returns `used`, whether the address has any history, and `ok`:
+// false when a lookup or a hydration failed, so the address was not fully
+// scanned.
 async function scanAndHydrateAddr(wallet, address, scan) {
   const sh = wallet.AddressToScriptHash(address);
 
@@ -320,9 +326,9 @@ async function scanAndHydrateAddr(wallet, address, scan) {
   } catch (err) {
     console.error(`[rescue-scan] history failed ${address}: ${err.message}`);
     scan.failures += 1;
-    return { ok: false, added: 0 };
+    return { ok: false, used: false };
   }
-  if (history.length === 0) return { ok: true, added: 0 };
+  if (history.length === 0) return { ok: true, used: false };
 
   let list;
   try {
@@ -332,12 +338,11 @@ async function scanAndHydrateAddr(wallet, address, scan) {
       `[rescue-scan] listunspent failed ${address}: ${err.message}`,
     );
     scan.failures += 1;
-    return { ok: false, added: 0 };
+    return { ok: false, used: false };
   }
-  if (list.length === 0) return { ok: true, added: 0 };
+  if (list.length === 0) return { ok: true, used: true };
 
   let ok = true;
-  let added = 0;
   for (const u of list) {
     const outpoint = `${u.tx_hash}:${u.tx_pos}`;
     scan.outpointsSeen.add(outpoint);
@@ -349,7 +354,6 @@ async function scanAndHydrateAddr(wallet, address, scan) {
       if (!out) continue;
       await wallet.AddOutput(outpoint, out, u.height);
       wallet.emit('balance_changed');
-      added++;
     } catch (err) {
       console.error(
         `[rescue-scan] hydrate failed for ${outpoint}: ${err.message}`,
@@ -357,7 +361,7 @@ async function scanAndHydrateAddr(wallet, address, scan) {
       ok = false;
     }
   }
-  return { ok, added };
+  return { ok, used: true };
 }
 
 async function getBranchAddrs(wallet, branch) {

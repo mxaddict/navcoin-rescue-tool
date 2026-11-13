@@ -370,11 +370,6 @@ badly each can cost a user coins. No test was written for any of them yet.
   (`purgeAllSources`). A failure between the two leaves registered sources
   with no databases, which now show as failed instead of as empty wallets.
   It no longer stops on a registry it cannot read.
-- **Low: the GUI log view fails on a multi-byte character at the tail
-  boundary.** `read_log_tail` in `src-tauri/src/lib.rs` seeks into the
-  file and calls `read_to_string`, which errors on a split character
-  before the partial first line is dropped. Fix: read bytes and decode
-  lossily.
 - **Low: a scan that finds no electrum client ends without a result.**
   `rescueScan` returns false when `wallet.client` is missing and `runScan`
   then leaves the source neither synced nor in error, with no retry. Read

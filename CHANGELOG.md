@@ -13,6 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- The GUI's log view no longer shows "Log read failed" on a long log. It
+  reads the last 256 KB, and when that cut landed inside a multi-byte
+  character, such as the dash in the scan's own messages, the whole read
+  failed.
 - A private key that is not a valid key is refused at import. A mistyped
   key or a stray word was accepted, read as some other key, and became a
   wallet that showed as empty.

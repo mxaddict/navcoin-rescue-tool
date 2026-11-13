@@ -88,17 +88,28 @@ fn read_log_tail() -> Result<String, String> {
     let start = len.saturating_sub(LOG_TAIL_BYTES);
     file.seek(SeekFrom::Start(start))
         .map_err(|e| format!("seek {}: {}", path.display(), e))?;
-    let mut buf = String::new();
-    file.read_to_string(&mut buf)
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
         .map_err(|e| format!("read {}: {}", path.display(), e))?;
-    // If we sliced into the middle of a UTF-8 codepoint or line, drop
-    // the partial first line.
-    if start > 0 {
-        if let Some(idx) = buf.find('\n') {
-            buf = buf[idx + 1..].to_string();
-        }
+    Ok(log_tail_text(&bytes, start > 0))
+}
+
+/// The text of a log tail read as raw bytes. `cut` says the read started
+/// part-way into the file, so the first line is partial and is dropped.
+///
+/// Decoded lossily, after the read: the cut can land inside a multi-byte
+/// character (the log has them, in the scan's own messages), and reading
+/// straight into a String fails the whole read on that one character,
+/// before the partial line it belongs to could be dropped.
+fn log_tail_text(bytes: &[u8], cut: bool) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    if !cut {
+        return text.into_owned();
     }
-    Ok(buf)
+    match text.find('\n') {
+        Some(idx) => text[idx + 1..].to_string(),
+        None => text.into_owned(),
+    }
 }
 
 /// The daemon's auth cookie, or None when there is no readable one — a
@@ -270,4 +281,39 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::log_tail_text;
+
+    #[test]
+    fn a_whole_log_is_returned_as_it_is() {
+        assert_eq!(log_tail_text(b"one\ntwo\n", false), "one\ntwo\n");
+    }
+
+    #[test]
+    fn a_cut_tail_drops_its_partial_first_line() {
+        assert_eq!(log_tail_text(b"rtial\ntwo\nthree\n", true), "two\nthree\n");
+    }
+
+    // The cut landed inside the em dash of a scan message. Reading the
+    // tail straight into a String failed the whole read on it.
+    #[test]
+    fn a_cut_inside_a_character_does_not_fail_the_read() {
+        let line = "resumed scan — skipping\nnext line\n".as_bytes();
+        let dash = line.iter().position(|byte| *byte == 0xE2).unwrap();
+        let tail = &line[dash + 1..];
+        assert!(std::str::from_utf8(tail).is_err());
+
+        assert_eq!(log_tail_text(tail, true), "next line\n");
+    }
+
+    #[test]
+    fn a_cut_tail_with_no_line_break_is_kept() {
+        assert_eq!(
+            log_tail_text(b"still being written", true),
+            "still being written"
+        );
+    }
 }

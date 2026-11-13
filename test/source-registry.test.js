@@ -5,7 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
-import { bootstrapAppData } from '../src/app-data.js';
+import { bootstrapAppData, getLayout } from '../src/app-data.js';
 import {
   MNEMONIC_DERIVATION_TYPES,
   STATIC_WALLET_PASSWORD,
@@ -14,6 +14,7 @@ import {
   importSources,
   markSourceFailed,
   markSourceSynced,
+  purgeAllSources,
   readSources,
   removeSource,
   updateSources,
@@ -25,6 +26,10 @@ import { getProjectRoot, makeProjectTempDir } from './test-helpers.js';
 const ADAPTER_URL = pathToFileURL(
   path.join(getProjectRoot(), 'src', 'navcoin-js-adapter.js'),
 ).href;
+
+// Two valid WIF keys, for the raw keys 0x11…11 and 0x22…22.
+const WIF_A = 'PCYkw9os1GcuAXFjzWEUwFbd9Y9dGzth2hME72zYMLqDBr1xWMCH';
+const WIF_B = 'PD7w76ZnkUpBARXG2eG1TQ1BxuAQLE7Le8FuGw1t3ucf92xsK29K';
 
 // A valid BIP39 phrase that fails no checksum, so every derivation except
 // navcoin-core (which needs 24 words) accepts it.
@@ -173,7 +178,7 @@ test('a waived checksum failure collapses the group to navcoin-core', async () =
 test('a private key still imports as a single source', async () => {
   await withRoot(async (root) => {
     const { importId, sources } = await importSources(
-      { type: 'private-key', keys: ['aaa', 'bbb'] },
+      { type: 'private-key', keys: [WIF_A, WIF_B] },
       root,
       fakeAdapter(),
     );
@@ -243,7 +248,7 @@ test('validateImportInput reports the derivations without touching disk', () => 
   // A private key has no derivation to choose, and the single null keeps
   // the caller's loop the same shape for both source types.
   assert.deepEqual(
-    validateImportInput({ type: 'private-key', keys: ['abc'] }).walletTypes,
+    validateImportInput({ type: 'private-key', keys: [WIF_A] }).walletTypes,
     [null],
   );
 
@@ -288,16 +293,18 @@ test('a failed wallet creation is not persisted', async () => {
 
   try {
     await withRoot(async (root) => {
-      // A malformed WIF gets through validateImportInput — which only
-      // requires a non-empty key — and fails inside navcoin-js while the
-      // wallet is being built. That is the failure this test is about: the
-      // mnemonic cases it used to use are now refused at the input, which
-      // never reaches wallet creation at all.
+      // A wallet that fails while it is being built, through the real
+      // adapter. Bad phrases and bad keys are refused at the input now and
+      // never get this far, so the failure is made where the worker cannot
+      // avoid it: a directory sits where the shim keeps the registry of
+      // databases every wallet in the directory shares.
+      const { walletsDir } = getLayout(root);
+      await fs.mkdir(path.join(walletsDir, '__sysdb__.sqlite'), {
+        recursive: true,
+      });
+
       await assert.rejects(
-        importSources(
-          { type: 'private-key', keys: ['not-a-valid-wif-key'] },
-          root,
-        ),
+        importSources({ type: 'private-key', keys: [WIF_A] }, root),
         /navcoin-js/,
       );
 
@@ -535,4 +542,141 @@ test('a phrase typed with capitals is the same phrase', () => {
     validateImportInput({ type: 'mnemonic', phrase: VALID_12.toUpperCase() }),
     plain,
   );
+});
+
+// navcoin-js imports a key through bitcore's PrivateKey.fromWIF, which
+// reads any string of hex digits as a raw key instead of refusing it. A
+// stray word or a mistyped key was accepted and became a wallet for some
+// other key, which then read as empty.
+test('a private key that is not a key is refused at import', () => {
+  const badChecksum = WIF_A.slice(0, -1) + (WIF_A.endsWith('H') ? 'J' : 'H');
+
+  for (const key of ['abc', 'not-a-valid-wif-key', badChecksum, WIF_A + 'x']) {
+    assert.throws(
+      () => validateImportInput({ type: 'private-key', keys: [key] }),
+      (error) => {
+        assert.match(error.message, /1 of 1 private key\(s\) are not valid/);
+        // Counted, never quoted: the message reaches the daemon log.
+        assert.ok(!error.message.includes(key), key);
+        return true;
+      },
+    );
+  }
+
+  assert.throws(
+    () => validateImportInput({ type: 'private-key', keys: [WIF_A, 'abc'] }),
+    /1 of 2 private key\(s\) are not valid/,
+  );
+
+  // A whole raw key is one navcoin-js imports as given.
+  assert.doesNotThrow(() =>
+    validateImportInput({ type: 'private-key', keys: ['11'.repeat(32)] }),
+  );
+});
+
+test('the same key twice in one import is one key', () => {
+  assert.equal(
+    validateImportInput({ type: 'private-key', keys: [WIF_A, WIF_A, WIF_B] })
+      .normalizedDetails,
+    validateImportInput({ type: 'private-key', keys: [WIF_B, WIF_A] })
+      .normalizedDetails,
+  );
+});
+
+// A private-key source is fingerprinted by its whole key set, so {A} and
+// then {A, B} were two sources both holding A: its coins counted twice,
+// and the second sweep leg spending what the first already had.
+test('a key another source already holds is refused', async () => {
+  await withRoot(async (root) => {
+    const first = await importSources(
+      { type: 'private-key', keys: [WIF_A] },
+      root,
+      fakeAdapter(),
+    );
+
+    const adapter = fakeAdapter();
+    await assert.rejects(
+      importSources(
+        { type: 'private-key', keys: [WIF_A, WIF_B] },
+        root,
+        adapter,
+      ),
+      (error) => {
+        assert.match(error.message, /already holds one or more of these keys/);
+        assert.ok(error.message.includes(first.sources[0].id));
+        assert.ok(!error.message.includes(WIF_A));
+        return true;
+      },
+    );
+    assert.deepEqual(adapter.calls.created, []);
+    assert.equal((await readSources(root)).sources.length, 1);
+
+    // A key nobody holds still imports.
+    await importSources(
+      { type: 'private-key', keys: [WIF_B] },
+      root,
+      fakeAdapter(),
+    );
+    assert.equal((await readSources(root)).sources.length, 2);
+  });
+});
+
+// A registry that cannot be read is the state a purge is most needed in.
+test('purge goes ahead when sources.json cannot be read', async (t) => {
+  await withRoot(async (root) => {
+    const secret = 'abandon abandon abandon not json';
+    await fs.writeFile(getLayout(root).sourcesFile, secret);
+    const logged = [];
+    t.mock.method(console, 'error', (...args) => logged.push(args.join(' ')));
+
+    let purged = 0;
+    const result = await purgeAllSources(root, {
+      purgeWallets: async () => {
+        purged += 1;
+      },
+    });
+
+    assert.equal(purged, 1);
+    assert.deepEqual(result, { purgedCount: 0 });
+    assert.deepEqual(await readSources(root), { sources: [] });
+    // The reason is logged without quoting the file, which holds phrases.
+    assert.equal(logged.length, 1);
+    assert.match(logged[0], /sources\.json not readable \(SyntaxError\)/);
+    assert.ok(!logged[0].includes('abandon'));
+  });
+});
+
+// The parent parses all of the worker's stdout as its reply. navcoin-js
+// prints to console.log on failures it carries on from, and one such line
+// made the reply unparseable: a wallet that was built, reported as failed.
+// The preload stands in for the dependency, printing once the worker's own
+// module has run.
+test('a line a dependency prints does not corrupt the worker reply', async () => {
+  await withRoot(async (root) => {
+    const preload =
+      'setTimeout(() => console.log("printed by a dependency"), 0);';
+    const child = spawn(
+      process.execPath,
+      [
+        `--import=data:text/javascript,${encodeURIComponent(preload)}`,
+        path.join(getProjectRoot(), 'src', 'wallet-worker.js'),
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    child.stdin.end(
+      JSON.stringify({
+        mode: 'forget',
+        databaseName: 'no-such-wallet.db',
+        walletsDir: getLayout(root).walletsDir,
+      }),
+    );
+    await new Promise((resolve) => child.once('close', resolve));
+
+    assert.deepEqual(JSON.parse(stdout), { ok: true });
+    assert.match(stderr, /printed by a dependency/);
+  });
 });

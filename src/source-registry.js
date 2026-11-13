@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 
+import bitcoreLib from '@aguycalled/bitcore-lib';
+
 import {
   getAppDataRoot,
   getLayout,
@@ -26,13 +28,33 @@ function normalizeMnemonic(phrase) {
   return phrase.toLowerCase().trim().split(/\s+/).filter(Boolean).join('\n');
 }
 
+// Deduplicated: the same key twice in one import is still one key.
 function normalizePrivateKeys(keys) {
-  return keys
-    .flatMap((key) => key.split(/[\s,]+/))
-    .map((key) => key.trim())
-    .filter(Boolean)
-    .sort();
+  return [
+    ...new Set(
+      keys
+        .flatMap((key) => key.split(/[\s,]+/))
+        .map((key) => key.trim())
+        .filter(Boolean),
+    ),
+  ].sort();
 }
+
+// Whether navcoin-js can import `key` as the key it reads as. It imports
+// through bitcore's PrivateKey.fromWIF, which does not reject what is not
+// WIF: it reads any string of hex digits as a raw key, so a mistyped key
+// or a stray word was accepted and became a wallet for some other key. A
+// WIF key has to come back as itself; a raw key has to be all 32 bytes.
+function isImportablePrivateKey(key) {
+  if (/^[0-9a-fA-F]{64}$/.test(key)) return PrivateKey.isValid(key);
+  try {
+    return PrivateKey.fromWIF(key).toWIF() === key;
+  } catch {
+    return false;
+  }
+}
+
+const { PrivateKey } = bitcoreLib;
 
 function buildFingerprint(parts) {
   return crypto.createHash('sha256').update(parts.join('\n')).digest('hex');
@@ -87,6 +109,15 @@ export function validateImportInput(input) {
   const normalizedKeys = normalizePrivateKeys(input.keys || []);
   if (normalizedKeys.length === 0) {
     throw new Error('At least one private key is required.');
+  }
+
+  // Counted, never quoted: the message reaches the daemon log.
+  const invalid = normalizedKeys.filter((key) => !isImportablePrivateKey(key));
+  if (invalid.length > 0) {
+    throw new Error(
+      `${invalid.length} of ${normalizedKeys.length} private key(s) are not ` +
+        `valid WIF keys. Check them against your backup.`,
+    );
   }
 
   return {
@@ -178,6 +209,25 @@ export async function importSources(
 
   if (fresh.length === 0) {
     throw new Error(`Duplicate source: ${importId}`);
+  }
+
+  // A private-key source is fingerprinted by its whole key set, so a set
+  // that overlaps an earlier one is a different source holding some of the
+  // same keys. Their coins would be counted in both, and a sweep would
+  // spend them from the first and then fail on the second.
+  if (validated.type === 'private-key') {
+    const keys = new Set(validated.normalizedDetails.split('\n'));
+    const holder = state.sources.find(
+      (source) =>
+        source.type === 'private-key' &&
+        source.normalizedDetails.split('\n').some((key) => keys.has(key)),
+    );
+    if (holder) {
+      throw new Error(
+        `Source ${holder.id} already holds one or more of these keys. ` +
+          `Import only the keys that are new, or remove that source first.`,
+      );
+    }
   }
 
   const created = [];
@@ -297,7 +347,18 @@ export async function purgeAllSources(
     purgeWallets: purgeOpenedWallets,
   },
 ) {
-  const state = await readSources(root);
+  // Only for the count in the reply. A registry that cannot be read is the
+  // state a purge is most needed in, and must not be what stops it: the
+  // secrets it holds are deleted below either way.
+  const state = await readSources(root).catch((error) => {
+    // Its kind only: a JSON error's message quotes the text it choked on,
+    // and this file holds phrases and keys.
+    console.error(
+      `[registry] sources.json not readable (${error.code ?? error.name}), ` +
+        `purging anyway`,
+    );
+    return { sources: [] };
+  });
 
   // Every wallet and the ___tx___ cache go, so nothing stale is left to
   // cause ConstraintErrors on the next import of the same key or mnemonic.

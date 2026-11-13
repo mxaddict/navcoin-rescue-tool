@@ -351,18 +351,25 @@ badly each can cost a user coins. No test was written for any of them yet.
   flow read, neither platform outcome run. Fix: track the creation promise
   per source, have the routes await it, and re-check the registry before
   opening.
-- **Low-medium: overlapping private-key imports hold one key twice.** The
-  import fingerprint hashes the sorted key set, so `{A}` and then `{A, B}`
-  are two sources both holding A. Balances double and the second sweep leg
-  conflicts with the first. WIF format is also not checked at import, so a
-  bad key is accepted and fails later. By reading; the broadcast rejection
-  is inferred. Fix: reject a key another source already holds, and
-  validate the format.
-- **Low: purge reads the registry first and deletes wallets before
-  emptying it** (`purgeAllSources` in `source-registry.js`): a corrupt
-  `sources.json` makes `/purge` fail with nothing deleted, and a failure
-  between the two steps leaves registered sources without databases, the
-  first finding's precondition.
+- **Private-key imports: what is left.** A key that is not a key is now
+  refused, and so is a key another private-key source already holds
+  (`isImportablePrivateKey` and the overlap check in `importSources`, in
+  `source-registry.js`). Left open: the overlap check reads the registry
+  before the wallet is built and is not repeated in the final
+  `updateSources`, so two overlapping imports started at the same moment
+  can both pass; and a key held by a private-key source is not compared
+  with keys a mnemonic source derives.
+- **`createImportedWallet` takes an existing database file for a built
+  wallet.** In `navcoin-js-adapter.js` it returns success without running
+  the worker when the file is there, so a file a killed worker left
+  half-written passes as built. Opening it then fails as a missing wallet
+  when it has no master key, which is safe; one that got its master key
+  but not all its keys would open short of keys. Found while writing a
+  test, by reading; not reproduced.
+- **Purge still deletes wallets before emptying the registry**
+  (`purgeAllSources`). A failure between the two leaves registered sources
+  with no databases, which now show as failed instead of as empty wallets.
+  It no longer stops on a registry it cannot read.
 - **Low: the GUI log view fails on a multi-byte character at the tail
   boundary.** `read_log_tail` in `src-tauri/src/lib.rs` seeks into the
   file and calls `read_to_string`, which errors on a split character
@@ -386,10 +393,6 @@ badly each can cost a user coins. No test was written for any of them yet.
     "port refused" for "gone", but `performShutdown` closes the listener
     before the wallets, so the replacement can start while the old process
     is still closing them.
-  - The wallet worker's reply shares stdout with whatever navcoin-js
-    prints there, so one stray line turns a successful creation into a
-    failed one (`runWalletWorker` cannot parse the reply). Trigger
-    inferred.
   - The header comment in `tx-cache.js` says a failed `AddTx` surfaces as
     before; `addTxOnce` rethrows where upstream logged and returned.
 - **Not reviewed:** indexeddbshim internals behind `wallet-database.js`;

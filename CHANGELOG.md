@@ -13,6 +13,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- A private key that is not a valid key is refused at import. A mistyped
+  key or a stray word was accepted, read as some other key, and became a
+  wallet that showed as empty.
+- A private key that an earlier import already holds is refused. Importing
+  key A and then keys A and B made two sources both holding A: its balance
+  was counted twice, and a sweep failed part-way after spending it once.
+- Purge works when `sources.json` cannot be read. It used to stop with
+  nothing deleted.
+- A wallet that was built is no longer reported as failed because a
+  library printed a line while it was being built.
 - An empty or damaged `auth.cookie` no longer switches the daemon's
   authentication off. A zero-byte cookie file, as a full disk or a crash
   during its first write can leave, made the expected cookie empty, and a

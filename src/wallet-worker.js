@@ -19,6 +19,15 @@ import path from 'node:path';
 import { getDerivationWalletType } from './constants.js';
 import { forgetDatabase, shimConfig } from './wallet-database.js';
 
+// stdout carries the reply and nothing else: the parent parses all of it
+// as one JSON document. navcoin-js prints to console.log on some failures
+// it then carries on from (a key that would not store in ImportPrivateKey,
+// for one), and one such line makes the reply unparseable: a source marked
+// failed with a good wallet on disk. Everything else goes to stderr, which
+// the parent reads as progress and diagnostics.
+console.log = console.error;
+console.info = console.error;
+
 // Send the one reply the parent reads, then exit once it has been
 // written. On Windows a write to a pipe is asynchronous, so exiting
 // straight after it can drop the reply: the parent then sees a bare exit

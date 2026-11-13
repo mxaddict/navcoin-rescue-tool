@@ -351,13 +351,6 @@ badly each can cost a user coins. No test was written for any of them yet.
   flow read, neither platform outcome run. Fix: track the creation promise
   per source, have the routes await it, and re-check the registry before
   opening.
-- **Low-medium: an empty `auth.cookie` turns authentication off.**
-  `ensureAuthCookie` in `app-data.js` accepts any existing file and writes
-  it non-atomically; a zero-byte file gives an empty cookie, and a request
-  with an empty `Authorization` header then matches. The comparison was
-  run by the reviewer; that a web page can send it is inferred. Fix:
-  regenerate a cookie that is not the expected length, and write it
-  through a rename.
 - **Low-medium: overlapping private-key imports hold one key twice.** The
   import fingerprint hashes the sorted key set, so `{A}` and then `{A, B}`
   are two sources both holding A. Balances double and the second sweep leg

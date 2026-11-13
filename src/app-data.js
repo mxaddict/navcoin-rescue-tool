@@ -174,17 +174,30 @@ export async function bootstrapAppData(root = getAppDataRoot()) {
   return layout;
 }
 
+const AUTH_COOKIE_BYTES = 24;
+const AUTH_COOKIE_PATTERN = new RegExp(`^[0-9a-f]{${AUTH_COOKIE_BYTES * 2}}$`);
+
+// Returns the daemon's auth cookie, creating it when there is none.
+//
+// A cookie file that does not hold a whole cookie is replaced, not used.
+// The daemon lets a request in when its Authorization header equals the
+// cookie, so an empty file, as a full disk or a crash during the first
+// write leaves, made the cookie the empty string and an empty header
+// enough to pass. Written through a rename for the same reason: a reader
+// must never see half of it.
 export async function ensureAuthCookie(root = getAppDataRoot()) {
   const layout = getLayout(root);
 
-  if (!(await pathExists(layout.authCookieFile))) {
-    const authCookie = crypto.randomBytes(24).toString('hex');
-    await fs.writeFile(layout.authCookieFile, `${authCookie}\n`, {
-      mode: 0o600,
-    });
-  }
+  const existing = (await pathExists(layout.authCookieFile))
+    ? await readAuthCookie(root)
+    : '';
+  if (AUTH_COOKIE_PATTERN.test(existing)) return existing;
 
-  return readAuthCookie(root);
+  const authCookie = crypto.randomBytes(AUTH_COOKIE_BYTES).toString('hex');
+  const tempPath = `${layout.authCookieFile}.${process.pid}.tmp`;
+  await fs.writeFile(tempPath, `${authCookie}\n`, { mode: 0o600 });
+  await fs.rename(tempPath, layout.authCookieFile);
+  return authCookie;
 }
 
 export async function readAuthCookie(root = getAppDataRoot()) {

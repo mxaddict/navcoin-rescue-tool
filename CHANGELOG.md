@@ -13,6 +13,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and retried with no pause, over a hundred times a second, which kept an
   overloaded server refusing the wallet. Each retry now waits first,
   starting at one second and growing to thirty while the errors continue.
+- An empty or damaged `auth.cookie` no longer switches the daemon's
+  authentication off. A zero-byte cookie file, as a full disk or a crash
+  during its first write can leave, made the expected cookie empty, and a
+  request with an empty `Authorization` header was let in. A cookie file
+  that does not hold a whole cookie is now replaced with a new one.
 - A phrase typed with capital letters is accepted. A keyboard that
   capitalises the first word made a correct phrase fail with "at least one
   word is wrong".

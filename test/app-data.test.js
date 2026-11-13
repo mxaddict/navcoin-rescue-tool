@@ -5,7 +5,9 @@ import assert from 'node:assert/strict';
 
 import {
   bootstrapAppData,
+  ensureAuthCookie,
   getAppDataRoot,
+  readAuthCookie,
   readStatus,
   writeDaemonState,
   writeJsonFileAtomic,
@@ -100,6 +102,33 @@ test('reading and writing daemon state at once never fails', async () => {
       if (result.status === 'rejected') throw result.reason;
     }
     assert.equal((await readStatus(root)).daemon.round, 199);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+// The daemon lets a request in when its Authorization header equals the
+// cookie. An empty cookie file, as a full disk or a crash during the first
+// write leaves, made that the empty string: an empty header passed, and
+// the CLI went on working, so nothing looked wrong.
+test('a cookie file that does not hold a whole cookie is replaced', async () => {
+  const root = await makeProjectTempDir('app-data-cookie');
+  const cookieFile = path.join(root, 'auth.cookie');
+
+  try {
+    await bootstrapAppData(root);
+    const original = await ensureAuthCookie(root);
+    assert.match(original, /^[0-9a-f]{48}$/);
+    // A good cookie is kept: clients already hold it.
+    assert.equal(await ensureAuthCookie(root), original);
+
+    for (const broken of ['', '\n', original.slice(0, 20), 'not a cookie']) {
+      await fs.writeFile(cookieFile, broken);
+      const replaced = await ensureAuthCookie(root);
+      assert.match(replaced, /^[0-9a-f]{48}$/, JSON.stringify(broken));
+      assert.notEqual(replaced, original);
+      assert.equal(await readAuthCookie(root), replaced);
+    }
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

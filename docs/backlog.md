@@ -176,9 +176,10 @@ after removing and re-importing a phrase. Every case is now a test in
   rewriting `destroyDatabase` for the new handle and re-checking
   `SQLITE_BUSY_TIMEOUT_MS`, which is passed as the shim's `sqlBusyTimeout`.
 - **A wallet whose creation failed is still forgotten through the worker**
-  (`deleteWalletForSource` in `createImportedWallet`). That is right while
-  the daemon never opens such a wallet; if it ever does, that path needs
-  `deleteOpenedWallet` too.
+  (`deleteWalletForSource` in `createImportedWallet`). That assumed the
+  daemon never opens such a wallet. It does, on the next start (see the
+  first finding of the 2026-11-13 review), so that path needs
+  `deleteOpenedWallet` too once the open is fixed.
 - **The sqlite busy timeout has no test in the suite.** Parallel wallet
   creation under load (four processes each creating the fixture phrase's
   derivations, fourteen rounds) failed 13 of 168 creations at the default
@@ -209,9 +210,10 @@ electrum server answering busy` on `ubuntu-24.04-arm`. Mechanism, found by
   the flake above: `performShutdown` in `daemon.js` does not stop or wait for
   the workers `runWalletWorker` spawned, so a stop during an import leaves a
   worker writing the wallet database until it finishes or hits its own
-  timeout (`WORKER_TIMEOUT_MS` in `wallet-worker.js`). Not seen to cause harm
-  for users; a restart right after could open a wallet a worker is still
-  writing. Not reproduced.
+  timeout (`WORKER_TIMEOUT_MS` in `wallet-worker.js`). A restart right after
+  opens a wallet the worker is still writing, and if its master key is not
+  in yet, navcoin-js writes a random one into it (the first finding of the
+  2026-11-13 review). Not reproduced.
 - Removing a source mid-setup now logs
   `[electrum] connection setup stopped by the wallet closing: …` — expected,
   not a fault.
@@ -234,11 +236,6 @@ electrum server answering busy` on `ubuntu-24.04-arm`. Mechanism, found by
 - `sources.json` now holds the same phrase once per derivation, in
   `normalizedDetails` on every source of the group. Same file, same 0600
   mode, more copies of the secret.
-- Two `POST /import` calls for different phrases that overlap can lose
-  one: `importSources` reads `sources.json`, awaits wallet creation, then
-  writes the whole array back, so the later write wins. The daemon's
-  import returns before the wallets are built, which keeps the window
-  small. Not reproduced, and no client issues concurrent imports today.
 - `explainNoEligibleWalletType` ends in a fallback that cannot be
   reached — navcash has no word-count rule and its check returns a
   boolean, so it always contributes a checksum error for a phrase no
@@ -302,6 +299,135 @@ to `/sweep/confirm` is lost. What that leaves open:
 - **Coverage gap:** the 300 s after which fetch gives up waiting for the
   reply was read in the repo's undici 6.28, not in the Node 22.11 the
   release bundles.
+
+## Codebase review 2026-11-13: findings not fixed
+
+A correctness review of the whole tree: `rescue-scan.js`,
+`wallet-manager.js`, `electrum-connection.js` and `sweep.js` were read in
+full in-session; everything else by a read-only reviewer whose report was
+then checked against the code where marked "re-checked". Ordered by how
+badly each can cost a user coins. No test was written for any of them yet.
+
+- **High: a source with no wallet database is opened as a new random
+  wallet and shown as synced with nothing in it.** Re-checked.
+  `openSourceWallet` in `wallet-manager.js` builds `WalletFile` without a
+  phrase, and navcoin-js `Load` then generates a random one and emits
+  `new_mnemonic` whenever the database has no `masterPubKey`. `main` in
+  `daemon.js` opens every record in `sources.json` whatever its `status`,
+  and `/import` writes the record before any wallet exists. So a source
+  whose wallet was never built (the daemon or its worker died during the
+  import, or creation failed and was rolled back), or whose database was
+  deleted while the registry write failed, becomes on the next start an
+  empty wallet that scans, reads "synced, 0", and gets `lastSyncedAt`.
+  Re-importing the phrase is refused as a duplicate. The reviewer
+  reproduced the missing-database case with the daemon's own `Load`
+  options; the half-built timings are inferred. Smallest fix: fail the
+  open on `new_mnemonic`, skip sources with `status: 'error'` in `main`,
+  and record that a source's wallet was built so an unbuilt one is rebuilt
+  rather than opened.
+- **High: the branch walk stops at the gap limit counted from the last
+  address holding unspent coins, not the last used one.** Read in
+  `walkBranch` in `rescue-scan.js`: `lastUsedIdx` moves only when
+  `scanAndHydrateAddr` added an output, and an address with history but
+  nothing unspent adds none. A wallet whose first `gapLimit` addresses of
+  a branch were all used and emptied, as a change branch is after that
+  many payments, ends the walk there, and coins on a later address are
+  never looked for. The source still reads synced. Not reproduced against
+  a real wallet. Fix: count an address as used when it has history.
+- **High: a scan with failed lookups is still recorded as synced.** Read
+  in `rescueScan`: a failed history or unspent lookup is counted in
+  `scan.failures`, which only holds back the stale-UTXO reap; the scan
+  returns true and `runScan` marks the source synced. Not counted at all:
+  a failed `GetTx` while hydrating an output (`scanAndHydrateAddr`,
+  `scanStaking`), which leaves a seen coin out of the balance, and a failed
+  `blockchain_staking_getKeys` (`discoverStakingPartners`), which leaves a
+  cold-staking partner unknown. A server answering "busy" for some
+  requests therefore yields a synced source with coins missing, and the
+  sweep leaves them behind without a word. The entry under "Electrum
+  failover" about navcoin-js's own `sync_finished` is the same hole from
+  another side.
+  Not reproduced. Fix: retry the failed lookups, and end the scan as
+  incomplete, not synced, if any still fail.
+- **High: a sweep cannot see a source that has no open wallet.**
+  `prepareSweep` and `executeSweep` in `sweep.js` look only at
+  `listSourceStates()`, and a source has no live state until its wallet
+  worker finishes. Sweeping while a just-imported phrase is still being
+  built, or after a wallet failed to build, previews and sweeps the other
+  sources and reports success, with the missing one neither blocking nor
+  listed under `skipped`. From the reviewer, by reading; not run. Fix: in
+  both sweep routes, treat every registered source without live state as
+  blocked.
+- **Medium: `/remove` or `/purge` during a background wallet creation.**
+  The creation chain in the `/import` handler is not tracked, the two
+  routes do not wait for it, and its `.then` opens the source without
+  checking it is still registered. A removal in that window can leave a
+  wallet open under an id no longer in `sources.json`: invisible on
+  `/status`, but counted by the sweep guard. From the reviewer, control
+  flow read, neither platform outcome run. Fix: track the creation promise
+  per source, have the routes await it, and re-check the registry before
+  opening.
+- **Medium: a phrase with a capital letter is rejected as a checksum
+  failure.** `normalizeMnemonic` in `source-registry.js` does not
+  lowercase, so a correct phrase from an autocapitalising keyboard fails.
+  For 24 words the failure is offered as waivable; waived, it imports only
+  as `navcoin-core` and then fails in the worker, because
+  `assertMnemonicAccepted` in `mnemonic.js` returns on the waiver before
+  any wordlist check. The reviewer ran the validation; the worker failure
+  is inferred. Fix: lowercase, and require a wordlist match under the
+  waiver too.
+- **Low-medium: an empty `auth.cookie` turns authentication off.**
+  `ensureAuthCookie` in `app-data.js` accepts any existing file and writes
+  it non-atomically; a zero-byte file gives an empty cookie, and a request
+  with an empty `Authorization` header then matches. The comparison was
+  run by the reviewer; that a web page can send it is inferred. Fix:
+  regenerate a cookie that is not the expected length, and write it
+  through a rename.
+- **Low-medium: overlapping private-key imports hold one key twice.** The
+  import fingerprint hashes the sorted key set, so `{A}` and then `{A, B}`
+  are two sources both holding A. Balances double and the second sweep leg
+  conflicts with the first. WIF format is also not checked at import, so a
+  bad key is accepted and fails later. By reading; the broadcast rejection
+  is inferred. Fix: reject a key another source already holds, and
+  validate the format.
+- **Low: purge reads the registry first and deletes wallets before
+  emptying it** (`purgeAllSources` in `source-registry.js`): a corrupt
+  `sources.json` makes `/purge` fail with nothing deleted, and a failure
+  between the two steps leaves registered sources without databases, the
+  first finding's precondition.
+- **Low: the GUI log view fails on a multi-byte character at the tail
+  boundary.** `read_log_tail` in `src-tauri/src/lib.rs` seeks into the
+  file and calls `read_to_string`, which errors on a split character
+  before the partial first line is dropped. Fix: read bytes and decode
+  lossily.
+- **Low: a scan that finds no electrum client ends without a result.**
+  `rescueScan` returns false when `wallet.client` is missing and `runScan`
+  then leaves the source neither synced nor in error, with no retry. Read
+  in-session; the window between `waitForConnected` and the scan starting
+  is small and it was not reproduced.
+- **Low, from the reviewer, by reading:**
+  - `main` in `daemon.js` ends the open-every-source chain with an empty
+    catch, so a failure of `getNavWallet` or `readSources` at start logs
+    nothing and every source shows `wallet-created` with no balance.
+  - A second daemon that loses the port writes `status: 'error'` into the
+    shared `daemon.json` while the first is running.
+  - `/daemon/stop` does not wait for a running sweep, and both the GUI's
+    `ensure_daemon` and `stopDaemonFromOtherVersion` send it on a version
+    mismatch.
+  - `stopDaemonFromOtherVersion` and the GUI's `wait_for_daemon_gone` take
+    "port refused" for "gone", but `performShutdown` closes the listener
+    before the wallets, so the replacement can start while the old process
+    is still closing them.
+  - The wallet worker's reply shares stdout with whatever navcoin-js
+    prints there, so one stray line turns a successful creation into a
+    failed one (`runWalletWorker` cannot parse the reply). Trigger
+    inferred.
+  - The header comment in `tx-cache.js` says a failed `AddTx` surfaces as
+    before; `addTxOnce` rethrows where upstream logged and returned.
+- **Not reviewed:** indexeddbshim internals behind `wallet-database.js`;
+  key derivation per wallet type in `mnemonic.js` and `wallet-worker.js`;
+  `tui.js` against blessed's real behaviour; `src-tauri/daemon-launch`
+  tests, `build.rs` and the Tauri capability files; GUI styling; anything
+  on a real daemon run on any platform.
 
 ## Codebase review 2026-11-08: findings not fixed
 

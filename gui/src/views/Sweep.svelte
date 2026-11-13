@@ -275,14 +275,37 @@
     </div>
   </section>
 {:else if step === 'done' && result}
-  <div class="callout success">
-    <p>
-      Sweep broadcast. Sent
-      <span class="num strong mono">{fmt(result.totalSent)}</span>
-      across {result.hashes?.length ?? 0} transaction(s); fees
-      <span class="mono">{fmt(result.totalFee)}</span>.
-    </p>
-  </div>
+  {#if result.hashes?.length}
+    <div class="callout success">
+      <p>
+        Sweep broadcast. Sent
+        <span class="num strong mono">{fmt(result.totalSent)}</span>
+        across {result.hashes.length} transaction(s); fees
+        <span class="mono">{fmt(result.totalFee)}</span>.
+      </p>
+    </div>
+  {:else}
+    <div class="callout error"><p>Nothing was broadcast.</p></div>
+  {/if}
+
+  {#if result.leftBehind?.length}
+    <div class="callout error">
+      <p>Not swept:</p>
+      <ul>
+        {#each result.leftBehind as left}
+          <li>
+            <span class="mono">{fmt(left.amount)}</span>
+            {left.coin} in {left.sourceId}{left.walletType
+              ? ` (${left.walletType})`
+              : ''}:
+            {left.reason === 'too-small'
+              ? 'in outputs too small to pay their own fee'
+              : 'not spendable yet; sweep again once it has confirmed or matured'}
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
 
   {#if result.hashes?.length}
     <section class="card">

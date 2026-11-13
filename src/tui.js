@@ -14,6 +14,7 @@ import {
   purgeDaemon,
   rescanDaemon,
   sweepPrepare,
+  describeLeftBehind,
   sweepConfirm,
 } from './daemon-client.js';
 import {
@@ -802,13 +803,22 @@ export async function cmdSweep(C, root, log, ask) {
       },
     });
     const result = response.result;
-    log(C.teal('  Sweep broadcast successfully.'));
+    log(
+      result.hashes?.length
+        ? C.teal('  Sweep broadcast successfully.')
+        : C.pink('  Nothing was broadcast.'),
+    );
     log(
       `  Sent: ${C.cyan(navStr(result.totalSent))} NAV   Fee: ${C.muted(navStr(result.totalFee) + ' NAV')}`,
     );
     if (result.hashes?.length) {
       log('  Tx hashes:');
       for (const h of result.hashes) log(`    ${C.magenta(h)}`);
+    }
+    const left = describeLeftBehind(result.leftBehind);
+    if (left.length) {
+      log('  Not swept:');
+      for (const line of left) log(`    ${C.pink(line)}`);
     }
   } catch (error) {
     // The message can run to several lines: a sweep that failed part-way

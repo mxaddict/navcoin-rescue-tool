@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A wallet holding many unspent outputs can now be swept. The sweep asked
+  navcoin-js for one transaction spending everything, however many outputs
+  that was: past roughly 670 NAV inputs the transaction is over the size
+  navcoin-core will relay, and an xNAV transaction takes longer to build
+  with every input. Each leg is now sent as several transactions, of at
+  most 250 NAV inputs or 100 xNAV inputs each, one after another. The
+  transaction ids of all of them are listed, and a batch that fails stops
+  the sweep and names the ones already broadcast, as a failed leg did.
+- A sweep no longer fails, or quietly sends less than the balance, over
+  coins it cannot spend. xNAV outputs worth less than the fee their own
+  input adds are left out instead of lowering what arrives, and a stake
+  reward that has not matured no longer fails the whole NAV leg. Whatever
+  is not sent is listed under "Not swept" in the CLI, TUI and GUI with the
+  reason, and as `leftBehind` in the `/sweep/confirm` reply.
+- A sweep that sent nothing no longer reports "Sweep broadcast
+  successfully".
+
+### Changed
+
+- The daemon log says how many outputs each sweep leg spends and in how
+  many transactions, and names each one (`NAV 2/5`), so a log from a
+  failed sweep shows how large the wallet is and how far it got.
+
 ## [0.2.11] - 2026-11-13
 
 ### Fixed

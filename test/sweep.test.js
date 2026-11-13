@@ -7,10 +7,18 @@ import { bootstrapAppData } from '../src/app-data.js';
 import {
   executeSweep,
   getSweepStatus,
+  LEFT_NOT_SPENDABLE,
+  LEFT_TOO_SMALL,
   prepareSweep,
   SWEEP_BROADCAST_TIMEOUT_MS,
   SWEEP_BUILD_TIMEOUT_MS,
 } from '../src/sweep.js';
+import {
+  NAV_BATCH_INPUTS,
+  NAV_TX_FEE,
+  XNAV_BATCH_INPUTS,
+  XNAV_FEE_PER_ELEMENT,
+} from '../src/sweep-batches.js';
 import {
   openSourceWallet,
   closeSourceWallet,
@@ -52,6 +60,8 @@ class MockWalletFile extends EventEmitter {
       fee: 10000,
     };
     this._xnavTxResult = opts._xnavTxResult ?? null;
+    this._navCalls = [];
+    this._xnavCalls = [];
     // Support queue-based send results: if _sendResultQueue is set, pop from
     // the front on each SendTransaction call; otherwise fall back to _sendResult.
     this._sendResultQueue = opts._sendResultQueue ?? null;
@@ -89,6 +99,41 @@ class MockWalletFile extends EventEmitter {
     return this._balance;
   }
 
+  // What navcoin-js's GetUtxos returns, as far as the sweep reads it: the
+  // UTXO db's outputs of that type when a test set one, and otherwise one
+  // output holding the whole balance of that kind.
+  async GetUtxos(type) {
+    if (this._opts._spendable) return this._opts._spendable(type);
+    if (this._opts._utxos) {
+      return this._opts._utxos
+        .filter((utxo) => utxo.type & type)
+        .map((utxo) => ({
+          txid: utxo.id.split(':')[0],
+          vout: Number(utxo.id.split(':')[1]),
+          amount: utxo.amount,
+          output: { satoshis: utxo.amount },
+        }));
+    }
+    const xnav = type === 0x4;
+    const amount = xnav
+      ? (this._balance.xnav?.confirmed ?? 0)
+      : this._balance.nav.confirmed;
+    return [
+      {
+        txid: xnav ? 'x'.repeat(64) : 'n'.repeat(64),
+        vout: 0,
+        amount,
+        output: { satoshis: amount },
+      },
+    ];
+  }
+
+  // The sweep builds a NAV batch on an object inheriting from the wallet,
+  // so calls are recorded in an array the wallet and that object share.
+  get _lastTxArgs() {
+    return this._navCalls.at(-1);
+  }
+
   async NavCreateTransaction(
     destination,
     amount,
@@ -98,7 +143,7 @@ class MockWalletFile extends EventEmitter {
     fee,
     type,
   ) {
-    this._lastTxArgs = {
+    this._navCalls.push({
       destination,
       amount,
       memo,
@@ -106,8 +151,13 @@ class MockWalletFile extends EventEmitter {
       subtractFee,
       fee,
       type,
-    };
+      inputs: await this.GetUtxos(type),
+    });
     return this._txResult;
+  }
+
+  get _lastXNavTxArgs() {
+    return this._xnavCalls.at(-1);
   }
 
   async xNavCreateTransaction(
@@ -116,8 +166,17 @@ class MockWalletFile extends EventEmitter {
     memo,
     password,
     subtractFee,
+    ...rest
   ) {
-    this._lastXNavTxArgs = { destination, amount, memo, password, subtractFee };
+    this._xnavCalls.push({
+      destination,
+      amount,
+      memo,
+      password,
+      subtractFee,
+      from: rest[6],
+      useFullAmount: rest[7],
+    });
     return this._xnavTxResult;
   }
 
@@ -823,9 +882,11 @@ test('a sweep logs each leg it builds and broadcasts', async (t) => {
     const expected = [
       /^\d{4}-\d\d-\d\dT[\d:.]+Z \[sweep\] start: destination=NDestinationAddr1 ready=1 blocked=0 force=false$/,
       /\[sweep\] src-log: nav=400000000 xnav=600000000$/,
+      /\[sweep\] src-log NAV: 1 output\(s\) in 1 transaction batch\(es\)$/,
       /\[sweep\] src-log NAV: building transaction for 400000000$/,
       /\[sweep\] src-log NAV: built in \d+ms, fee=12000; broadcasting via mock-server:40004$/,
       /\[sweep\] src-log NAV: broadcast in \d+ms, hashes=nav-hash$/,
+      /\[sweep\] src-log xNAV: 1 output\(s\) in 1 transaction batch\(es\)$/,
       /\[sweep\] src-log xNAV: building transaction for 600000000$/,
       /\[sweep\] src-log xNAV: built in \d+ms, fee=25000; broadcasting via mock-server:40004$/,
       /\[sweep\] src-log xNAV: broadcast in \d+ms, hashes=xnav-hash$/,
@@ -1196,4 +1257,233 @@ test('registered sources with no wallet open at all are not "no sources"', async
     /No source is ready to sweep/,
   );
   assert.throws(() => prepareSweep(), /No imported sources/);
+});
+
+// Spendable outputs for the fake wallet: `nav` and `xnav` are lists of
+// amounts, each becoming one output.
+function spendableOutputs({ nav = [], xnav = [] }) {
+  const build = (amounts, prefix) =>
+    amounts.map((amount, index) => ({
+      txid: `${prefix}${index}`,
+      vout: 0,
+      amount,
+      output: { satoshis: amount },
+    }));
+  const navOutputs = build(nav, 'nav');
+  const xnavOutputs = build(xnav, 'xnav');
+  return (type) => (type === 0x4 ? xnavOutputs : navOutputs);
+}
+
+const outpointsOf = (outputs) => outputs.map((o) => `${o.txid}:${o.vout}`);
+
+test('a NAV leg with more outputs than one batch goes out in several', async (t) => {
+  captureSweepLog(t);
+  const amounts = Array.from(
+    { length: NAV_BATCH_INPUTS * 2 + 1 },
+    (_, index) => 1_0000_0000 + index,
+  );
+  const total = amounts.reduce((sum, amount) => sum + amount, 0);
+
+  await withSweepSource(
+    'nav-batches',
+    {
+      _balance: {
+        nav: { confirmed: total, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _spendable: spendableOutputs({ nav: amounts }),
+      _txResult: { tx: 'navhex', fee: NAV_TX_FEE },
+      _sendResultQueue: [
+        { hashes: ['nav-1'], error: null },
+        { hashes: ['nav-2'], error: null },
+        { hashes: ['nav-3'], error: null },
+      ],
+    },
+    async (state) => {
+      const result = await executeSweep('NDestinationAddr1');
+
+      const calls = state.wallet._navCalls;
+      assert.equal(calls.length, 3);
+      for (const call of calls) {
+        assert.ok(call.inputs.length <= NAV_BATCH_INPUTS);
+        assert.equal(call.fee, NAV_TX_FEE);
+        assert.equal(call.subtractFee, true);
+        // Each transaction is asked to send exactly what its inputs hold.
+        assert.equal(
+          call.amount,
+          call.inputs.reduce((sum, o) => sum + o.amount, 0),
+        );
+      }
+      // Every output is spent, and none twice.
+      const spent = calls.flatMap((call) => outpointsOf(call.inputs));
+      assert.equal(spent.length, amounts.length);
+      assert.equal(new Set(spent).size, amounts.length);
+
+      assert.deepEqual(result.hashes, ['nav-1', 'nav-2', 'nav-3']);
+      assert.equal(result.totalFee, 3 * NAV_TX_FEE);
+      assert.equal(result.totalSent, total - 3 * NAV_TX_FEE);
+      assert.deepEqual(result.leftBehind, []);
+      assert.deepEqual(
+        getSweepStatus().legs.map((leg) => [leg.label, leg.status]),
+        [
+          ['NAV 1/3', 'broadcast'],
+          ['NAV 2/3', 'broadcast'],
+          ['NAV 3/3', 'broadcast'],
+        ],
+      );
+    },
+  );
+});
+
+test('an xNAV leg is batched by outpoint and leaves dust behind', async (t) => {
+  const lines = captureSweepLog(t);
+  const dust = [XNAV_FEE_PER_ELEMENT, 1];
+  const worth = Array.from(
+    { length: XNAV_BATCH_INPUTS + 1 },
+    (_, index) => 1_0000_0000 + index,
+  );
+  const sum = (list) => list.reduce((total, amount) => total + amount, 0);
+
+  await withSweepSource(
+    'xnav-batches',
+    {
+      _balance: {
+        nav: { confirmed: 0, pending: 0 },
+        xnav: { confirmed: sum(worth) + sum(dust), pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _spendable: spendableOutputs({ xnav: [...dust, ...worth] }),
+      _xnavTxResult: { tx: 'xnavhex', fee: 1_000_000 },
+      _sendResultQueue: [
+        { hashes: ['xnav-1'], error: null },
+        { hashes: ['xnav-2'], error: null },
+      ],
+    },
+    async (state) => {
+      const result = await executeSweep('NDestinationAddr1');
+
+      const calls = state.wallet._xnavCalls;
+      assert.equal(calls.length, 2);
+      for (const call of calls) {
+        assert.ok(call.from.length <= XNAV_BATCH_INPUTS);
+        assert.equal(call.useFullAmount, true);
+      }
+      const spent = calls.flatMap((call) => call.from);
+      assert.equal(spent.length, worth.length);
+      assert.equal(new Set(spent).size, worth.length);
+      // xnav0 and xnav1 are the dust outputs.
+      assert.ok(!spent.includes('xnav0:0') && !spent.includes('xnav1:0'));
+      assert.equal(sum(calls.map((call) => call.amount)), sum(worth));
+
+      assert.deepEqual(result.leftBehind, [
+        {
+          sourceId: 'src-xnav-batches',
+          walletType: null,
+          coin: 'xNAV',
+          reason: LEFT_TOO_SMALL,
+          amount: sum(dust),
+        },
+      ]);
+      assert.ok(
+        lines.some((line) =>
+          line.includes(
+            `xNAV: ${sum(dust)} left behind, ${dust.length} output(s) too small`,
+          ),
+        ),
+      );
+    },
+  );
+});
+
+test('a batch that fails stops the leg and names the batches before it', async (t) => {
+  captureSweepLog(t);
+  const amounts = Array.from(
+    { length: NAV_BATCH_INPUTS * 2 + 1 },
+    () => 1_0000_0000,
+  );
+
+  await withSweepSource(
+    'batch-fails',
+    {
+      _balance: {
+        nav: { confirmed: amounts.length * 1_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _spendable: spendableOutputs({ nav: amounts }),
+      _sendResultQueue: [
+        { hashes: ['nav-1'], error: null },
+        { hashes: [], error: 'server busy - request timed out' },
+      ],
+    },
+    async (state) => {
+      await assert.rejects(executeSweep('NDestinationAddr1'), (error) => {
+        assert.match(error.message, /NAV 2\/3 broadcast failed/);
+        assert.match(
+          error.message,
+          /not undone:\n {2}NAV 1\/3 from src-batch-fails: nav-1$/,
+        );
+        return true;
+      });
+      // The third batch is never built.
+      assert.equal(state.wallet._navCalls.length, 2);
+    },
+  );
+});
+
+test('a balance the wallet cannot spend yet is reported, not dropped', async (t) => {
+  const lines = captureSweepLog(t);
+  await withSweepSource(
+    'immature',
+    {
+      _balance: {
+        nav: { confirmed: 7_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      // navcoin-js lists 5 of the 7 as spendable.
+      _spendable: spendableOutputs({ nav: [5_0000_0000] }),
+      _txResult: { tx: 'navhex', fee: NAV_TX_FEE },
+    },
+    async (state) => {
+      const result = await executeSweep('NDestinationAddr1');
+
+      assert.equal(state.wallet._lastTxArgs.amount, 5_0000_0000);
+      assert.equal(result.totalSent, 5_0000_0000 - NAV_TX_FEE);
+      assert.deepEqual(result.leftBehind, [
+        {
+          sourceId: 'src-immature',
+          walletType: null,
+          coin: 'NAV',
+          reason: LEFT_NOT_SPENDABLE,
+          amount: 2_0000_0000,
+        },
+      ]);
+      assert.ok(
+        lines.some((line) =>
+          line.includes('NAV: 200000000 left behind, not spendable yet'),
+        ),
+      );
+    },
+  );
+});
+
+test('a source with nothing spendable broadcasts nothing and says so', async (t) => {
+  captureSweepLog(t);
+  await withSweepSource(
+    'all-immature',
+    {
+      _balance: {
+        nav: { confirmed: 3_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _spendable: spendableOutputs({}),
+    },
+    async (state) => {
+      const result = await executeSweep('NDestinationAddr1');
+
+      assert.equal(state.wallet._navCalls.length, 0);
+      assert.deepEqual(result.hashes, []);
+      assert.equal(result.leftBehind[0].amount, 3_0000_0000);
+      assert.equal(result.leftBehind[0].reason, LEFT_NOT_SPENDABLE);
+    },
+  );
 });

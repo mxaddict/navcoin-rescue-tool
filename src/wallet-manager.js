@@ -15,7 +15,7 @@ import { cacheTransactionsOnce } from './tx-cache.js';
 // Inlined to avoid coupling to internal module paths.
 export const OUT_NAV = 0x1;
 export const OUT_STAKED = 0x2;
-const OUT_XNAV = 0x4;
+export const OUT_XNAV = 0x4;
 
 // Replacement for navcoin-js wallet.GetBalance with a recovery-friendly
 // pending rule: anything with at least one confirmation is spendable. The

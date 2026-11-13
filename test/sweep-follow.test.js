@@ -8,7 +8,8 @@ import fs from 'node:fs/promises';
 import test, { before } from 'node:test';
 
 import { bootstrapAppData } from '../src/app-data.js';
-import { sweepConfirm } from '../src/daemon-client.js';
+import { describeLeftBehind, sweepConfirm } from '../src/daemon-client.js';
+import { LEFT_NOT_SPENDABLE, LEFT_TOO_SMALL } from '../src/sweep.js';
 import {
   killPortHolders,
   makeProjectTempDir,
@@ -153,4 +154,33 @@ test('a sweep sent to no daemon at all fails as unreachable', async () => {
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test('what a sweep left behind is described with its reason', () => {
+  assert.deepEqual(
+    describeLeftBehind([
+      {
+        sourceId: 'imported-1',
+        walletType: 'navpay',
+        coin: 'xNAV',
+        reason: LEFT_TOO_SMALL,
+        amount: 150_000,
+      },
+      {
+        sourceId: 'imported-2',
+        walletType: null,
+        coin: 'NAV',
+        reason: LEFT_NOT_SPENDABLE,
+        amount: 2_0000_0000,
+      },
+    ]),
+    [
+      '0.00150000 xNAV left in imported-1 (navpay): in outputs too small ' +
+        'to pay their own fee',
+      '2.00000000 NAV left in imported-2: not spendable yet; sweep again ' +
+        'once it has confirmed or matured',
+    ],
+  );
+  // A daemon older than the client sends no list.
+  assert.deepEqual(describeLeftBehind(undefined), []);
 });

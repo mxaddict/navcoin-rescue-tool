@@ -22,6 +22,7 @@ import {
   purgeDaemon,
   rescanDaemon,
   sweepPrepare,
+  describeLeftBehind,
   sweepConfirm,
 } from './daemon-client.js';
 import {
@@ -659,7 +660,12 @@ async function handleSweep(argv) {
     });
     const result = response.result;
 
-    process.stdout.write('\nSweep broadcast successfully.\n');
+    const left = describeLeftBehind(result.leftBehind);
+    process.stdout.write(
+      result.hashes?.length > 0
+        ? '\nSweep broadcast successfully.\n'
+        : '\nNothing was broadcast.\n',
+    );
     process.stdout.write(
       `  Total sent : ${(result.totalSent / 1e8).toFixed(8)} NAV\n`,
     );
@@ -673,6 +679,11 @@ async function handleSweep(argv) {
       for (const hash of result.hashes) {
         process.stdout.write(`    ${hash}\n`);
       }
+    }
+
+    if (left.length > 0) {
+      process.stdout.write('  Not swept:\n');
+      for (const line of left) process.stdout.write(`    ${line}\n`);
     }
   } catch (error) {
     // Only a refused connection means no daemon. isDaemonUnreachable also

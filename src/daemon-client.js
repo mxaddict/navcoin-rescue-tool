@@ -192,3 +192,17 @@ async function followSweep(sweepId, root, lost) {
     );
   }
 }
+
+// One line per part of a balance a sweep did not send, for a client to
+// print under its result. `leftBehind` is absent from a daemon older than
+// the client.
+export function describeLeftBehind(leftBehind = []) {
+  return leftBehind.map(({ sourceId, walletType, coin, reason, amount }) => {
+    const source = walletType ? `${sourceId} (${walletType})` : sourceId;
+    const why =
+      reason === 'too-small'
+        ? 'in outputs too small to pay their own fee'
+        : 'not spendable yet; sweep again once it has confirmed or matured';
+    return `${(amount / 1e8).toFixed(8)} ${coin} left in ${source}: ${why}`;
+  });
+}

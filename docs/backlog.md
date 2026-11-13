@@ -305,6 +305,65 @@ to `/sweep/confirm` is lost. What that leaves open:
   reply was read in the repo's undici 6.28, not in the Node 22.11 the
   release bundles.
 
+## Sweep batching: what is left
+
+A sweep leg is sent as several transactions, planned and built in
+`sweep-batches.js`: `planNavBatches` / `planXnavBatches` deal the wallet's
+spendable outputs into batches, `buildNavBatch` runs navcoin-js's
+`NavCreateTransaction` on an object inheriting from the wallet whose
+`GetUtxos` answers with the batch, and `buildXnavBatch` passes the batch's
+outpoints as navcoin-js's own `from` argument. This was prompted by a guess
+that the user whose sweeps failed has an old wallet with many small
+outputs. **That guess is not confirmed**: none of their logs shows an
+output count. The `[sweep] ... N output(s) in M transaction batch(es)`
+line in the daemon log now does.
+
+What the limits rest on, and what was not checked:
+
+- **No batch was ever broadcast to a real node.** The NAV limit was read in
+  navcoin-core's source (`MAX_STANDARD_TX_WEIGHT` in `policy/policy.h`,
+  checked in `IsStandardTx`; `DEFAULT_MIN_RELAY_TX_FEE` in `main.h`), and
+  the input size was measured locally by signing with
+  `@aguycalled/bitcore-lib`: 148 bytes an input with compressed keys.
+  `NAV_BATCH_INPUTS` leaves room for larger inputs, but an input signed
+  with an uncompressed key or spending a cold-stake script was not
+  measured.
+- **`XNAV_BATCH_INPUTS` is set from a partial measurement.** Only the BLS
+  sign and verify per input were timed (60 ms an input on the development
+  desktop, load not controlled). The whole build, with range-proof
+  recovery per input, was not timed, nor the size of an xNAV transaction
+  per input, nor anything on slow hardware. If a batch of that size takes
+  longer than `SWEEP_BUILD_TIMEOUT_MS` it is reported as not broadcast;
+  lowering the constant is safe.
+- **The electrum servers' limit on one request is unknown.** A 250-input
+  NAV transaction is about 75 kB of hex in one `transaction.broadcast`
+  request. Whether the public servers accept that was not tried; a server
+  that drops the connection on it would show as an unknown-outcome batch.
+- **The stub electrum server has no `transaction.broadcast`**, so no test
+  sends a batch through the real navcoin-js `SendTransaction`. The builds
+  are tested against the real library (`sweep-batches.test.js`); the
+  broadcast loop only against the fake wallet in `sweep.test.js`.
+- **The preview does not know about batches.** `prepareSweep` reads the
+  balances only, so it cannot say how many transactions the sweep will
+  take, what the fees come to, or what will be left behind. All three are
+  known only once `executeSweep` plans each leg. Showing them needs the
+  preview to become async and read each wallet's outputs.
+- **The balance counts coins navcoin-js will not spend yet.**
+  `computeBalance` in `wallet-manager.js` counts a stake reward as
+  confirmed as soon as it is in a block; navcoin-js's `GetUtxos` holds it
+  back until it has 120 confirmations. The sweep reports the difference
+  as `LEFT_NOT_SPENDABLE`, but the status screens and the sweep preview
+  still show it as sweepable. The fixture in `test/fixtures` has exactly
+  such outputs, which is how this was found.
+- **The GUI still does not follow a lost sweep** (see "Sweep guards"), and
+  a sweep in many batches is the one most likely to outlast the 300 s its
+  request waits for a reply. The CLI and TUI follow it on `/status`.
+- **Considered and declined: sweeping xNAV dust anyway.** An xNAV output
+  worth less than `XNAV_FEE_PER_ELEMENT` costs more to spend than it
+  holds, so sending it lowers what arrives. It stays in the wallet.
+- **Batches go out with no pause between them.** Whether a public server
+  rate-limits broadcasts was not tried.
+
 ## Codebase review 2026-11-13: findings not fixed
 
 A correctness review of the whole tree: `rescue-scan.js`,

@@ -1,6 +1,11 @@
 // Sweeping every imported source to one destination: the preview, the
 // broadcast of each leg, and the daemon-log record of what went out.
-import { STATIC_WALLET_PASSWORD } from './constants.js';
+import {
+  buildNavBatch,
+  buildXnavBatch,
+  planNavBatches,
+  planXnavBatches,
+} from './sweep-batches.js';
 import {
   describeSource,
   listSourceStates,
@@ -135,6 +140,10 @@ export function prepareSweep({ force = false, registered = [] } = {}) {
   };
 }
 
+// Why part of a balance was not swept, as `leftBehind[].reason`.
+export const LEFT_TOO_SMALL = 'too-small';
+export const LEFT_NOT_SPENDABLE = 'not-spendable';
+
 // One timestamped daemon-log line per sweep step. A sweep that fails,
 // hangs or loses its client mid-broadcast is otherwise invisible in a
 // user's log, and whether a transaction went out is the first thing they
@@ -222,10 +231,19 @@ function describeBroadcastLegs(record) {
 
 /**
  * Execute the sweep: for each source with a non-zero confirmed balance,
- * broadcast a NAV leg and/or an xNAV leg to the destination.
+ * broadcast a NAV leg and/or an xNAV leg to the destination. A leg goes
+ * out as one transaction per batch of outputs: see sweep-batches.js.
  *
  * Returns:
- *   { hashes: string[], totalSent: number, totalFee: number }
+ *   {
+ *     hashes: string[],
+ *     totalSent: number,
+ *     totalFee: number,
+ *     leftBehind: [{ sourceId, walletType, coin, reason, amount }],
+ *   }
+ * where `leftBehind` is what was not swept, empty when everything went:
+ * `reason` is LEFT_TOO_SMALL for outputs that could not pay their own fee
+ * and LEFT_NOT_SPENDABLE for coins the wallet cannot spend yet.
  *
  * Throws if any leg fails, with the legs already broadcast listed in the
  * message: they cannot be undone, and the sources after the failure are
@@ -305,9 +323,7 @@ export async function executeSweep(
 }
 
 async function sweepReadySources(ready, destination, record) {
-  const hashes = [];
-  let totalSent = 0;
-  let totalFee = 0;
+  const totals = { hashes: [], totalSent: 0, totalFee: 0, leftBehind: [] };
 
   for (const state of ready) {
     if (!state.wallet) {
@@ -320,51 +336,97 @@ async function sweepReadySources(ready, destination, record) {
     logSweep(`${describeSource(state)}: nav=${nav} xnav=${xnav}`);
 
     if (nav > 0) {
-      const navResult = await broadcastLeg(
+      // Spend cold-stake outputs too. Not OUT_STAKED alone: with that
+      // type navcoin-js sends change back to a cold-stake script.
+      const type = OUT_NAV | OUT_STAKED;
+      await sweepLeg(
         state,
         'NAV',
-        () =>
-          state.wallet.NavCreateTransaction(
-            destination,
-            nav,
-            '',
-            STATIC_WALLET_PASSWORD,
-            true,
-            undefined,
-            // Spend cold-stake outputs too. Not OUT_STAKED alone: with
-            // that type navcoin-js sends change back to a cold-stake script.
-            OUT_NAV | OUT_STAKED,
-          ),
         nav,
+        await planNavBatches(state.wallet, type),
+        (batch) => buildNavBatch(state.wallet, destination, batch, type),
         record,
+        totals,
       );
-      hashes.push(...navResult.hashes);
-      totalSent += navResult.sent;
-      totalFee += navResult.fee;
     }
 
     if (xnav > 0) {
-      const xnavResult = await broadcastLeg(
+      await sweepLeg(
         state,
         'xNAV',
-        () =>
-          state.wallet.xNavCreateTransaction(
-            destination,
-            xnav,
-            '',
-            STATIC_WALLET_PASSWORD,
-            true,
-          ),
         xnav,
+        await planXnavBatches(state.wallet),
+        (batch) => buildXnavBatch(state.wallet, destination, batch),
         record,
+        totals,
       );
-      hashes.push(...xnavResult.hashes);
-      totalSent += xnavResult.sent;
-      totalFee += xnavResult.fee;
     }
   }
 
-  return { hashes, totalSent, totalFee };
+  return totals;
+}
+
+// Broadcast one leg of one source, a batch at a time, adding what went out
+// to `totals`. Each batch is built only after the one before it was
+// broadcast, and the first that fails ends the sweep: see `executeSweep`.
+// `balance` is what the source shows for this coin; whatever part of it
+// the plan does not send is reported in `totals.leftBehind`.
+async function sweepLeg(
+  state,
+  coin,
+  balance,
+  plan,
+  buildBatch,
+  record,
+  totals,
+) {
+  const source = describeSource(state);
+  const { batches, left } = plan;
+  const outputs = batches.reduce((sum, batch) => sum + batch.outputs.length, 0);
+  const planned = batches.reduce((sum, batch) => sum + batch.amount, 0);
+  logSweep(
+    `${source} ${coin}: ${outputs} output(s) in ${batches.length} ` +
+      `transaction batch(es)`,
+  );
+
+  const leave = (reason, amount, detail) => {
+    logSweep(`${source} ${coin}: ${amount} left behind, ${detail}`);
+    totals.leftBehind.push({
+      sourceId: state.sourceId,
+      walletType: state.walletType ?? null,
+      coin,
+      reason,
+      amount,
+    });
+  };
+  if (left.outputs > 0) {
+    leave(
+      LEFT_TOO_SMALL,
+      left.amount,
+      `${left.outputs} output(s) too small to pay their fee`,
+    );
+  }
+  // navcoin-js holds back outputs the balance already counts: a stake
+  // reward until it has matured, xNAV until it has confirmed.
+  const unspendable = balance - planned - left.amount;
+  if (unspendable > 0) {
+    leave(LEFT_NOT_SPENDABLE, unspendable, 'not spendable yet');
+  }
+
+  for (const [index, batch] of batches.entries()) {
+    const label =
+      batches.length > 1 ? `${coin} ${index + 1}/${batches.length}` : coin;
+    const result = await broadcastLeg(
+      state,
+      label,
+      () => buildBatch(batch),
+      batch.amount,
+      record,
+    );
+    totals.hashes.push(...result.hashes);
+    totals.totalSent += result.sent;
+    totals.totalFee += result.fee;
+  }
 }
 
 async function broadcastLeg(state, label, createTx, amount, record) {

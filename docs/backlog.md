@@ -314,9 +314,35 @@ spendable outputs into batches, `buildNavBatch` runs navcoin-js's
 `GetUtxos` answers with the batch, and `buildXnavBatch` passes the batch's
 outpoints as navcoin-js's own `from` argument. This was prompted by a guess
 that the user whose sweeps failed has an old wallet with many small
-outputs. **That guess is not confirmed**: none of their logs shows an
-output count. The `[sweep] ... N output(s) in M transaction batch(es)`
-line in the daemon log now does.
+outputs. Their 0.2.12 log answered it: 249 spendable NAV outputs, one
+batch, so size was not what failed.
+
+What that log showed instead (macOS Intel, a staking `navcash` wallet): the
+NAV build ran into `SWEEP_BUILD_TIMEOUT_MS` on 0.2.11 and 0.2.12 with the
+server connected throughout, and listing the outputs (`planNavBatches`)
+took 37 s. `buildNavBatch` now answers navcoin-js's `GetTx` without its
+`ProcessTx`, which the build ran once per input, and `NAV_BATCH_INPUTS` was
+lowered. Open:
+
+- **The fix is not confirmed on that machine.** The log cannot tell a slow
+  build from one stuck on a request the server never answered; both sit in
+  the per-input `GetTx`. A test shows the build no longer calls `ProcessTx`,
+  nothing shows how long a build now takes there. The next log's
+  `built in ...ms` line per batch will.
+- **Why that wallet's database reads are so slow is not known.** 37 s for
+  249 outputs is about 150 ms a read. Not investigated: whether navcoin-js's
+  sync was still working through the wallet's history at the time (the
+  sweep started under eight minutes after the import), or the sqlite shim
+  is simply slow there. If a build still takes minutes, the remaining
+  per-input cost is `db.GetTx` and `db.GetKey`.
+- **The first launch of 0.2.12 on that Mac died loading `bcrypto.node`**:
+  `ERR_DLOPEN_FAILED`, "code signature ... not valid for use in process
+  using Library Validation". The launches after it loaded the same file.
+  Not investigated; the release archive's native modules are not signed.
+- **After the sweep failed the wallet's connection went into the
+  connect/reset loop** seen in the 0.2.8 logs: each server accepts, then
+  resets the socket. Whether the servers are dropping a session that asks
+  too much of them was not looked into.
 
 What the limits rest on, and what was not checked:
 
@@ -335,9 +361,10 @@ What the limits rest on, and what was not checked:
   per input, nor anything on slow hardware. If a batch of that size takes
   longer than `SWEEP_BUILD_TIMEOUT_MS` it is reported as not broadcast;
   lowering the constant is safe.
-- **The electrum servers' limit on one request is unknown.** A 250-input
-  NAV transaction is about 75 kB of hex in one `transaction.broadcast`
-  request. Whether the public servers accept that was not tried; a server
+- **The electrum servers' limit on one request is unknown.** A NAV
+  transaction of `NAV_BATCH_INPUTS` inputs is about 15 kB of hex in one
+  `transaction.broadcast` request. Whether the public servers accept that
+  was not tried; a server
   that drops the connection on it would show as an unknown-outcome batch.
 - **The stub electrum server has no `transaction.broadcast`**, so no test
   sends a batch through the real navcoin-js `SendTransaction`. The builds

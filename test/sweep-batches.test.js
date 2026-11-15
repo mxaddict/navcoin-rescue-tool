@@ -209,6 +209,15 @@ test(
         navPlan.batches.reduce((sum, batch) => sum + batch.amount, 0),
         fixture.expectedNavConfirmed,
       );
+      // Building reads the wallet; it must not process transactions over
+      // again. navcoin-js does that for every input when left to itself,
+      // and a build of a few hundred inputs then outlasts its timeout.
+      let processed = 0;
+      const processTx = wallet.ProcessTx;
+      wallet.ProcessTx = function countProcessTx(...args) {
+        processed += 1;
+        return processTx.apply(this, args);
+      };
       for (const batch of navPlan.batches) {
         const built = await buildNavBatch(
           wallet,
@@ -216,6 +225,7 @@ test(
           batch,
           NAV_TYPES,
         );
+        assert.equal(processed, 0);
         assert.equal(built.tx.length, 1);
         assert.equal(built.fee, NAV_TX_FEE);
         assert.deepEqual(inputsOf(built.tx[0]), batch.outputs.map(outpointOf));
@@ -223,6 +233,8 @@ test(
         assert.equal(outputs.length, 1);
         assert.equal(outputs[0].satoshis, batch.amount - NAV_TX_FEE);
       }
+
+      delete wallet.ProcessTx;
 
       // And one batch holding every output spends every output.
       const whole = await planNavBatches(wallet, NAV_TYPES);

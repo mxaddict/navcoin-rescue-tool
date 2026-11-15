@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A NAV sweep no longer runs out of time while its transaction is built. A
+  user's sweep of 249 outputs gave up after ten minutes in "building
+  transaction" on 0.2.11 and 0.2.12, with the server connected throughout.
+  For every input, navcoin-js processed the input's whole transaction over
+  again, looking up each of its parents and rewriting the wallet's records
+  of it, where the build only reads one output. The build now reads the
+  transaction and skips that processing.
+- The message for a build that ran out of time said "the server did not
+  answer"; it now says "the build did not finish".
+
+### Changed
+
+- A NAV sweep is sent in transactions of at most 50 inputs, down from 250,
+  so each one is built and broadcast inside the build timeout even on a
+  slow machine, and what has gone out stays out when a later one fails.
+  Each transaction costs the flat NAV fee.
+
 ## [0.2.12] - 2026-11-13
 
 ### Fixed

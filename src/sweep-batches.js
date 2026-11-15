@@ -12,9 +12,11 @@
 import { STATIC_WALLET_PASSWORD } from './constants.js';
 import { OUT_XNAV } from './wallet-manager.js';
 
-// Inputs per NAV transaction: well under navcoin-core's size limit even
-// for inputs signed with uncompressed keys, which are larger.
-export const NAV_BATCH_INPUTS = 250;
+// Inputs per NAV transaction. navcoin-core's size limit allows several
+// times this; it is kept low so that a wallet database slow enough to make
+// a build take minutes still finishes each batch inside the build timeout,
+// and what has gone out stays out when a later batch fails.
+export const NAV_BATCH_INPUTS = 50;
 // Inputs per xNAV transaction, kept low for the time one takes to build.
 export const XNAV_BATCH_INPUTS = 100;
 
@@ -111,9 +113,20 @@ export async function planXnavBatches(wallet, batchInputs = XNAV_BATCH_INPUTS) {
 // on an object that inherits everything from the wallet and answers that
 // one call with the batch. The wallet itself is not touched: anything else
 // reading its outputs meanwhile still sees all of them.
+//
+// The same object answers `GetTx` without navcoin-js's processing of the
+// transaction. The build looks each input's transaction up only to read
+// one output, but a plain `GetTx` also runs `ProcessTx` on it: every
+// input's parent looked up, from the server when it is not cached, and
+// the wallet's records of it written again. The sync has already done
+// that once, and repeated for every input it kept a build of a few
+// hundred inputs from finishing inside SWEEP_BUILD_TIMEOUT_MS.
 export function buildNavBatch(wallet, destination, batch, type) {
   const scoped = Object.create(wallet, {
     GetUtxos: { value: async () => batch.outputs },
+    GetTx: {
+      value: (hash) => wallet.GetTx(hash, undefined, undefined, false),
+    },
   });
   return scoped.NavCreateTransaction(
     destination,

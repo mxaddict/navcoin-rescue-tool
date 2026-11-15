@@ -1059,7 +1059,7 @@ test('a broadcast the server never answers times out as outcome unknown', async 
   });
 });
 
-test('a build the server never answers times out without broadcasting', async (t) => {
+test('a build that never finishes times out without broadcasting', async (t) => {
   captureSweepLog(t);
   await withSweepSource('silent-build', { _txResult: NEVER }, async (state) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -1070,7 +1070,7 @@ test('a build the server never answers times out without broadcasting', async (t
 
     await assert.rejects(
       sweeping,
-      /was not broadcast: the server did not answer/,
+      /was not broadcast: the build did not finish within/,
     );
     assert.equal(state.wallet._lastSentTx, undefined);
     t.mock.timers.reset();

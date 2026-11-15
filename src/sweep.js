@@ -180,8 +180,9 @@ class SweepStepInterrupted extends Error {}
 // Settle with `promise`, unless the source loses its connection or
 // `timeoutMs` passes first. navcoin-js's electrum client drops a pending
 // request without settling it when the socket closes, so a step caught by
-// a drop would otherwise wait forever and the sweep with it.
-function untilInterrupted(promise, state, timeoutMs) {
+// a drop would otherwise wait forever and the sweep with it. `timedOut`
+// says what did not happen, for the message of a step that ran out of time.
+function untilInterrupted(promise, state, timeoutMs, timedOut) {
   return new Promise((resolve, reject) => {
     const controller = new AbortController();
     state.sweepAbort = controller;
@@ -195,9 +196,7 @@ function untilInterrupted(promise, state, timeoutMs) {
       () =>
         finish(
           reject,
-          new SweepStepInterrupted(
-            `the server did not answer within ${timeoutMs / 1000}s`,
-          ),
+          new SweepStepInterrupted(`${timedOut} within ${timeoutMs / 1000}s`),
         ),
       timeoutMs,
     );
@@ -469,7 +468,12 @@ async function runLeg(state, label, createTx, amount, legRecord) {
   const buildStart = Date.now();
   let tx;
   try {
-    tx = await untilInterrupted(createTx(), state, SWEEP_BUILD_TIMEOUT_MS);
+    tx = await untilInterrupted(
+      createTx(),
+      state,
+      SWEEP_BUILD_TIMEOUT_MS,
+      'the build did not finish',
+    );
   } catch (error) {
     if (!(error instanceof SweepStepInterrupted)) throw error;
     logSweep(`${leg}: build interrupted, ${error.message}`);
@@ -494,7 +498,12 @@ async function runLeg(state, label, createTx, amount, legRecord) {
   const sending = state.wallet.SendTransaction(tx.tx);
   let result;
   try {
-    result = await untilInterrupted(sending, state, SWEEP_BROADCAST_TIMEOUT_MS);
+    result = await untilInterrupted(
+      sending,
+      state,
+      SWEEP_BROADCAST_TIMEOUT_MS,
+      'the server did not answer',
+    );
   } catch (error) {
     if (!(error instanceof SweepStepInterrupted)) throw error;
     logSweep(

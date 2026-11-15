@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-11-15
+
 ### Fixed
 
 - A NAV sweep no longer runs out of time while its transaction is built. A
@@ -544,7 +546,8 @@ mismatch between the manifests. Its fix ships in 0.2.7.
 - `Release` can be dispatched with no tag to build and smoke-test a ref without
   publishing anything.
 
-[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.12...HEAD
+[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.13...HEAD
+[0.2.13]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.9...v0.2.10

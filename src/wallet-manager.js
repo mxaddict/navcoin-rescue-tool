@@ -118,6 +118,8 @@ const RECONNECT_INTERVAL_MS = 10_000;
 export const FAILOVER_DELAY_MS = 1_000;
 // How often a scan waiting for a connection checks for one.
 const CONNECTED_POLL_MS = 50;
+// How often a rescan waiting for a scan already running looks again.
+const SCAN_IDLE_POLL_MS = 50;
 // How long transactions are allowed to accumulate before the address and
 // balance snapshot is rebuilt.
 const REFRESH_COALESCE_MS = 1_000;
@@ -245,10 +247,20 @@ export async function rescanAllSources() {
 // Rescan one source from scratch and wait for it. Resolves true when the
 // source came out synced, false when it could not be rescanned or the
 // scan did not finish; the reason is then in the source's state.
+//
+// A scan already running is waited for first, and the source then scanned
+// again: the caller wants the chain as it is now, and a scan under way
+// began before the caller asked. That also covers the moment a source
+// reads as synced while its scan is still being wound up.
 export async function rescanSource(sourceId) {
   const state = walletState.get(sourceId);
-  if (!state || state.closing || !state.wallet) return false;
-  if (state.rescanInFlight) return false;
+  const usable = () => state && !state.closing && state.wallet;
+  if (!usable()) return false;
+
+  while (state.rescanInFlight) {
+    await new Promise((resolve) => setTimeout(resolve, SCAN_IDLE_POLL_MS));
+    if (!usable()) return false;
+  }
 
   state.rescanInFlight = true;
   await runFreshRescan(state);

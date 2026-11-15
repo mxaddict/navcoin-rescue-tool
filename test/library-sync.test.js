@@ -91,6 +91,14 @@ test(
       assert.equal(state.balance.xnav.confirmed, fixture.expectedXNavConfirmed);
       assert.equal(stub.requests('blockchain.scripthash.subscribe'), 0);
       assert.equal(await rescanSource('no-such-source'), false);
+
+      // Asked for while a scan is already running, it waits its turn: the
+      // source reads as synced a moment before its scan is done with, and
+      // a rescan asked for in that moment must not come back refused.
+      assert.deepEqual(
+        await Promise.all([rescanSource(source.id), rescanSource(source.id)]),
+        [true, true],
+      );
     } finally {
       await closeAllWallets();
       await stub.close();

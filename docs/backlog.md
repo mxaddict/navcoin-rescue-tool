@@ -389,8 +389,15 @@ relayed; no log of that run was seen. Open:
     workarounds they explain were not removed or re-examined.
 - **The first launch of 0.2.12 on that Mac died loading `bcrypto.node`**:
   `ERR_DLOPEN_FAILED`, "code signature ... not valid for use in process
-  using Library Validation". The launches after it loaded the same file.
-  Not investigated; the release archive's native modules are not signed.
+  using Library Validation: library load disallowed by system policy". The
+  launches after it loaded the same file. Read from the message, not
+  reproduced: this is macOS refusing an unsigned library in a freshly
+  downloaded, quarantined folder (the archive ran from `Downloads`), which
+  stops once the user allows it or the quarantine flag is gone. Memory
+  pressure was suggested as a cause; the log has nothing about memory, and
+  the message names system policy. The release archive's native modules
+  are not signed; signing them, or having the launcher clear the quarantine
+  flag, is what would be tried.
 - **After the sweep failed the wallet's connection went into the
   connect/reset loop** seen in the 0.2.8 logs: each server accepts, then
   resets the socket. Whether the servers are dropping a session that asks

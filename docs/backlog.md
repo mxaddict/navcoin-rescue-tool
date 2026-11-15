@@ -322,13 +322,14 @@ NAV build ran into `SWEEP_BUILD_TIMEOUT_MS` on 0.2.11 and 0.2.12 with the
 server connected throughout, and listing the outputs (`planNavBatches`)
 took 37 s. `buildNavBatch` now answers navcoin-js's `GetTx` without its
 `ProcessTx`, which the build ran once per input, and `NAV_BATCH_INPUTS` was
-lowered. Open:
+lowered. The user then swept that wallet with 0.2.13, as the maintainer
+relayed; no log of that run was seen. Open:
 
-- **The fix is not confirmed on that machine.** The log cannot tell a slow
-  build from one stuck on a request the server never answered; both sit in
-  the per-input `GetTx`. A test shows the build no longer calls `ProcessTx`,
-  nothing shows how long a build now takes there. The next log's
-  `built in ...ms` line per batch will.
+- **Which change made the sweep go through is not known.** 0.2.13 changed
+  the build (no `ProcessTx` per input), the batch size, and switched
+  navcoin-js's sync off, all at once. Without the log of the run that
+  worked there are no `built in ...ms` figures for that machine, and
+  nothing says whether a batch was rejected and rescanned on the way.
 - **Why that wallet's database reads are so slow is not known.** 37 s for
   249 outputs is about 150 ms a read. Not investigated: whether navcoin-js's
   sync was still working through the wallet's history at the time (the
@@ -397,7 +398,10 @@ lowered. Open:
 
 What the limits rest on, and what was not checked:
 
-- **No batch was ever broadcast to a real node.** The NAV limit was read in
+- **No batch was broadcast to a real node by us.** The one sweep known to
+  have gone through is the user's on 0.2.13, a `navcash` wallet of 249 NAV
+  outputs in batches of `NAV_BATCH_INPUTS`; whether it held xNAV is not
+  known. The NAV limit was read in
   navcoin-core's source (`MAX_STANDARD_TX_WEIGHT` in `policy/policy.h`,
   checked in `IsStandardTx`; `DEFAULT_MIN_RELAY_TX_FEE` in `main.h`), and
   the input size was measured locally by signing with

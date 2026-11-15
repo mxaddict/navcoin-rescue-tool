@@ -15,6 +15,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   again, looking up each of its parents and rewriting the wallet's records
   of it, where the build only reads one output. The build now reads the
   transaction and skips that processing.
+- navcoin-js's own wallet sync no longer runs. On every connect it
+  subscribed to each address and queued a job for every transaction the
+  wallet ever had, on top of the rescue scan and on the same database and
+  server; for a staking wallet that is thousands of jobs the rescue has no
+  use for. The option that was meant to leave it out,
+  `skipInitialHistorySync`, is not one navcoin-js has. Only the rescue scan
+  reads the chain now, so a source finishes syncing when the scan does.
+  Coins that arrive after a scan show up on the next rescan, not live.
+- A source no longer reads as synced beside a balance from before its
+  scan ended. The status was set first and the balance read after, and a
+  balance read still under way from earlier in the scan could replace the
+  newer one, so for a moment a synced source could show, and a sweep could
+  go by, a balance missing the last outputs found. The balance is now read
+  before the source is marked synced, and a read that started earlier
+  never replaces a later one.
 - The message for a build that ran out of time said "the server did not
   answer"; it now says "the build did not finish".
 

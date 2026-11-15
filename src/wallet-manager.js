@@ -7,6 +7,7 @@ import {
   connectWithFailover,
   describeElectrumNode,
 } from './electrum-connection.js';
+import { skipLibrarySync } from './library-sync.js';
 import { rescueScan, ScanIncompleteError } from './rescue-scan.js';
 import { markSourceSynced } from './source-registry.js';
 import { cacheTransactionsOnce } from './tx-cache.js';
@@ -165,6 +166,11 @@ function makeInitialState(sourceId, root) {
     sweepAbort: null,
     refreshPending: false,
     refreshInFlight: false,
+    // Snapshot reads are numbered as they start, and the number of the
+    // one whose view is in the state is kept, so a read that finishes
+    // after a later one has been applied can tell it is out of date.
+    refreshStarted: 0,
+    refreshApplied: 0,
     refreshTimer: null,
     sourceType: null,
     closing: false,
@@ -374,11 +380,15 @@ async function runScanAttempts(state, opts) {
 }
 
 async function finishSync(state) {
+  // The balance first, the status after: 'synced' is what lets a sweep
+  // start, and it must not be readable beside a balance from before the
+  // scan's last outputs.
+  await refreshAddressesAndBalance(state.sourceId, state.wallet);
+  if (state.closing) return;
   state.syncStatus = 'synced';
   state.syncPhase = null;
   state.syncProgress = 100;
   state.syncCurrent = state.syncTotal;
-  await refreshAddressesAndBalance(state.sourceId, state.wallet);
   try {
     await markSourceSynced(state.sourceId, state.root);
   } catch {
@@ -568,14 +578,15 @@ export async function openSourceWallet(source, root, navWallet) {
       state.syncPhase = phase;
     });
 
-    // navcoin-js runs a sync of its own on every connect and reports it
-    // finished, usually long before a scan of ours is. While one runs,
-    // only that scan's clean finish counts — runScan reports it — or the
-    // source is recorded as synced mid-scan and skips the scan next start.
+    // The rescue scan emits this when it ends, and navcoin-js would from a
+    // sync of its own if `skipLibrarySync` had not taken that out. While a
+    // scan of ours runs only its clean finish counts — runScan reports it —
+    // or the source is recorded as synced mid-scan and skips the scan next
+    // start.
     //
     // Nor does it count after a scan of ours failed: the source would go
-    // from error to synced on the next reconnect, with the coins that scan
-    // could not look up still missing.
+    // from error to synced with the coins that scan could not look up
+    // still missing.
     wallet.on('sync_finished', () => {
       if (state.rescanInFlight || state.scanFailed) return;
       void finishSync(state);
@@ -609,7 +620,6 @@ export async function openSourceWallet(source, root, navWallet) {
       await wallet.Load({
         useP2p: false,
         minPoolSize: getSourceMinPoolSize(source),
-        skipInitialHistorySync: true,
       });
       if (createdNewWallet) {
         // Not the user's wallet: scanning it would show a synced source
@@ -619,6 +629,7 @@ export async function openSourceWallet(source, root, navWallet) {
       }
       await prunePrivateKeyPool(wallet, source);
       cacheTransactionsOnce(wallet);
+      skipLibrarySync(wallet);
       await configureElectrumNodes(wallet);
 
       // Seed initial address and balance snapshot before connecting.
@@ -724,10 +735,19 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
   const state = walletState.get(sourceId);
   if (!state) return;
 
+  // Passes overlap: the coalesced one a new transaction asks for, and the
+  // direct one at the end of a scan. Each reads the wallet at its start,
+  // so of two the one that started later holds the newer view, whichever
+  // finishes last. A pass writes nothing once a later one has written.
+  state.refreshStarted += 1;
+  const started = state.refreshStarted;
+  const newest = () => started > state.refreshApplied;
+
   // Read once, use for both halves: the per-address balances below and
   // the wallet totals at the end.
   const unspent = await readUnspentOutputs(wallet);
 
+  let addresses = null;
   try {
     const navAddrs = await wallet.NavReceivingAddresses(true);
     const xnavAddrs = await wallet.xNavReceivingAddresses(true);
@@ -754,7 +774,7 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
       );
     }
 
-    state.addresses = [
+    addresses = [
       ...navAddrs.map((a) => ({
         address: a.address,
         path: a.path,
@@ -776,11 +796,17 @@ async function refreshAddressesAndBalance(sourceId, wallet) {
     // Non-fatal: leave previous address list intact.
   }
 
+  let balance = null;
   try {
-    state.balance = await computeBalance(wallet, unspent);
+    balance = await computeBalance(wallet, unspent);
   } catch {
     // Non-fatal: leave previous balance intact.
   }
+
+  if (!newest()) return;
+  state.refreshApplied = started;
+  if (addresses) state.addresses = addresses;
+  if (balance) state.balance = balance;
 }
 
 export async function closeSourceWallet(sourceId) {

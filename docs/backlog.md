@@ -335,20 +335,31 @@ lowered. Open:
   sweep started under eight minutes after the import), or the sqlite shim
   is simply slow there. If a build still takes minutes, the remaining
   per-input cost is `db.GetTx` and `db.GetKey`.
-- **A sweep waits for navcoin-js's own sync, which may not end.**
-  `sweepBlockReason` in `sweep.js` blocks a source while `wallet.queue` is
-  running. navcoin-js ignores the `skipInitialHistorySync` option
-  `wallet-manager.js` passes (the name appears nowhere in 1.1.182), so
-  every connect queues a `GetTxKeys` job per transaction in the wallet's
-  history; seen with the fixture, where the queue runs and drains before
-  the scan ends. Not known: whether that queue was busy during the user's
-  failed sweeps (no log line showed it; a refused sweep now logs the
-  reason), how long it takes for a staking wallet's history, and whether a
-  job waiting on a request the server never answers keeps `queue.running`
-  set until the next reconnect. If it does, the source stays blocked and
-  the options are stopping that queue once the rescue scan has finished,
-  or pausing it for the length of a sweep. The status screens still show
-  such a source as synced; only the sweep's refusal says otherwise.
+- **navcoin-js's own sync is switched off; what that leaves.**
+  `skipLibrarySync` in `library-sync.js` replaces `wallet.Sync` on every
+  wallet `openSourceWallet` opens, so nothing subscribes to addresses or
+  puts work on `wallet.queue` (`library-sync.test.js` shows both against
+  the real library). Whether that queue was what slowed the user's failed
+  sweeps is not known: no log line showed it. Left behind:
+  - The `sync_finished` handler in `openSourceWallet` now only ever hears
+    the rescue scan's own emit, which arrives while `rescanInFlight` is set
+    and is ignored, so in production it does nothing. The fake wallets in
+    `sweep.test.js` still reach `synced` through it (`_syncOnConnect`).
+    Removing it means giving those fakes a scan to finish instead.
+  - `sweepBlockReason` in `sweep.js` still blocks a source whose
+    `wallet.queue` is running. Nothing should start that queue any more;
+    it stays as a guard, and a refused sweep logs the reason.
+  - A source no longer hears of coins arriving after its scan. A rescan
+    finds them; the status screens do not say the balance may be stale.
+  - `scanXNav`, `scanAddr` and `scanStaking` in `rescue-scan.js` all
+    `continue` when `wallet.GetTx` returns nothing, which it does when the
+    wallet has no client at that moment, and none counts it in
+    `scan.failures`: an output skipped that way leaves the scan finishing
+    as synced without it. navcoin-js's sync used to claim such an output
+    on its own; nothing does now.
+  - Comments in `rescue-scan.js` (the `password` option) and in
+    `tx-cache.js` still describe navcoin-js's sync as running. The
+    workarounds they explain were not removed or re-examined.
 - **The first launch of 0.2.12 on that Mac died loading `bcrypto.node`**:
   `ERR_DLOPEN_FAILED`, "code signature ... not valid for use in process
   using Library Validation". The launches after it loaded the same file.

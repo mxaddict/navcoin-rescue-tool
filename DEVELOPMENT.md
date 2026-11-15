@@ -61,6 +61,7 @@ src/
   sweep.js              sweep preview, broadcast of each leg, sweep log
   sweep-batches.js      splits a leg into transactions of bounded inputs
   rescue-scan.js        adaptive gap-walk + inline hydrate scan engine
+  library-sync.js       keeps navcoin-js's own wallet sync from running
   source-registry.js    source CRUD, fingerprinting, dedup, sources.json
   wallet-worker.js      child-process wallet creation (avoids blocking daemon)
   cli.js                ntr CLI entrypoint and command handlers

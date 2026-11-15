@@ -1010,6 +1010,85 @@ test('a source whose wallet is still processing transactions is not ready', asyn
   });
 });
 
+const navBalance = (confirmed) => ({
+  nav: { confirmed, pending: 0 },
+  staked: { confirmed: 0, pending: 0 },
+});
+
+// A source that has connected and is waiting for its scan to be reported
+// finished, with its balance reads handed to the test: each read waits
+// for the test to answer it.
+async function withUnsyncedSource(name, body) {
+  const root = await makeProjectTempDir(`sweep-${name}`);
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: `src-${name}`, type: 'mnemonic', label: name };
+    await openSourceWallet(
+      source,
+      root,
+      makeNavWallet({ _syncOnConnect: false }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const state = getSourceState(source.id);
+
+    const reads = [];
+    state.wallet.GetBalance = () =>
+      new Promise((resolve) => reads.push(resolve));
+    const untilRead = async (count) => {
+      while (reads.length < count) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    };
+    await body(state, reads, untilRead);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+// A source read as synced while it still showed the balance from before
+// the scan's last outputs: the status was set first and the balance read
+// after, and a sweep started in between would have gone by the old one.
+test('a source is not synced until its balance has been read', async () => {
+  await withUnsyncedSource('synced-late', async (state, reads, untilRead) => {
+    state.wallet.emit('sync_finished');
+    await untilRead(1);
+    assert.notEqual(state.syncStatus, 'synced');
+
+    reads[0](navBalance(7_0000_0000));
+    while (state.syncStatus !== 'synced') {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(state.balance.nav.confirmed, 7_0000_0000);
+  });
+});
+
+test('a balance read that started earlier does not replace a later one', async () => {
+  await withUnsyncedSource('stale-read', async (state, reads, untilRead) => {
+    // A read of the balance as it was mid-scan, still unanswered...
+    state.wallet.emit('new_tx');
+    await untilRead(1);
+    // ...when the scan finishes and the balance is read again.
+    state.wallet.emit('sync_finished');
+    await untilRead(2);
+    reads[1](navBalance(9_0000_0000));
+    while (state.syncStatus !== 'synced') {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    reads[0](navBalance(1_0000_0000));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(state.balance.nav.confirmed, 9_0000_0000);
+  });
+});
+
 // A request the server never answers: what navcoin-js's electrum client
 // leaves behind when the socket closes under it.
 const NEVER = new Promise(() => {});

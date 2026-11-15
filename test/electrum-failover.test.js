@@ -76,8 +76,8 @@ test.afterEach(async () => {
   delete process.env.NTR_ELECTRUM_NODES;
 });
 
-async function startStub(options) {
-  const stub = await startStubElectrumServer(null, options);
+async function startStub(options, fixture = null) {
+  const stub = await startStubElectrumServer(fixture, options);
   stubs.push(stub);
   return stub;
 }
@@ -250,8 +250,7 @@ test('a scan stuck on a server that dies is run again on the next', async () => 
     () => a.requests('blockchain.scripthash.get_history') > 0,
     SCAN_WITHIN_MS,
   );
-  // navcoin-js runs a short sync of its own on connect and reports it
-  // finished; that must not pass for this scan finishing.
+  // Being connected must not pass for this scan finishing.
   await waitForConnectionSetUp(state);
   assert.notEqual(state.syncStatus, 'synced', 'stuck on the stalled server');
   assert.equal(
@@ -308,22 +307,34 @@ test('a scan run after connecting still derives new addresses', async () => {
 // its own waits are never awaited — which against one busy server opened
 // thousands of connections a minute and kept the server refusing us.
 test('a server answering busy is not reconnected to in a tight loop', async () => {
-  const busy = await startStub({
-    failing: {
-      'blockchain.scripthash.subscribe': 'server busy - request timed out',
+  // The scan fetches the transaction of each output it finds through
+  // navcoin-js, which is where navcoin-js meets the busy reply; the
+  // fixture is what gives the scan outputs to find.
+  const fixture = JSON.parse(
+    await fs.readFile(
+      path.join(import.meta.dirname, 'fixtures', 'mainnet-fake.json'),
+      'utf8',
+    ),
+  );
+  const busy = await startStub(
+    {
+      failing: {
+        'blockchain.transaction.get': 'server busy - request timed out',
+      },
     },
-  });
+    fixture,
+  );
   useNodes(busy);
 
-  const state = await openWallet();
-  // Not waited for at teardown: connection setup ends with a scripthash
-  // subscription, which this server never grants, so it never finishes.
+  const state = await openWallet({ scanned: false });
+  // Not waited for at teardown: the connection is being dropped and made
+  // again for as long as the server answers busy.
   opened.splice(opened.indexOf(state), 1);
 
   await waitFor(
     'navcoin-js to hit the busy reply',
-    () => busy.requests('blockchain.scripthash.subscribe') > 0,
-    SETTLE_WITHIN_MS,
+    () => busy.requests('blockchain.transaction.get') > 0,
+    SCAN_WITHIN_MS,
   );
   const before = busy.connections();
   await sleep(BUSY_WINDOW_MS);

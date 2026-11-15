@@ -497,11 +497,6 @@ test(
       assert.ok(fundedSource, 'navcoin-js-v1 is one of the derivations');
 
       // Poll until syncStatus === 'synced' AND the expected balance is credited.
-      // rescue-scan runs concurrently with the wallet's built-in Sync(); the
-      // wallet emits sync_finished quickly (before rescue-scan finishes), then
-      // rescue-scan emits a second sync_finished when it's done. We must wait
-      // for the balance to reflect the rescue-scan results, not just the first
-      // sync_finished.
       const SYNC_TIMEOUT_MS = 90_000;
       const POLL_INTERVAL_MS = 500;
       const DAEMON_LOG_TAIL_LINES = 60;

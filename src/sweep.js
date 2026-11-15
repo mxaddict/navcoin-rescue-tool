@@ -18,6 +18,14 @@ function sweepBlockReason(state) {
   if (state.error) return `in error state: ${state.error}`;
   if (state.syncStatus !== 'synced')
     return `not fully synced (status: ${state.syncStatus})`;
+  // 'synced' says the rescue scan finished. navcoin-js runs a sync of its
+  // own on every connect, one queued job for each transaction in the
+  // wallet's history, and for a long history it is still going then. A
+  // build started under it shares the database and the server with those
+  // jobs and can run out of time.
+  const queue = state.wallet?.queue;
+  if (queue?.running)
+    return `still processing transactions (${queue.q.length} queued)`;
   return null;
 }
 
@@ -279,6 +287,9 @@ export async function executeSweep(
 
   if (blocked.length > 0 && !force) {
     logSweep(`refused: ${blocked.length} source(s) not ready`);
+    for (const { state, reason } of blocked) {
+      logSweep(`${describeSource(state)}: ${reason}`);
+    }
     throw new Error(`${blocked.length} source(s) are not ready to sweep.`);
   }
 

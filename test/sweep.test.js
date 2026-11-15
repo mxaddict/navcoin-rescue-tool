@@ -981,6 +981,35 @@ async function withSweepSource(name, walletOpts, body) {
   }
 }
 
+// From a user's sweep that could not build its transaction: the source
+// read as synced because the rescue scan had finished, while navcoin-js
+// was still working through the wallet's history on its own queue.
+test('a source whose wallet is still processing transactions is not ready', async (t) => {
+  const sweepLog = captureSweepLog(t);
+  await withSweepSource('busy-queue', {}, async (state) => {
+    assert.equal(state.syncStatus, 'synced');
+    state.wallet.queue = { running: true, q: { length: 7 } };
+
+    assert.throws(
+      () => prepareSweep(),
+      /still processing transactions \(7 queued\)/,
+    );
+    await assert.rejects(
+      executeSweep('NDestinationAddr1'),
+      /1 source\(s\) are not ready to sweep/,
+    );
+    assert.equal(state.wallet._lastSentTx, undefined);
+    assert.match(
+      sweepLog.join('\n'),
+      /\[sweep\] src-busy-queue.*: still processing transactions/,
+    );
+
+    // The queue drained: the same source sweeps.
+    state.wallet.queue = { running: false, q: { length: 0 } };
+    assert.equal(prepareSweep().sources.length, 1);
+  });
+});
+
 // A request the server never answers: what navcoin-js's electrum client
 // leaves behind when the socket closes under it.
 const NEVER = new Promise(() => {});

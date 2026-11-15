@@ -18,6 +18,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The message for a build that ran out of time said "the server did not
   answer"; it now says "the build did not finish".
 
+- A sweep no longer starts while navcoin-js is still working through a
+  wallet's transaction history. A source read as synced once the rescue
+  scan finished, but navcoin-js runs a sync of its own on every connect,
+  one job for each transaction the wallet ever had, and a sweep started
+  under it shared the database and the server with those jobs. Such a
+  source now blocks the sweep with "still processing transactions" and
+  the number queued, and the daemon log names why a sweep was refused.
+
 ### Changed
 
 - A NAV sweep is sent in transactions of at most 50 inputs, down from 250,

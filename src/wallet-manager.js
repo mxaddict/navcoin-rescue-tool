@@ -242,6 +242,19 @@ export async function rescanAllSources() {
   return { started };
 }
 
+// Rescan one source from scratch and wait for it. Resolves true when the
+// source came out synced, false when it could not be rescanned or the
+// scan did not finish; the reason is then in the source's state.
+export async function rescanSource(sourceId) {
+  const state = walletState.get(sourceId);
+  if (!state || state.closing || !state.wallet) return false;
+  if (state.rescanInFlight) return false;
+
+  state.rescanInFlight = true;
+  await runFreshRescan(state);
+  return state.syncStatus === 'synced';
+}
+
 async function runFreshRescan(state) {
   try {
     // Wipe UTXO/tx/scripthash state so the scan rebuilds from a clean

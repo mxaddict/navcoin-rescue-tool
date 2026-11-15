@@ -11,6 +11,7 @@ import {
   listSourceStates,
   OUT_NAV,
   OUT_STAKED,
+  rescanSource,
 } from './wallet-manager.js';
 
 // Why a source cannot take part in a sweep, or null if it can.
@@ -169,6 +170,17 @@ function logSweep(message) {
 export const SWEEP_BUILD_TIMEOUT_MS = 10 * 60_000;
 export const SWEEP_BROADCAST_TIMEOUT_MS = 2 * 60_000;
 
+// How many times in a row a leg may have a batch rejected over spent
+// outputs, rescan, and have the next batch rejected too with nothing sent
+// in between, before the sweep gives up. Any batch that goes out starts
+// the count again, so a wallet that is staking is swept for as long as
+// the sweep keeps ahead of it.
+export const SWEEP_STALE_ROUNDS = 5;
+
+// On the error of a batch the node answered and refused. The only failure
+// a rescan can explain: nothing went out, and the answer is in.
+const SWEEP_BATCH_REJECTED = 'SWEEP_BATCH_REJECTED';
+
 // The sweep running now, or the last one that ran: what the daemon reports
 // on /status, so a client that lost the reply to its request can still
 // learn what was broadcast. Kept in memory only.
@@ -261,12 +273,18 @@ function describeBroadcastLegs(record) {
  * Spends only from the sources `prepareSweep` would have accepted for the
  * same `force`, so what is broadcast is what the preview showed.
  *
+ * A batch the node rejects is not the end when its outputs went stale: a
+ * wallet that is still staking spends them while it is swept. The source
+ * is rescanned with `rescan(sourceId)`, which resolves true once it is
+ * synced again, and the leg goes on from what is still unspent. See
+ * `sweepLeg`.
+ *
  * `id` names the sweep in `getSweepStatus`, so a client can tell the sweep
  * it asked for from an earlier one. `registered` is as for `prepareSweep`.
  */
 export async function executeSweep(
   destination,
-  { force = false, id = null, registered = [] } = {},
+  { force = false, id = null, registered = [], rescan = rescanSource } = {},
 ) {
   if (sweepRunning) {
     logSweep('refused: another sweep is still running');
@@ -308,7 +326,7 @@ export async function executeSweep(
   sweepRunning = true;
 
   try {
-    const result = await sweepReadySources(ready, destination, record);
+    const result = await sweepReadySources(ready, destination, record, rescan);
     logSweep(
       `finished: ${result.hashes.length} transaction(s), ` +
         `sent=${result.totalSent} fee=${result.totalFee}`,
@@ -332,7 +350,7 @@ export async function executeSweep(
   }
 }
 
-async function sweepReadySources(ready, destination, record) {
+async function sweepReadySources(ready, destination, record, rescan) {
   const totals = { hashes: [], totalSent: 0, totalFee: 0, leftBehind: [] };
 
   for (const state of ready) {
@@ -349,55 +367,130 @@ async function sweepReadySources(ready, destination, record) {
       // Spend cold-stake outputs too. Not OUT_STAKED alone: with that
       // type navcoin-js sends change back to a cold-stake script.
       const type = OUT_NAV | OUT_STAKED;
-      await sweepLeg(
-        state,
-        'NAV',
-        nav,
-        await planNavBatches(state.wallet, type),
-        (batch) => buildNavBatch(state.wallet, destination, batch, type),
-        record,
-        totals,
-      );
+      await sweepLeg(state, 'NAV', record, totals, {
+        balance: () => state.balance.nav.confirmed,
+        plan: () => planNavBatches(state.wallet, type),
+        build: (batch) => buildNavBatch(state.wallet, destination, batch, type),
+        rescan,
+      });
     }
 
     if (xnav > 0) {
-      await sweepLeg(
-        state,
-        'xNAV',
-        xnav,
-        await planXnavBatches(state.wallet),
-        (batch) => buildXnavBatch(state.wallet, destination, batch),
-        record,
-        totals,
-      );
+      await sweepLeg(state, 'xNAV', record, totals, {
+        balance: () => state.balance.xnav?.confirmed ?? 0,
+        plan: () => planXnavBatches(state.wallet),
+        build: (batch) => buildXnavBatch(state.wallet, destination, batch),
+        rescan,
+      });
     }
   }
 
   return totals;
 }
 
+const outpointOf = (output) => `${output.txid}:${output.vout}`;
+
 // Broadcast one leg of one source, a batch at a time, adding what went out
 // to `totals`. Each batch is built only after the one before it was
-// broadcast, and the first that fails ends the sweep: see `executeSweep`.
-// `balance` is what the source shows for this coin; whatever part of it
-// the plan does not send is reported in `totals.leftBehind`.
-async function sweepLeg(
-  state,
-  coin,
-  balance,
-  plan,
-  buildBatch,
-  record,
-  totals,
-) {
+// broadcast.
+//
+// `leg` is how to work on this coin of this source: `plan()` deals the
+// outputs spendable now into batches, `build(batch)` builds one,
+// `balance()` is what the source shows for the coin, and `rescan` is as
+// for `executeSweep`.
+//
+// A batch the node rejects ends the sweep unless its outputs went stale.
+// To find out, the source is rescanned and the leg planned again: when
+// outputs of the rejected batch are no longer among the unspent ones,
+// something else spent them, a stake usually, and the leg carries on with
+// the new plan. It does so for as long as batches keep going out; see
+// SWEEP_STALE_ROUNDS. When every output of the rejected batch is still
+// unspent, the rejection was about something else and stands.
+//
+// Whatever part of the balance the last plan did not send is reported in
+// `totals.leftBehind`.
+async function sweepLeg(state, coin, record, totals, leg) {
   const source = describeSource(state);
-  const { batches, left } = plan;
-  const outputs = batches.reduce((sum, batch) => sum + batch.outputs.length, 0);
-  const planned = batches.reduce((sum, batch) => sum + batch.amount, 0);
-  logSweep(
-    `${source} ${coin}: ${outputs} output(s) in ${batches.length} ` +
-      `transaction batch(es)`,
-  );
+  // The balance beside the plan made from it: both move with a rescan.
+  let balance = leg.balance();
+  let plan = await leg.plan();
+  let rescans = 0;
+  let staleRounds = 0;
+
+  for (;;) {
+    const { batches } = plan;
+    const outputs = batches.reduce((sum, b) => sum + b.outputs.length, 0);
+    logSweep(
+      `${source} ${coin}: ${outputs} output(s) in ${batches.length} ` +
+        `transaction batch(es)`,
+    );
+    const round = rescans > 0 ? ` after rescan ${rescans}` : '';
+
+    let rejected = null;
+    for (const [index, batch] of batches.entries()) {
+      const label =
+        (batches.length > 1 ? `${coin} ${index + 1}/${batches.length}` : coin) +
+        round;
+      try {
+        const result = await broadcastLeg(
+          state,
+          label,
+          () => leg.build(batch),
+          batch.amount,
+          record,
+        );
+        totals.hashes.push(...result.hashes);
+        totals.totalSent += result.sent;
+        totals.totalFee += result.fee;
+        staleRounds = 0;
+      } catch (error) {
+        if (error.code !== SWEEP_BATCH_REJECTED) throw error;
+        rejected = { batch, error };
+        break;
+      }
+    }
+    if (!rejected) break;
+
+    staleRounds += 1;
+    if (staleRounds > SWEEP_STALE_ROUNDS) {
+      rejected.error.message +=
+        `\nGave up after ${SWEEP_STALE_ROUNDS} rescans in a row with ` +
+        `nothing sent in between: outputs kept being spent while the ` +
+        `sweep ran. If this wallet is staking, stop it and sweep again.`;
+      throw rejected.error;
+    }
+
+    logSweep(
+      `${source} ${coin}: batch rejected, rescanning to see whether its ` +
+        `outputs were spent`,
+    );
+    if (!(await leg.rescan(state.sourceId))) {
+      logSweep(`${source} ${coin}: the rescan did not finish`);
+      rejected.error.message += `\nThe rescan to check for spent outputs did not finish.`;
+      throw rejected.error;
+    }
+    rescans += 1;
+
+    balance = leg.balance();
+    plan = await leg.plan();
+    const unspent = new Set(
+      plan.batches.flatMap((batch) => batch.outputs.map(outpointOf)),
+    );
+    const gone = rejected.batch.outputs.filter(
+      (output) => !unspent.has(outpointOf(output)),
+    );
+    if (gone.length === 0) {
+      logSweep(
+        `${source} ${coin}: every output of the rejected batch is still ` +
+          `unspent, so the rejection stands`,
+      );
+      throw rejected.error;
+    }
+    logSweep(
+      `${source} ${coin}: ${gone.length} output(s) of the rejected batch ` +
+        `are no longer unspent; sweeping what is left`,
+    );
+  }
 
   const leave = (reason, amount, detail) => {
     logSweep(`${source} ${coin}: ${amount} left behind, ${detail}`);
@@ -409,6 +502,7 @@ async function sweepLeg(
       amount,
     });
   };
+  const { batches, left } = plan;
   if (left.outputs > 0) {
     leave(
       LEFT_TOO_SMALL,
@@ -418,24 +512,10 @@ async function sweepLeg(
   }
   // navcoin-js holds back outputs the balance already counts: a stake
   // reward until it has matured, xNAV until it has confirmed.
+  const planned = batches.reduce((sum, batch) => sum + batch.amount, 0);
   const unspendable = balance - planned - left.amount;
   if (unspendable > 0) {
     leave(LEFT_NOT_SPENDABLE, unspendable, 'not spendable yet');
-  }
-
-  for (const [index, batch] of batches.entries()) {
-    const label =
-      batches.length > 1 ? `${coin} ${index + 1}/${batches.length}` : coin;
-    const result = await broadcastLeg(
-      state,
-      label,
-      () => buildBatch(batch),
-      batch.amount,
-      record,
-    );
-    totals.hashes.push(...result.hashes);
-    totals.totalSent += result.sent;
-    totals.totalFee += result.fee;
   }
 }
 
@@ -553,9 +633,13 @@ async function runLeg(state, label, createTx, amount, legRecord) {
       `${leg}: broadcast rejected after ${Date.now() - sendStart}ms, ` +
         `hashes=${sentHashes}: ${result.error}`,
     );
-    throw new Error(
+    const refused = new Error(
       `${label} broadcast failed for source ${state.sourceId}: ${result.error}`,
     );
+    // Part of the leg already out is not something a rescan and another
+    // try can account for.
+    if (hashes.length === 0) refused.code = SWEEP_BATCH_REJECTED;
+    throw refused;
   }
   // navcoin-js reports success with no transaction id when its client is
   // gone, having sent nothing.

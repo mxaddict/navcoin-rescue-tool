@@ -335,6 +335,28 @@ lowered. Open:
   sweep started under eight minutes after the import), or the sqlite shim
   is simply slow there. If a build still takes minutes, the remaining
   per-input cost is `db.GetTx` and `db.GetKey`.
+- **Stale outputs during a sweep: what rests on what.** `sweepLeg` in
+  `sweep.js` rescans (`rescanSource` in `wallet-manager.js`) when a batch
+  is rejected and carries on if outputs of that batch are gone. Not
+  verified:
+  - What a real node's rejection looks like through an electrum server.
+    The code does not read the message: any broadcast the server answers
+    with an error and no transaction id counts, so a rejection for another
+    reason also costs one full rescan before the sweep fails. If a server
+    reports a spent input some other way (no answer, a dropped
+    connection), the batch ends as outcome unknown or failed and nothing
+    is rescanned.
+  - How long a rescan takes on a wallet like the user's. It wipes the
+    source's outputs and scans from the first address, and the sweep waits
+    for it; the GUI's request does not wait that long (see "Sweep
+    guards").
+  - A rescan that fails leaves the source in `error` with its outputs
+    wiped; the sweep reports it and a manual rescan is needed.
+  - Considered and not done: asking the server whether a batch's outputs
+    are still unspent before building it. It cannot close the gap (a stake
+    can land between the check and the broadcast), and the call it would
+    use, `blockchain.outpoint.subscribe`, was not tried against a live
+    server.
 - **navcoin-js's own sync is switched off; what that leaves.**
   `skipLibrarySync` in `library-sync.js` replaces `wallet.Sync` on every
   wallet `openSourceWallet` opens, so nothing subscribes to addresses or
@@ -356,7 +378,11 @@ lowered. Open:
     wallet has no client at that moment, and none counts it in
     `scan.failures`: an output skipped that way leaves the scan finishing
     as synced without it. navcoin-js's sync used to claim such an output
-    on its own; nothing does now.
+    on its own; nothing does now. Left as it is because the one known way
+    to get there, a dropped connection, also aborts the scan
+    (`state.scanAbort`), which then runs again; the fakes in
+    `rescue-scan.test.js` return nothing from `GetTx` on purpose and would
+    need real transactions to change it.
   - Comments in `rescue-scan.js` (the `password` option) and in
     `tx-cache.js` still describe navcoin-js's sync as running. The
     workarounds they explain were not removed or re-examined.

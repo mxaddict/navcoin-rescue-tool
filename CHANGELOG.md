@@ -41,6 +41,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   source now blocks the sweep with "still processing transactions" and
   the number queued, and the daemon log names why a sweep was refused.
 
+- A sweep no longer fails when the wallet spends its own outputs while it
+  is being swept, as one that is still staking does. A batch the node
+  rejects now has the source rescanned: when outputs of that batch turn
+  out to be spent, the sweep carries on with what is still unspent, and
+  goes on doing so until nothing spendable is left. Batches already sent
+  stay sent and are still listed. A rejection with every output still
+  unspent fails the sweep as before, and so do five rescans in a row with
+  nothing sent in between. Stake rewards a rescan finds are not spendable
+  until they mature and are listed under "Not swept".
+
 ### Changed
 
 - A NAV sweep is sent in transactions of at most 50 inputs, down from 250,

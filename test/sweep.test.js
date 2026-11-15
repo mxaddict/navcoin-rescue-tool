@@ -12,6 +12,7 @@ import {
   prepareSweep,
   SWEEP_BROADCAST_TIMEOUT_MS,
   SWEEP_BUILD_TIMEOUT_MS,
+  SWEEP_STALE_ROUNDS,
 } from '../src/sweep.js';
 import {
   NAV_BATCH_INPUTS,
@@ -1383,6 +1384,165 @@ function spendableOutputs({ nav = [], xnav = [] }) {
 }
 
 const outpointsOf = (outputs) => outputs.map((o) => `${o.txid}:${o.vout}`);
+
+// A wallet that is still staking spends its own outputs while it is being
+// swept: the output list the sweep planned from goes stale, and the node
+// rejects the batch holding the spent one.
+const REJECTED = { hashes: [], error: 'bad-txns-inputs-spent' };
+
+// Three NAV outputs the test can take away from, as a stake would.
+function stakingWallet(sendResults) {
+  const outputs = spendableOutputs({
+    nav: [3_0000_0000, 2_0000_0000, 1_0000_0000],
+  })(0x1);
+  return {
+    outputs,
+    opts: {
+      _balance: {
+        nav: { confirmed: 6_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _spendable: (type) => (type === 0x4 ? [] : outputs),
+      _sendResultQueue: sendResults,
+    },
+  };
+}
+
+test('a batch rejected over a spent output is rescanned and sent again', async (t) => {
+  const sweepLog = captureSweepLog(t);
+  const { outputs, opts } = stakingWallet([
+    REJECTED,
+    { hashes: ['after-rescan'], error: null },
+  ]);
+
+  await withSweepSource('stale-output', opts, async (state) => {
+    const rescans = [];
+    const result = await executeSweep('NDestinationAddr1', {
+      rescan: async (sourceId) => {
+        rescans.push(sourceId);
+        // The scan finds the middle output gone, and the balance with it.
+        outputs.splice(1, 1);
+        state.balance.nav.confirmed = 4_0000_0000;
+        return true;
+      },
+    });
+
+    assert.deepEqual(rescans, [state.sourceId]);
+    assert.deepEqual(result.hashes, ['after-rescan']);
+    assert.deepEqual(
+      state.wallet._navCalls.map((call) => outpointsOf(call.inputs)),
+      [
+        ['nav0:0', 'nav1:0', 'nav2:0'],
+        ['nav0:0', 'nav2:0'],
+      ],
+    );
+    assert.equal(result.totalSent + result.totalFee, 4_0000_0000);
+    assert.deepEqual(result.leftBehind, []);
+    assert.match(
+      sweepLog.join('\n'),
+      /1 output\(s\) of the rejected batch are no longer unspent/,
+    );
+  });
+});
+
+test('a sweep goes on rescanning for as long as outputs keep going stale', async (t) => {
+  captureSweepLog(t);
+  const { outputs, opts } = stakingWallet([
+    REJECTED,
+    REJECTED,
+    { hashes: ['last-one'], error: null },
+  ]);
+
+  await withSweepSource('stale-twice', opts, async (state) => {
+    let rescans = 0;
+    const result = await executeSweep('NDestinationAddr1', {
+      rescan: async () => {
+        rescans += 1;
+        outputs.pop();
+        state.balance.nav.confirmed = outputs.reduce(
+          (sum, output) => sum + output.amount,
+          0,
+        );
+        return true;
+      },
+    });
+
+    assert.equal(rescans, 2);
+    assert.deepEqual(result.hashes, ['last-one']);
+    assert.deepEqual(outpointsOf(state.wallet._navCalls.at(-1).inputs), [
+      'nav0:0',
+    ]);
+  });
+});
+
+test('a rejected batch whose outputs are all still unspent fails the sweep', async (t) => {
+  captureSweepLog(t);
+  const { opts } = stakingWallet([REJECTED]);
+
+  await withSweepSource('rejected-not-stale', opts, async (state) => {
+    let rescans = 0;
+    await assert.rejects(
+      executeSweep('NDestinationAddr1', {
+        rescan: async () => {
+          rescans += 1;
+          return true;
+        },
+      }),
+      /NAV broadcast failed for source src-rejected-not-stale: bad-txns-inputs-spent/,
+    );
+    assert.equal(rescans, 1);
+    assert.equal(state.wallet._navCalls.length, 1);
+  });
+});
+
+test('a rejected batch fails the sweep when the rescan does not finish', async (t) => {
+  captureSweepLog(t);
+  const { opts } = stakingWallet([REJECTED]);
+
+  await withSweepSource('rescan-fails', opts, async () => {
+    await assert.rejects(
+      executeSweep('NDestinationAddr1', { rescan: async () => false }),
+      /bad-txns-inputs-spent[\s\S]*rescan to check for spent outputs did not finish/,
+    );
+  });
+});
+
+test('a sweep whose every batch keeps going stale gives up', async (t) => {
+  captureSweepLog(t);
+  const extra = Array.from({ length: SWEEP_STALE_ROUNDS + 3 }, (_, index) => ({
+    txid: `more${index}`,
+    vout: 0,
+    amount: 1_0000_0000,
+    output: { satoshis: 1_0000_0000 },
+  }));
+  const outputs = [...extra];
+
+  await withSweepSource(
+    'always-stale',
+    {
+      _balance: {
+        nav: { confirmed: extra.length * 1_0000_0000, pending: 0 },
+        staked: { confirmed: 0, pending: 0 },
+      },
+      _spendable: (type) => (type === 0x4 ? [] : outputs),
+      _sendResult: REJECTED,
+    },
+    async () => {
+      let rescans = 0;
+      await assert.rejects(
+        executeSweep('NDestinationAddr1', {
+          rescan: async () => {
+            rescans += 1;
+            outputs.pop();
+            return true;
+          },
+        }),
+        /outputs kept being spent/,
+      );
+      assert.equal(rescans, SWEEP_STALE_ROUNDS);
+    },
+  );
+});
 
 test('a NAV leg with more outputs than one batch goes out in several', async (t) => {
   captureSweepLog(t);

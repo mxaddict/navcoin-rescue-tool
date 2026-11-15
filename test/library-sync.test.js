@@ -12,6 +12,7 @@ import {
   closeAllWallets,
   getSourceState,
   openSourceWallet,
+  rescanSource,
   resetElectrumNodeSelectionCache,
 } from '../src/wallet-manager.js';
 import {
@@ -79,6 +80,17 @@ test(
       assert.equal(stub.requests('blockchain.scripthash.subscribe'), 0);
       assert.equal(queueStarted, false);
       assert.equal(state.wallet.queue.running, false);
+
+      // What a sweep runs when a batch is rejected: the source scanned
+      // again from nothing, waited for, and synced on the same coins.
+      const lookups = stub.requests('blockchain.scripthash.listunspent');
+      assert.equal(await rescanSource(source.id), true);
+      assert.ok(stub.requests('blockchain.scripthash.listunspent') > lookups);
+      assert.equal(state.syncStatus, 'synced');
+      assert.equal(state.balance.nav.confirmed, fixture.expectedNavConfirmed);
+      assert.equal(state.balance.xnav.confirmed, fixture.expectedXNavConfirmed);
+      assert.equal(stub.requests('blockchain.scripthash.subscribe'), 0);
+      assert.equal(await rescanSource('no-such-source'), false);
     } finally {
       await closeAllWallets();
       await stub.close();

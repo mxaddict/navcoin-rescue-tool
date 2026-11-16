@@ -388,13 +388,16 @@ relayed; no log of that run was seen. Open:
   `ERR_DLOPEN_FAILED`, "code signature ... not valid for use in process
   using Library Validation: library load disallowed by system policy". The
   launches after it loaded the same file. Read from the message, not
-  reproduced: this is macOS refusing an unsigned library in a freshly
-  downloaded, quarantined folder (the archive ran from `Downloads`), which
-  stops once the user allows it or the quarantine flag is gone. Memory
-  pressure was suggested as a cause; the log has nothing about memory, and
-  the message names system policy. The release archive's native modules
-  are not signed; signing them, or having the launcher clear the quarantine
-  flag, is what would be tried.
+  reproduced: macOS refusing an unsigned library in a quarantined folder
+  (the archive ran from `Downloads`). The unix wrappers written in
+  `release.yml` and `clear_quarantine` in `src-tauri/daemon-launch` now
+  remove the quarantine mark before the daemon starts. What is checked is
+  that the mark is gone, by the release smoke test on the macOS runners;
+  that a Mac which refused the load now accepts it is not, and the smoke
+  test prints whether the runner refuses a quarantined module at all.
+  Memory pressure was suggested as a cause; the log has nothing about
+  memory. Not done: signing and notarizing the archive, which needs an
+  Apple developer account and would also stop the prompt for the GUI.
 - **After the sweep failed the wallet's connection went into the
   connect/reset loop** seen in the 0.2.8 logs: each server accepts, then
   resets the socket. Whether the servers are dropping a session that asks
@@ -590,12 +593,9 @@ theirs. Nothing was retried, so the job failed, and `smoke` and `release`
 skipped: a tag on the remote, a green-looking push, and nothing
 published. `gh run rerun --failed` got it out.
 
-Each platform downloads its runtime with a single unretried call
-(`Invoke-WebRequest` on Windows, `curl` elsewhere). A retry with backoff
-around each of them would turn a blip into a slower build instead of a
-failed release. Not done here because it changes the release workflow,
-which only a tag exercises — so it cannot be verified without cutting
-one.
+Each platform now downloads its runtime with `curl --retry` (`curl.exe`
+on Windows). Not verified against a real dropped connection: the retries
+only show when one happens.
 
 The v0.2.8 run hit the same shape on 2026-11-08 in a different download:
 `canvas` (pulled in by indexeddbshim 16) fetches a prebuilt binary from

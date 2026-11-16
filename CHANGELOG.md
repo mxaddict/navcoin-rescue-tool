@@ -36,6 +36,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the log. A failure from the library that quotes what it was given, as
   an invalid-mnemonic error does, is logged with the secret replaced by
   `[redacted]`.
+- macOS: the app no longer has to be taken out of quarantine by hand
+  before its first run. A user's daemon died at its first start on
+  `ERR_DLOPEN_FAILED`, "library load disallowed by system policy": macOS
+  marks everything unpacked from a download and refuses to load the
+  archive's unsigned native modules while they carry the mark. `ntr`,
+  `ntr-daemon` and the GUI's daemon start now remove it from the unpacked
+  folder themselves. The GUI binary still has to be allowed once, as
+  macOS asks for any unsigned app.
 
 ## [0.2.13] - 2026-11-15
 

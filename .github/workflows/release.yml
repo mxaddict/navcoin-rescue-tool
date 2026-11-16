@@ -250,7 +250,9 @@ jobs:
         run: |
           set -euo pipefail
           stage="staging/${{ steps.stage.outputs.name }}"
-          curl -fsSL "${{ matrix.node_url }}" -o node.tar
+          # Retried: one dropped connection here failed the build, and with
+          # it the publish, of a release whose tag was already pushed.
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o node.tar "${{ matrix.node_url }}"
           mkdir -p node_extract
           if [[ "${{ matrix.node_url }}" == *.tar.xz ]]; then
             tar -xJf node.tar -C node_extract --strip-components=1
@@ -267,7 +269,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $stage = "staging/${{ steps.stage.outputs.name }}"
-          Invoke-WebRequest -Uri "${{ matrix.node_url }}" -OutFile node.zip
+          # curl, as on the other platforms, for its retries: one dropped
+          # connection here failed the build, and with it the publish, of a
+          # release whose tag was already pushed.
+          curl.exe -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o node.zip "${{ matrix.node_url }}"
+          if ($LASTEXITCODE -ne 0) { throw "downloading the Node runtime failed (curl exit $LASTEXITCODE)" }
           Expand-Archive -Path node.zip -DestinationPath node_extract
           $nodeDir = Get-ChildItem node_extract | Select-Object -First 1
           New-Item -ItemType Directory -Path "$stage/runtime" -Force | Out-Null
@@ -285,6 +291,12 @@ jobs:
             cat > "$stage/$name" <<EOF
           #!/bin/sh
           DIR=\$(cd "\$(dirname "\$0")" && pwd)
+          # macOS marks everything unpacked from a download as quarantined,
+          # and then refuses to load the unsigned native modules in here.
+          # The mark is gone after the first run, and xattr then fails.
+          if [ "\$(uname)" = "Darwin" ]; then
+            xattr -dr com.apple.quarantine "\$DIR" 2>/dev/null || true
+          fi
           exec "\$DIR/runtime/bin/node" "\$DIR/app/$script" "\$@"
           EOF
             chmod +x "$stage/$name"
@@ -485,14 +497,50 @@ jobs:
           fi
           trap 'echo "--- daemon.log ---"; tail -n 100 "$daemon_log" 2>/dev/null || echo "(no daemon.log at $daemon_log)"' ERR
 
+          # macOS only: mark the app the way a browser download is marked,
+          # and check each entry point takes the mark off before it loads
+          # the native modules. `quarantined` is true while any file under
+          # app/ still carries it.
+          quarantined() {
+            [ -n "$(xattr -r -p com.apple.quarantine "$root/app" 2>/dev/null || true)" ]
+          }
+          quarantine() {
+            xattr -rw com.apple.quarantine "0081;00000000;Safari;" "$root/app"
+            if ! quarantined; then
+              echo "could not quarantine the app, so the check below would prove nothing" >&2
+              exit 1
+            fi
+          }
+          if [ "$(uname)" = "Darwin" ]; then
+            quarantine
+            # For the record only: whether this runner refuses the load a
+            # user's Mac refused. The checks below hold either way.
+            native=$(find "$root/app/node_modules" -name bcrypto.node | head -n 1)
+            if "$root/runtime/bin/node" -e 'process.dlopen({ exports: {} }, process.argv[1])' "$native"; then
+              echo "note: this runner loads a quarantined native module"
+            else
+              echo "note: this runner refuses a quarantined native module"
+            fi
+          fi
+
           "$root/ntr" start
+          if [ "$(uname)" = "Darwin" ] && quarantined; then
+            echo "ntr left the app quarantined" >&2
+            exit 1
+          fi
           "$root/ntr" status | tee status.txt
           grep -q 'Daemon status: running' status.txt
           "$root/ntr" stop
 
+          if [ "$(uname)" = "Darwin" ]; then quarantine; fi
+
           # The failure users hit: the GUI starting the daemon with no
           # Node, no `ntr` on PATH and no build checkout.
           "$root/ntr-gui" --daemon-check
+          if [ "$(uname)" = "Darwin" ] && quarantined; then
+            echo "ntr-gui left the app quarantined" >&2
+            exit 1
+          fi
           "$root/ntr" status | grep -q 'Daemon status: running'
           "$root/ntr" stop
 

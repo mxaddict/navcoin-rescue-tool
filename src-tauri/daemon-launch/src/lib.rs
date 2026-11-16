@@ -329,6 +329,34 @@ pub fn find_on_path(names: &[&str]) -> Option<PathBuf> {
     None
 }
 
+/// The extended attribute macOS puts on everything unpacked from a
+/// download.
+const QUARANTINE_ATTRIBUTE: &str = "com.apple.quarantine";
+
+/// Take macOS's quarantine mark off the unpacked archive at `dir`.
+///
+/// The archive's native modules are not signed, and macOS refuses to load
+/// a quarantined one: the daemon then dies at start on `ERR_DLOPEN_FAILED`,
+/// "library load disallowed by system policy". The user has already let
+/// the GUI itself run by the time this is reached.
+///
+/// Fails only when `xattr` could not be run. Its exit status is not
+/// looked at: once the mark is gone it reports failure for every file,
+/// which is the usual case, and if the mark could not be removed the
+/// daemon's own failure says so in its log. Verified only by the release
+/// smoke test on the macOS runners, which checks the mark is gone, not
+/// that a Mac which refused the load now accepts it.
+fn clear_quarantine(dir: &Path) -> std::io::Result<()> {
+    Command::new("xattr")
+        .arg("-dr")
+        .arg(QUARANTINE_ATTRIBUTE)
+        .arg(dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|_exit| ())
+}
+
 /// Start the daemon with the first launch that spawns, and report which
 /// one that was. Every failure is reported together, since which of them
 /// applies depends on how the user installed the app.
@@ -337,6 +365,13 @@ pub fn spawn_daemon(
     dev_cli: Option<&Path>,
     path_ntr: Option<&Path>,
 ) -> Result<DaemonLaunch, String> {
+    let mut errors = Vec::new();
+    if cfg!(target_os = "macos") && bundled_node(exe_dir).is_file() {
+        if let Err(e) = clear_quarantine(exe_dir) {
+            errors.push(format!("clearing the macOS quarantine mark: {e}"));
+        }
+    }
+
     let launches = daemon_launches(exe_dir, dev_cli, path_ntr);
     if launches.is_empty() {
         return Err(format!(
@@ -347,7 +382,6 @@ pub fn spawn_daemon(
         ));
     }
 
-    let mut errors = Vec::new();
     for launch in launches {
         match spawn_one(&launch) {
             Ok(mut child) => {

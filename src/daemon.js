@@ -22,11 +22,11 @@ import {
 import {
   importSources,
   markSourceFailed,
-  publicSource,
   removeSource,
   readSources,
   purgeAllSources,
 } from './source-registry.js';
+import { publicSource } from './source-secret.js';
 import { executeSweep, getSweepStatus, prepareSweep } from './sweep.js';
 import {
   openSourceWallet,

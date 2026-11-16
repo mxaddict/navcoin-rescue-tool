@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -43,6 +44,46 @@ test('bootstrapAppData creates initial metadata files', async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+// Windows has no such modes; see `keepPrivate`.
+test(
+  'bootstrapAppData closes the app data to other users',
+  { skip: process.platform === 'win32' },
+  async () => {
+    // Not under the project: a checkout on a filesystem without modes
+    // would pass this without checking anything.
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ntr-private-'));
+    const mode = async (...parts) =>
+      (await fs.stat(path.join(root, ...parts))).mode & 0o777;
+
+    try {
+      // As an earlier version, or the launcher, left them.
+      await fs.chmod(root, 0o755);
+      await fs.mkdir(path.join(root, 'wallets'), { mode: 0o755 });
+      await fs.mkdir(path.join(root, 'logs'), { mode: 0o755 });
+      await fs.writeFile(path.join(root, 'logs', 'daemon.log'), 'old', {
+        mode: 0o644,
+      });
+      await fs.chmod(path.join(root, 'logs', 'daemon.log'), 0o644);
+      assert.equal(await mode('logs', 'daemon.log'), 0o644);
+
+      await bootstrapAppData(root);
+
+      assert.equal(await mode(), 0o700);
+      assert.equal(await mode('wallets'), 0o700);
+      assert.equal(await mode('logs'), 0o700);
+      assert.equal(await mode('logs', 'daemon.log'), 0o600);
+      assert.equal(await mode('sources.json'), 0o600);
+      assert.equal(await mode('auth.cookie'), 0o600);
+      assert.equal(
+        await fs.readFile(path.join(root, 'logs', 'daemon.log'), 'utf8'),
+        'old',
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 // The daemon writes the source registry from several places that run at
 // once — every derivation of a phrase marks itself synced when its scan

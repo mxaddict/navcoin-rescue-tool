@@ -41,24 +41,21 @@ is when the check happens; a warning on a mismatch would close the gap.
   Svelte views under `gui/src` — their daemon wiring was read, their UI logic
   was not.
 
-## The daemon log records mnemonics in cleartext
+## The daemon log and secrets: what is left
 
-- `createImportedWallet` in `navcoin-js-adapter.js` translates the
-  "cannot read properties of undefined" failure into a wallet-type hint, but
-  every other failure falls through to
-  `navcoin-js import failed: ${raw}`. bitcore-mnemonic's `InvalidMnemonic`
-  puts the whole phrase in its message, so `daemon.js` writes the user's
-  seed phrase into `logs/daemon.log`.
-- The log file is created mode 644, unlike `sources.json` and `auth.cookie`
-  which are 600. Confirmed on this machine 2026-08-27: the log was
-  world-readable and held the phrase on 12 lines.
-- Partly fixed: import-time validation now rejects a bad phrase with a
-  message that never contains it, so the reported case no longer reaches
-  the log. Still open: any other failure from `createImportedWallet` falls
-  through to `navcoin-js import failed: ${raw}`, and a waived
-  `navcoin-core` import can still reach that path. The log is also still
-  created 644 while `sources.json` and `auth.cookie` are 600. Existing logs
-  stay readable until wiped by hand.
+Import failures are now logged with the source's phrase or keys redacted
+(`redactSourceSecret` in `source-secret.js`, applied in
+`createImportedWallet`), and `bootstrapAppData` closes the app-data
+directories and the log to other users on every start. Left open:
+
+- Logs written before this still hold whatever they held, readable now
+  only by the owner. Nothing scrubs them.
+- The redaction covers what `createImportedWallet` reports. Lines the
+  wallet worker or navcoin-js print for themselves were not audited for
+  secrets.
+- The mode test in `test/app-data.test.js` is skipped on Windows, where
+  nothing was done or checked: the directory is assumed private because it
+  is under the user's profile.
 
 ## Large-wallet sync: what is fixed and what is not
 
@@ -561,11 +558,6 @@ reading, and no test was written or run for any of them.
   local user who binds the port while the daemon is down receives the
   cookie and every phrase imported. `handleStart` notices a foreign
   listener; `import` and `sweep` do not.
-- **Medium: wallet databases are readable by other local users.**
-  `bootstrapAppData` creates the app-data and `wallets/` directories with
-  default modes; the review saw `drwxr-xr-x` directories and a `-rw-r--r--`
-  tx cache. Wallet files are inferred to match. Their encryption password is
-  the public `ObsidianSweepKey`. Same root cause as the 644 log above.
 - **Low: a rescan leaves the source `synced` for a moment.**
   `runFreshRescan` zeroes the balance while `syncStatus` stays `synced`
   until the first progress event, so a sweep in that window sends nothing

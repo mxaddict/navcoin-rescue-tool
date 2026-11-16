@@ -141,12 +141,35 @@ async function readJsonFileWithRetry(filePath, attempts = 3) {
   throw lastError;
 }
 
+// Owner only. The wallet databases are encrypted with a password that is
+// public, the registry holds the phrases, and the log names every source
+// and what was swept where, so none of it is for another user of the
+// machine to read. Closing the directories covers every file under them,
+// whoever creates it later and with whatever mode.
+const PRIVATE_DIR_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
+
+// Applies those modes to what is already there: a mode given at creation
+// does nothing for an app-data directory an earlier version made open, or
+// for a log some other process created first. Does nothing on Windows,
+// which has no such modes; the app-data directory there is under the
+// user's profile.
+async function keepPrivate(layout) {
+  if (process.platform === 'win32') return;
+
+  for (const dir of [layout.root, layout.walletsDir, layout.logsDir]) {
+    await fs.chmod(dir, PRIVATE_DIR_MODE);
+  }
+  await fs.chmod(layout.daemonLogFile, PRIVATE_FILE_MODE);
+}
+
 export async function bootstrapAppData(root = getAppDataRoot()) {
   const layout = getLayout(root);
   const now = new Date().toISOString();
 
-  await fs.mkdir(layout.walletsDir, { recursive: true });
-  await fs.mkdir(layout.logsDir, { recursive: true });
+  for (const dir of [layout.root, layout.walletsDir, layout.logsDir]) {
+    await fs.mkdir(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+  }
 
   await ensureFile(
     layout.daemonFile,
@@ -169,7 +192,8 @@ export async function bootstrapAppData(root = getAppDataRoot()) {
     0o600,
   );
   await ensureAuthCookie(root);
-  await ensureFile(layout.daemonLogFile, '');
+  await ensureFile(layout.daemonLogFile, '', PRIVATE_FILE_MODE);
+  await keepPrivate(layout);
 
   return layout;
 }

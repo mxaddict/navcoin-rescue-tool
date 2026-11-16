@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 
 import { getAppDataRoot, getLayout } from './app-data.js';
 import { STATIC_WALLET_PASSWORD } from './constants.js';
+import { redactSourceSecret } from './source-secret.js';
 import {
   destroyAllDatabases,
   destroyDatabase,
@@ -188,12 +189,18 @@ export async function createImportedWallet(
       password: STATIC_WALLET_PASSWORD,
     },
     onProgress,
-  );
+  ).catch((error) => {
+    // A worker that died carries its output in the message, and that
+    // output may quote the phrase or keys. A new error, since the old
+    // one's stack repeats its message.
+    throw new Error(redactSourceSecret(error.message, source));
+  });
 
   if (!result.ok) {
     await deleteWalletForSource(source.id, root).catch(() => {});
 
-    const raw = result.error ?? 'unknown error';
+    // Whatever the worker failed on may quote what it was given.
+    const raw = redactSourceSecret(result.error ?? 'unknown error', source);
     let message;
 
     if (

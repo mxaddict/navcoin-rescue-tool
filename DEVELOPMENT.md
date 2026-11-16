@@ -64,6 +64,7 @@ src/
   rescue-scan.js        adaptive gap-walk + inline hydrate scan engine
   library-sync.js       keeps navcoin-js's own wallet sync from running
   source-registry.js    source CRUD, fingerprinting, dedup, sources.json
+  source-secret.js      keeps a source's phrase or keys out of replies and logs
   wallet-worker.js      child-process wallet creation (avoids blocking daemon)
   cli.js                ntr CLI entrypoint and command handlers
   tui.js                blessed TUI launched by ntr with no arguments

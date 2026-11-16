@@ -127,14 +127,6 @@ export function validateImportInput(input) {
   };
 }
 
-// A source as a reply may carry it: the registry's record without the
-// phrase or keys it was imported from. Only the wallet worker needs those,
-// and it reads the registry itself.
-export function publicSource(source) {
-  const { normalizedDetails: _secret, ...shown } = source;
-  return shown;
-}
-
 export async function readSources(root = getAppDataRoot()) {
   const layout = getLayout(root);
   return readJsonFile(layout.sourcesFile);

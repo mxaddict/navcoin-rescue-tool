@@ -26,6 +26,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   When `/status` could not read its files (a locked or damaged
   `sources.json`), the request was left open with no reply, and the GUI's
   status poll hung on it.
+- The app-data directory, its `wallets` and `logs` directories and
+  `daemon.log` are now readable by their owner only (Linux and macOS;
+  Windows keeps them under the user's profile). They were created with
+  default modes, so another user of the machine could read the log and
+  the wallet databases, whose encryption password is public. The modes are
+  applied on every start, so an existing installation is closed too.
+- A wallet that fails to build no longer writes the phrase or keys into
+  the log. A failure from the library that quotes what it was given, as
+  an invalid-mnemonic error does, is logged with the secret replaced by
+  `[redacted]`.
 
 ## [0.2.13] - 2026-11-15
 

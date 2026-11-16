@@ -182,6 +182,7 @@
     {#each sources as s}
       {@const navConf = s.balance?.nav?.confirmed ?? 0}
       {@const navPend = s.balance?.nav?.pending ?? 0}
+      {@const navImmature = s.balance?.nav?.immature ?? 0}
       {@const xnavConf = s.balance?.xnav?.confirmed ?? 0}
       {@const xnavPend = s.balance?.xnav?.pending ?? 0}
       {@const total = navConf + navPend + xnavConf + xnavPend}
@@ -249,6 +250,12 @@
             <dd class="totals-line">
               <span class="num cyan mono">{fmt(navConf)}</span>
               <span class="dim">(+{fmt(navPend)} pending)</span>
+              {#if navImmature > 0}
+                <span class="dim"
+                  >({fmt(navImmature)} of it in staking rewards not spendable
+                  yet)</span
+                >
+              {/if}
             </dd>
           </div>
           <div class="row">

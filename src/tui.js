@@ -321,6 +321,14 @@ function renderStatus(C, data) {
       `  ${C.bold('Pending:')}   ${C.cyan(navStr(navPend))} NAV  +  ` +
         `${C.indigo(navStr(xnavPend))} xNAV`,
     );
+    // Absent from a daemon older than this client.
+    const navImmature = src.balance.nav.immature ?? 0;
+    if (navImmature > 0) {
+      lines.push(
+        `  ${C.bold('Maturing:')}  ${C.cyan(navStr(navImmature))} NAV ` +
+          C.muted('of the confirmed, in staking rewards not spendable yet'),
+      );
+    }
     lines.push(
       `  ${C.bold('Total:')}     ${C.bold(navStr(navConf + navPend + xnavConf + xnavPend))}`,
     );
@@ -744,6 +752,15 @@ export async function cmdSweep(C, root, log, ask) {
   log(
     `  Combined: ${C.bold(navStr(preview.totalCombined))}  ${C.muted('(confirmed, before fee)')}`,
   );
+  if (preview.totalNotSpendable > 0) {
+    log(
+      C.pink(
+        `  Not included: ${navStr(preview.totalNotSpendable)} NAV in ` +
+          `staking rewards not spendable yet; sweep again once they have ` +
+          `matured`,
+      ),
+    );
+  }
   log('  Sources:');
   for (const src of preview.sources) {
     const label = src.walletType

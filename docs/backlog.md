@@ -441,13 +441,15 @@ What the limits rest on, and what was not checked:
   take, what the fees come to, or what will be left behind. All three are
   known only once `executeSweep` plans each leg. Showing them needs the
   preview to become async and read each wallet's outputs.
-- **The balance counts coins navcoin-js will not spend yet.**
-  `computeBalance` in `wallet-manager.js` counts a stake reward as
-  confirmed as soon as it is in a block; navcoin-js's `GetUtxos` holds it
-  back until it has 120 confirmations. The sweep reports the difference
-  as `LEFT_NOT_SPENDABLE`, but the status screens and the sweep preview
-  still show it as sweepable. The fixture in `test/fixtures` has exactly
-  such outputs, which is how this was found.
+- **The immature part of a balance is as old as the balance.**
+  `computeBalance` in `wallet-manager.js` counts staking rewards navcoin-js
+  will not spend yet in `nav.immature`, by a copy of the rule in
+  navcoin-js's `GetUtxos` (`library-sync.test.js` holds the two together on
+  the fixture), and the status screens and the sweep preview show it. It is
+  worked out when the balance is, and with navcoin-js's sync off nothing
+  refreshes a balance after a scan: a reward that matures an hour later
+  still shows as maturing until a rescan. The sweep itself asks navcoin-js
+  afresh, so what it sends and reports is right either way.
 - **Considered and declined: sweeping xNAV dust anyway.** An xNAV output
   worth less than `XNAV_FEE_PER_ELEMENT` costs more to spend than it
   holds, so sending it lowers what arrives. It stays in the wallet.

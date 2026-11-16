@@ -81,6 +81,12 @@ class MockWalletFile extends EventEmitter {
     this.emit('db_open');
   }
 
+  // The chain tip, as far as the balance reads it. No transaction of
+  // these wallets is a staking one, so nothing is immature at any tip.
+  async GetTip() {
+    return 1000;
+  }
+
   async Connect() {
     this.emit('connected', 'mock-server:40004');
     if (this._syncOnConnect) {
@@ -568,9 +574,12 @@ test('cold-stake outputs are counted and swept with NAV outputs', async () => {
     });
     await openSourceWallet(source, root, navWallet);
 
-    // The UTXO-db balance lands on the coalesced refresh, not on open.
+    // Neither is there on open: the balance lands with a refresh and the
+    // status with the end of the scan, in either order.
     const state = getSourceState(source.id);
-    for (let i = 0; i < 40 && state.balance.nav.confirmed === 0; i++) {
+    const ready = () =>
+      state.balance.nav.confirmed > 0 && state.syncStatus === 'synced';
+    for (let i = 0; i < 40 && !ready(); i++) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     assert.equal(state.balance.nav.confirmed, 7_0000_0000);
@@ -1057,6 +1066,32 @@ test('a source whose wallet is still processing transactions is not ready', asyn
     // The queue drained: the same source sweeps.
     state.wallet.queue = { running: false, q: { length: 0 } };
     assert.equal(prepareSweep().sources.length, 1);
+  });
+});
+
+// The balance counts a staking reward as confirmed from its first block;
+// navcoin-js will not spend it until it has matured.
+test('the preview leaves out staking rewards that are not spendable yet', async () => {
+  await withSweepSource('immature', {}, async (state) => {
+    state.balance = {
+      nav: { confirmed: 5_0000_0000, pending: 0, immature: 2_0000_0000 },
+      xnav: { confirmed: 1_0000_0000, pending: 0 },
+      staked: { confirmed: 0, pending: 0 },
+    };
+
+    const preview = prepareSweep();
+    assert.equal(preview.totalNav, 3_0000_0000);
+    assert.equal(preview.totalNotSpendable, 2_0000_0000);
+    assert.equal(preview.totalCombined, 4_0000_0000);
+    assert.deepEqual(preview.sources, [
+      {
+        sourceId: state.sourceId,
+        walletType: null,
+        nav: 3_0000_0000,
+        xnav: 1_0000_0000,
+        notSpendable: 2_0000_0000,
+      },
+    ]);
   });
 });
 

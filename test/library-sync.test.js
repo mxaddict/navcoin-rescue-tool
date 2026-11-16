@@ -12,6 +12,8 @@ import {
   closeAllWallets,
   getSourceState,
   openSourceWallet,
+  OUT_NAV,
+  OUT_STAKED,
   rescanSource,
   resetElectrumNodeSelectionCache,
 } from '../src/wallet-manager.js';
@@ -80,6 +82,18 @@ test(
       assert.equal(stub.requests('blockchain.scripthash.subscribe'), 0);
       assert.equal(queueStarted, false);
       assert.equal(state.wallet.queue.running, false);
+
+      // The part of the balance navcoin-js will not spend yet is told
+      // apart by a copy of its rule; this holds the copy to the original,
+      // on a fixture that has immature outputs.
+      const spendable = (await state.wallet.GetUtxos(OUT_NAV | OUT_STAKED))
+        .map((utxo) => utxo.output.satoshis)
+        .reduce((sum, amount) => sum + amount, 0);
+      assert.ok(state.balance.nav.immature > 0, 'the fixture has immature NAV');
+      assert.equal(
+        state.balance.nav.immature,
+        state.balance.nav.confirmed - spendable,
+      );
 
       // What a sweep runs when a batch is rejected: the source scanned
       // again from nothing, waited for, and synced on the same coins.

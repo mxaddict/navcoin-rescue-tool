@@ -59,6 +59,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   daemon went on broadcasting. It now follows the sweep on the daemon's
   status until it ends, as the CLI and TUI already did, and says that it
   is doing so.
+- Staking rewards that cannot be spent yet are no longer shown as
+  sweepable. A reward counts as confirmed from its first block but
+  navcoin-js will not spend it until it has matured, so a staking wallet's
+  status and sweep preview promised more than the sweep then sent. The
+  status in the CLI, TUI and GUI now shows that part of the confirmed NAV
+  as maturing, and the sweep preview leaves it out of its totals and
+  lists it as not included. `/status` carries it as `balance.nav.immature`
+  and the preview as `notSpendable` per source and `totalNotSpendable`.
 
 ## [0.2.13] - 2026-11-15
 

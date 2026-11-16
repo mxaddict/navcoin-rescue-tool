@@ -77,9 +77,14 @@ function partitionSweepSources(registered) {
  *     totalNav,
  *     totalXNav,
  *     totalCombined,
- *     sources: [{ sourceId, walletType, nav, xnav }],
+ *     totalNotSpendable,
+ *     sources: [{ sourceId, walletType, nav, xnav, notSpendable }],
  *     skipped: [{ sourceId, walletType, reason }],
  *   }
+ *
+ * `nav` and the totals are what a sweep started now would try to send.
+ * `notSpendable` is the NAV in staking rewards that have not matured, as
+ * the balance last counted them: confirmed, and left behind by the sweep.
  *
  * Throws if a source is not synced, unless `force` is set — then that
  * source is excluded from the sweep and reported in `skipped`.
@@ -130,18 +135,23 @@ export function prepareSweep({
 
   let totalNav = 0;
   let totalXNav = 0;
+  let totalNotSpendable = 0;
   const sources = [];
 
   for (const state of ready) {
-    const nav = state.balance.nav.confirmed;
+    // Absent on a balance that came from the wallet's own GetBalance.
+    const notSpendable = state.balance.nav.immature ?? 0;
+    const nav = state.balance.nav.confirmed - notSpendable;
     const xnav = state.balance.xnav?.confirmed ?? 0;
     totalNav += nav;
     totalXNav += xnav;
+    totalNotSpendable += notSpendable;
     sources.push({
       sourceId: state.sourceId,
       walletType: state.walletType ?? null,
       nav,
       xnav,
+      notSpendable,
     });
   }
 
@@ -149,6 +159,7 @@ export function prepareSweep({
     totalNav,
     totalXNav,
     totalCombined: totalNav + totalXNav,
+    totalNotSpendable,
     sources,
     // Always present, empty when nothing was skipped, so a caller can
     // render it without checking whether the sweep was forced.

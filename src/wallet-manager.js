@@ -25,6 +25,21 @@ export const OUT_XNAV = 0x4;
 // the wallet's tip lags. For a one-shot rescue + sweep flow we'd rather
 // surface the balance as confirmed and let the broadcast fail clearly if
 // the chain still considers it immature.
+//
+// What upstream would hold back is still counted, in `nav.immature`: the
+// part of `nav.confirmed` a sweep started now would leave behind, so that
+// a status screen and the sweep preview can say so beforehand.
+
+// How many confirmations navcoin-js wants on a staking or coinbase output
+// before its GetUtxos lets it be spent. Its own number, a literal there.
+const STAKE_MATURITY_CONFIRMATIONS = 120;
+
+// navcoin-js's rule in GetUtxos for holding back a NAV output of `tx`,
+// with the wallet's chain tip at `tip`.
+function isImmature(tx, tip) {
+  return tx.pos < 2 && tip - tx.height < STAKE_MATURITY_CONFIRMATIONS;
+}
+
 // Every unspent output, or null when this wallet has no queryable db.
 //
 // Real wallets expose wallet.db.GetUtxos / wallet.db.GetTx; tests use a
@@ -47,8 +62,10 @@ async function computeBalance(wallet, outputs = undefined) {
     outputs === undefined ? await readUnspentOutputs(wallet) : outputs;
   if (!utxos) return await wallet.GetBalance();
 
+  const tip = await wallet.GetTip();
   let navConfirmed = 0;
   let navPending = 0;
+  let navImmature = 0;
   let xnavConfirmed = 0;
   let xnavPending = 0;
   let stakedConfirmed = 0;
@@ -82,15 +99,24 @@ async function computeBalance(wallet, outputs = undefined) {
       } else {
         stakedConfirmed += utxo.amount;
         navConfirmed += utxo.amount;
+        if (isImmature(tx, tip)) navImmature += utxo.amount;
       }
     } else if (utxo.type & OUT_NAV) {
       if (pending) navPending += utxo.amount;
-      else navConfirmed += utxo.amount;
+      else {
+        navConfirmed += utxo.amount;
+        if (isImmature(tx, tip)) navImmature += utxo.amount;
+      }
     }
   }
 
   return {
-    nav: { confirmed: navConfirmed, pending: navPending },
+    // `immature` is part of `confirmed`, not beside it.
+    nav: {
+      confirmed: navConfirmed,
+      pending: navPending,
+      immature: navImmature,
+    },
     xnav: { confirmed: xnavConfirmed, pending: xnavPending },
     // Counted from the outputs, this is already inside `nav`: the
     // cold-staked part of it, not extra funds, so anything printing both

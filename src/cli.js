@@ -204,6 +204,14 @@ async function handleStatus() {
       process.stdout.write(
         `  Pending:   ${fmt(navPend)} NAV + ${fmt(xnavPend)} xNAV\n`,
       );
+      // Absent from a daemon older than this client.
+      const navImmature = source.balance.nav.immature ?? 0;
+      if (navImmature > 0) {
+        process.stdout.write(
+          `  Maturing:  ${fmt(navImmature)} NAV of the confirmed, in ` +
+            `staking rewards not spendable yet\n`,
+        );
+      }
       process.stdout.write(`  Total:     ${fmt(total)}\n`);
     }
   } catch {
@@ -605,6 +613,13 @@ async function handleSweep(argv) {
   process.stdout.write(
     `  Combined    : ${totalCombined} (confirmed, before fee)\n`,
   );
+  if (preview.totalNotSpendable > 0) {
+    process.stdout.write(
+      `  Not included: ${(preview.totalNotSpendable / 1e8).toFixed(8)} NAV ` +
+        `in staking rewards not spendable yet; sweep again once they ` +
+        `have matured\n`,
+    );
+  }
   process.stdout.write(`\nSources:\n`);
 
   for (const src of preview.sources) {

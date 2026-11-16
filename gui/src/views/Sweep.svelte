@@ -227,6 +227,16 @@
         <dt>Sources</dt>
         <dd>{preview.sources?.length ?? 0}</dd>
       </div>
+      {#if preview.totalNotSpendable > 0}
+        <div class="row">
+          <dt>Not included</dt>
+          <dd>
+            <span class="num mono">{fmt(preview.totalNotSpendable)}</span>
+            NAV in staking rewards not spendable yet. Sweep again once they have
+            matured.
+          </dd>
+        </div>
+      {/if}
     </dl>
 
     {#if preview.skipped?.length}

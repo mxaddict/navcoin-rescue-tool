@@ -881,6 +881,10 @@ class CountingWalletFile extends EventEmitter {
 
   async Load() {}
 
+  async GetTip() {
+    return 1000;
+  }
+
   ClearNodeList() {
     this.electrumNodes = [];
   }

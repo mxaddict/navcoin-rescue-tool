@@ -536,16 +536,15 @@ A read-only review, most severe first. "Re-checked" means the code path
 was traced again after the review; the rest come from the review alone, by
 reading, and no test was written or run for any of them.
 
-- **Medium: a source below the fee aborts the sweep and hides what was
-  already sent.** Re-checked. `executeSweep` in `sweep.js` spends
-  any `nav > 0`, with subtract-fee on and navcoin-js's default fee. In
-  `NavCreateTransaction`, `amount < fee` adds no destination output and,
-  since inputs equal the amount, no change either; the signed transaction
-  has inputs and no outputs, the broadcast fails, and `broadcastLeg`
-  throws. Later sources are never swept, and the hashes of earlier legs are
-  dropped, so the user sees "Sweep failed" after coins moved. A retry hits
-  the same dust source every time. Balances just above the fee (a dust
-  output) are suspected to fail the same way, not checked.
+- **Suspected: a batch worth just over its fee fails the sweep.**
+  `planBatches` in `sweep-batches.js` leaves a batch behind only when it
+  is worth no more than its fee. One worth slightly more is built and
+  pays a destination output smaller than the node's dust limit, which
+  the node is expected to refuse; the sweep then rescans, finds the
+  outputs still unspent, and fails without reaching later sources. A
+  retry meets the same batch. Not checked against a node, and the dust
+  limit was not looked up. Leaving such a batch behind as too small
+  needs that limit.
 - **Medium: the CLI takes secrets only as arguments.** `handleImport` /
   `parseOptions` in `cli.js`: `--phrase` and `--key` have no stdin or
   prompt fallback, so the secret lands in shell history and is readable in
@@ -557,10 +556,6 @@ reading, and no test was written or run for any of them.
   local user who binds the port while the daemon is down receives the
   cookie and every phrase imported. `handleStart` notices a foreign
   listener; `import` and `sweep` do not.
-- Test gaps on these paths: `test/sweep.test.js` mocks transaction creation
-  so it always succeeds. Nothing covers a balance below the fee
-  or a later source failing after an earlier broadcast (and what the caller
-  learns).
 - Not reviewed in this pass: `rescue-scan.js`, `electrum-connection.js`,
   `wallet-database.js`, `tx-cache.js`, derivation correctness in
   `mnemonic.js`, change-output handling for private-key sources (which use

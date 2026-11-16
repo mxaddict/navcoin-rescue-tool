@@ -53,6 +53,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the daemon. A sweep is likewise refused for a source that is being
   rescanned: for a moment such a source read as synced with a zero
   balance, and a sweep then reported success having sent nothing for it.
+- The GUI no longer reports a failure for a sweep that is still running.
+  A sweep in many batches can take longer than the page waits for the
+  daemon's answer; the page then showed an error and stopped, while the
+  daemon went on broadcasting. It now follows the sweep on the daemon's
+  status until it ends, as the CLI and TUI already did, and says that it
+  is doing so.
 
 ## [0.2.13] - 2026-11-15
 

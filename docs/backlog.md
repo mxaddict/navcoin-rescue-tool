@@ -287,9 +287,13 @@ to `/sweep/confirm` is lost. What that leaves open:
   takes longer than its timeout is reported as not broadcast, which is
   true, but that source cannot be swept until the constant is raised.
   Nothing was broadcast in that case, so raising it is safe.
-- **The GUI does not follow a lost sweep.** `sweepConfirm` in
-  `gui/src/lib/daemon.js` is its own client and sends no sweep id; it shows
-  the error and stops. The record is on `/status` for it to use.
+- **The GUI's following of a lost sweep is not tested.** `sweepConfirm`
+  in `gui/src/lib/daemon.js` now follows the sweep through `followSweep`
+  in `src/sweep-follow.js`, which `test/sweep-follow.test.js` covers by
+  way of the CLI's client. The GUI's own part was only built: that a
+  fetch which throws is a lost reply, and what the webview's fetch does
+  when a reply takes minutes (how long each platform's webview waits was
+  not measured).
 - **The sweep record is lost on a daemon restart.** It lives in memory in
   `sweep.js`. A client following a sweep then reports that the daemon has
   no record of it and to check the log, which does survive.
@@ -444,9 +448,6 @@ What the limits rest on, and what was not checked:
   as `LEFT_NOT_SPENDABLE`, but the status screens and the sweep preview
   still show it as sweepable. The fixture in `test/fixtures` has exactly
   such outputs, which is how this was found.
-- **The GUI still does not follow a lost sweep** (see "Sweep guards"), and
-  a sweep in many batches is the one most likely to outlast the 300 s its
-  request waits for a reply. The CLI and TUI follow it on `/status`.
 - **Considered and declined: sweeping xNAV dust anyway.** An xNAV output
   worth less than `XNAV_FEE_PER_ELEMENT` costs more to spend than it
   holds, so sending it lowers what arrives. It stays in the wallet.

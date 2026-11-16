@@ -3,6 +3,8 @@
 // daemon address rather than reading the cookie file directly.
 import { invoke } from '@tauri-apps/api/core';
 
+import { followSweep } from '../../../src/sweep-follow.js';
+
 // Always re-read the auth cookie on each call. The daemon rewrites
 // auth.cookie on every start (e.g. after a purge-triggered shutdown
 // + auto-respawn), so caching the value risks stale auth across that
@@ -18,15 +20,25 @@ async function ensureDaemon() {
 async function daemonRequest(path, init = {}) {
   await ensureDaemon();
   const { url, cookie } = await getAuth();
-  const res = await fetch(`${url}${path}`, {
-    ...init,
-    headers: {
-      Authorization: cookie,
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(init.headers ?? {}),
-    },
-    credentials: 'include',
-  });
+  let res;
+  try {
+    res = await fetch(`${url}${path}`, {
+      ...init,
+      headers: {
+        Authorization: cookie,
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(init.headers ?? {}),
+      },
+      credentials: 'include',
+    });
+  } catch (error) {
+    // fetch throws only when no reply came: the daemon was up a moment
+    // ago, `ensureDaemon` saw to that, so the request may well have
+    // arrived and still be running. Marked so a caller can tell this from
+    // a daemon that answered with an error.
+    error.lostReply = true;
+    throw error;
+  }
   const text = await res.text();
   let body;
   try {
@@ -81,13 +93,26 @@ export async function sweepPrepare({ force = false, destination } = {}) {
   });
 }
 
+// Runs the sweep and returns `{ result }`. A sweep in many batches can
+// outlast the webview's wait for a reply while the daemon carries on, so
+// it is given an id, and when the reply is lost it is followed on /status
+// until it ends, as the CLI and TUI do. `onLostReply` is told when that
+// starts.
 export async function sweepConfirm({
   destination,
   confirmPhrase,
   force = false,
+  onLostReply,
 }) {
-  return await daemonRequest('/sweep/confirm', {
-    method: 'POST',
-    body: JSON.stringify({ destination, confirmPhrase, force }),
-  });
+  const sweepId = crypto.randomUUID();
+  try {
+    return await daemonRequest('/sweep/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ destination, confirmPhrase, force, sweepId }),
+    });
+  } catch (error) {
+    if (!error.lostReply) throw error;
+    onLostReply?.(error);
+    return { result: await followSweep(sweepId, fetchDaemonStatus, error) };
+  }
 }

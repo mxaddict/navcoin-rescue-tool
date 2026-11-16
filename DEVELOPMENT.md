@@ -60,6 +60,7 @@ src/
   wallet-manager.js     in-memory per-source sync state, rescan
   sweep.js              sweep preview, broadcast of each leg, sweep log
   sweep-batches.js      splits a leg into transactions of bounded inputs
+  sweep-follow.js       follows a sweep whose reply was lost (CLI, TUI and GUI)
   destination.js        what a sweep accepts as its destination address
   rescue-scan.js        adaptive gap-walk + inline hydrate scan engine
   library-sync.js       keeps navcoin-js's own wallet sync from running

@@ -15,5 +15,10 @@ export default defineConfig({
     watch: {
       ignored: ['**/src-tauri/**'],
     },
+    // The webview bundle shares src/sweep-follow.js with the CLI, and the
+    // dev server only serves files under the directories listed here.
+    fs: {
+      allow: ['..'],
+    },
   },
 });

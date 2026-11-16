@@ -23,6 +23,9 @@
   let force = $state(false);
   let result = $state(null);
   let busy = $state(false);
+  // Set while a sweep whose reply was lost is followed on the daemon's
+  // status: it is still running, and the page must say so, not look hung.
+  let following = $state(false);
   let error = $state(null);
 
   let verifyInput;
@@ -92,6 +95,9 @@
         destination: destination.trim(),
         confirmPhrase: phrase,
         force,
+        onLostReply: () => {
+          following = true;
+        },
       });
       result = res?.result ?? null;
       step = 'done';
@@ -99,6 +105,7 @@
       error = err.message ?? String(err);
     } finally {
       busy = false;
+      following = false;
       if (step === 'review') {
         await tick();
         phraseInput?.focus();
@@ -265,6 +272,14 @@
         }}
       />
     </div>
+
+    {#if following}
+      <p class="muted small">
+        The sweep is taking longer than this page waits for an answer. It is
+        still running in the daemon; this page is following it and will show
+        the result. Do not start another sweep.
+      </p>
+    {/if}
 
     <div class="actions">
       <button class="ghost" onclick={back} disabled={busy}>Back</button>

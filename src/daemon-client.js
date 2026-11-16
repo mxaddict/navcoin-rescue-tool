@@ -2,14 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 import { readAuthCookie } from './app-data.js';
 import { APP_VERSION, DAEMON_HOST, DAEMON_PORT } from './constants.js';
+import { followSweep } from './sweep-follow.js';
 
 // How long a stopped daemon gets to let go of the port. Its own shutdown
 // force-exits on a timer in `performShutdown` (daemon.js); this only has to
 // outlast that.
 const DAEMON_STOP_TIMEOUT_MS = 15_000;
-
-// How often a sweep whose reply was lost is looked up again on /status.
-const SWEEP_FOLLOW_INTERVAL_MS = 2_000;
 
 function buildUrl(pathname) {
   return new URL(`http://${DAEMON_HOST}:${DAEMON_PORT}${pathname}`);
@@ -157,41 +155,9 @@ export async function sweepConfirm(
       throw error;
     }
     onLostReply?.(error);
-    return { result: await followSweep(sweepId, root, error) };
-  }
-}
-
-const CHECK_BEFORE_SWEEPING_AGAIN =
-  'Transactions may have gone out: check the [sweep] lines in the daemon ' +
-  'log and the destination address on a block explorer before sweeping again.';
-
-async function followSweep(sweepId, root, lost) {
-  for (;;) {
-    let status;
-    try {
-      status = await getDaemonStatus(root);
-    } catch (error) {
-      throw new Error(
-        `Lost the daemon's reply to the sweep (${lost.message}) and it ` +
-          `cannot be reached now (${error.message}). ` +
-          CHECK_BEFORE_SWEEPING_AGAIN,
-      );
-    }
-
-    const sweep = status.sweep;
-    if (sweep?.id !== sweepId) {
-      throw new Error(
-        `Lost the daemon's reply to the sweep (${lost.message}) and the ` +
-          `daemon has no record of it, as after a restart. ` +
-          CHECK_BEFORE_SWEEPING_AGAIN,
-      );
-    }
-    if (sweep.state === 'finished') return sweep.result;
-    if (sweep.state === 'failed') throw new Error(sweep.error);
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, SWEEP_FOLLOW_INTERVAL_MS),
-    );
+    return {
+      result: await followSweep(sweepId, () => getDaemonStatus(root), error),
+    };
   }
 }
 

@@ -397,8 +397,10 @@ relayed; no log of that run was seen. Open:
   `release.yml` and `clear_quarantine` in `src-tauri/daemon-launch` now
   remove the quarantine mark before the daemon starts. What is checked is
   that the mark is gone, by the release smoke test on the macOS runners;
-  that a Mac which refused the load now accepts it is not, and the smoke
-  test prints whether the runner refuses a quarantined module at all.
+  that a Mac which refused the load now accepts it is not. The smoke test
+  prints whether the runner refuses a quarantined module at all, and the
+  `macos-15-intel` runner did not (dry run of 2026-11-16), so the runners
+  cannot show the refusal.
   Memory pressure was suggested as a cause; the log has nothing about
   memory. Not done: signing and notarizing the archive, which needs an
   Apple developer account and would also stop the prompt for the GUI.

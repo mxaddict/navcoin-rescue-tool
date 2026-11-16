@@ -6,17 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
+## [0.3.0] - 2026-11-17
+
+### Breaking
 
 - A sweep now only accepts a NavCoin mainnet address, NAV or xNAV, as its
-  destination. Anything ending in `.nav` used to be passed on as a DotNav
-  name, which navcoin-js resolves by asking the public electrum server the
-  wallet is connected to, and the address that server answered with was
-  never shown: a hostile server could have sent the coins to itself. A
-  name, a mistyped address or a testnet address is now refused by the
-  daemon before anything is built, and the CLI and GUI report it at the
-  preview. If you used a `.nav` name as the destination, enter the address
-  itself.
+  destination; a `.nav` name is refused. Anything ending in `.nav` used to
+  be passed on as a DotNav name, which navcoin-js resolves by asking the
+  public electrum server the wallet is connected to, and the address that
+  server answered with was never shown: a hostile server could have sent
+  the coins to itself. A name, a mistyped address or a testnet address is
+  now refused by the daemon before anything is built, and the CLI and GUI
+  report it at the preview. If you used a `.nav` name as the destination,
+  enter the address itself.
+- For anything that talks to the daemon directly: sources in `/status`
+  and `/import` replies no longer have `normalizedDetails`; `/daemon/stop`
+  answers 409, and `/remove`, `/purge` and `/rescan` 400, with code
+  `SWEEP_IN_PROGRESS` while a sweep runs; and the sweep preview's `nav`
+  and totals no longer include immature staking rewards. Each is described
+  under Fixed.
+
+### Fixed
+
 - The daemon's replies no longer carry the seed phrase or private keys.
   `/status` and `/import` returned each source's whole registry record,
   which includes what it was imported from, so the secret went to the GUI
@@ -608,7 +619,8 @@ mismatch between the manifests. Its fix ships in 0.2.7.
 - `Release` can be dispatched with no tag to build and smoke-test a ref without
   publishing anything.
 
-[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.13...HEAD
+[Unreleased]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.13...v0.3.0
 [0.2.13]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/mxaddict/navcoin-rescue-tool/compare/v0.2.10...v0.2.11

@@ -402,6 +402,7 @@ async function main() {
         const preview = prepareSweep({
           force: body.force === true,
           registered,
+          destination: body.destination,
         });
         sendJson(response, 200, { preview });
       } catch (error) {

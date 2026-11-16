@@ -540,17 +540,6 @@ A read-only review, most severe first. "Re-checked" means the code path
 was traced again after the review; the rest come from the review alone, by
 reading, and no test was written or run for any of them.
 
-- **High: a `.nav` destination is resolved by an electrum server and the
-  result is never shown.** Re-checked. The `/sweep/confirm` handler in
-  `daemon.js` only checks the destination is present, and the CLI, TUI and
-  `gui/src/views/Sweep.svelte` only compare the two typed copies.
-  navcoin-js's `NavCreateTransaction` and `xNavCreateTransaction` treat any
-  string ending in `.nav` as a DotNav name and resolve it through
-  `ResolveName`, which asks whichever public electrum node the source is
-  connected to — once per source and leg. A hostile node answers with its
-  own address; the user only ever saw `alice.nav`. Fix: reject anything
-  that is not a valid mainnet NAV or xNAV address in the daemon before
-  `executeSweep`.
 - **Medium: a source below the fee aborts the sweep and hides what was
   already sent.** Re-checked. `executeSweep` in `sweep.js` spends
   any `nav > 0`, with subtract-fee on and navcoin-js's default fee. In
@@ -605,7 +594,7 @@ reading, and no test was written or run for any of them.
 - Test gaps on these paths: `test/sweep.test.js` mocks transaction creation
   so it always succeeds. Nothing covers a balance below the fee, a later
   source failing after an earlier broadcast (and what the caller learns),
-  destination validation, `normalizedDetails` in replies, or `/status`
+  `normalizedDetails` in replies, or `/status`
   failing to read.
 - Not reviewed in this pass: `rescue-scan.js`, `electrum-connection.js`,
   `wallet-database.js`, `tx-cache.js`, derivation correctness in

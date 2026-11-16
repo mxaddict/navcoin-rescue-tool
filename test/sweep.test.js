@@ -294,11 +294,55 @@ test('executeSweep creates and broadcasts transactions per source', async () => 
     await openSourceWallet(source, root, makeNavWallet());
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const result = await executeSweep('NDestinationAddr1');
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
     assert.equal(result.hashes.length, 1);
     assert.equal(result.hashes[0], 'abc123');
     assert.equal(result.totalFee, 10000);
     assert.equal(result.totalSent, 5_0000_0000 - 10000);
+  } finally {
+    global.WebSocket = OriginalWebSocket;
+    await closeAllWallets();
+    resetElectrumNodeSelectionCache();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('executeSweep refuses a destination that is not an address', async () => {
+  const root = await makeProjectTempDir('sweep-destination');
+  const OriginalWebSocket = global.WebSocket;
+
+  try {
+    global.WebSocket = AlwaysOpenWebSocket;
+    resetElectrumNodeSelectionCache();
+    await bootstrapAppData(root);
+
+    const source = { id: 'src-destination', type: 'mnemonic', label: 'Test' };
+    await openSourceWallet(source, root, makeNavWallet());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const before = getSweepStatus();
+
+    // A DotNav name is what navcoin-js would ask the server to resolve.
+    for (const destination of ['alice.nav', 'NDestinationAddr1', '']) {
+      await assert.rejects(
+        () => executeSweep(destination),
+        (error) => {
+          assert.equal(error.code, 'INVALID_DESTINATION');
+          return true;
+        },
+      );
+    }
+
+    // The preview refuses it too, when it is told the destination.
+    assert.throws(
+      () => prepareSweep({ destination: 'alice.nav' }),
+      (error) => error.code === 'INVALID_DESTINATION',
+    );
+    assert.equal(prepareSweep().sources.length, 1);
+
+    const { wallet } = getSourceState(source.id);
+    assert.equal(wallet._lastTxArgs, undefined, 'no transaction was built');
+    assert.equal(wallet._lastSentTx, undefined, 'nothing was broadcast');
+    assert.deepEqual(getSweepStatus(), before, 'no sweep was recorded');
   } finally {
     global.WebSocket = OriginalWebSocket;
     await closeAllWallets();
@@ -327,7 +371,7 @@ test('executeSweep skips zero-balance sources', async () => {
     await openSourceWallet(source, root, navWallet);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const result = await executeSweep('NDestinationAddr1');
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
     assert.equal(result.hashes.length, 0);
     assert.equal(result.totalSent, 0);
     assert.equal(result.totalFee, 0);
@@ -389,7 +433,7 @@ test('executeSweep throws when SendTransaction returns error', async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     await assert.rejects(
-      () => executeSweep('NDestinationAddr1'),
+      () => executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai'),
       /broadcast failed/i,
     );
   } finally {
@@ -433,7 +477,7 @@ test('executeSweep aggregates legs from multiple sources without double-counting
 
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const result = await executeSweep('NDestinationAddr1');
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
 
     // 1. Both hashes present, no duplicates.
     assert.equal(result.hashes.length, 2);
@@ -488,7 +532,7 @@ test('staked balance is reported but excluded from sweep totals', async () => {
     assert.equal(preview.totalCombined, 2_0000_0000);
     assert.equal(preview.sources[0].nav, 2_0000_0000);
 
-    const result = await executeSweep('NDestinationAddr1');
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
     assert.equal(result.totalSent, 2_0000_0000 - 10_000);
     assert.equal(
       getSourceState(source.id).wallet._lastTxArgs.amount,
@@ -535,7 +579,7 @@ test('cold-stake outputs are counted and swept with NAV outputs', async () => {
     const preview = prepareSweep();
     assert.equal(preview.totalNav, 7_0000_0000);
 
-    const result = await executeSweep('NDestinationAddr1');
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
     const lastTxArgs = state.wallet._lastTxArgs;
     assert.equal(lastTxArgs.amount, 7_0000_0000);
     // NAV | STAKED, so navcoin-js selects cold-stake outputs and sends
@@ -571,11 +615,11 @@ test('executeSweep passes full confirmed balance with subtractFee=true', async (
     await openSourceWallet(source, root, navWallet);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const result = await executeSweep('NDestinationAddr1');
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
 
     // Inspect the args passed to NavCreateTransaction.
     const lastTxArgs = getSourceState(source.id).wallet._lastTxArgs;
-    assert.equal(lastTxArgs.destination, 'NDestinationAddr1');
+    assert.equal(lastTxArgs.destination, 'NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
     assert.equal(lastTxArgs.amount, 10_0000_0000);
     assert.equal(lastTxArgs.subtractFee, true);
 
@@ -619,7 +663,7 @@ test('executeSweep broadcasts NAV and xNAV legs from same source', async () => {
     await openSourceWallet(source, root, navWallet);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const result = await executeSweep('NDestinationAddr1');
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
 
     // Both hashes present.
     const hashSet = new Set(result.hashes);
@@ -639,7 +683,10 @@ test('executeSweep broadcasts NAV and xNAV legs from same source', async () => {
     assert.equal(wallet._lastTxArgs.subtractFee, true);
 
     // xNAV leg args.
-    assert.equal(wallet._lastXNavTxArgs.destination, 'NDestinationAddr1');
+    assert.equal(
+      wallet._lastXNavTxArgs.destination,
+      'NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai',
+    );
     assert.equal(wallet._lastXNavTxArgs.amount, 6_0000_0000);
     assert.equal(wallet._lastXNavTxArgs.subtractFee, true);
   } finally {
@@ -756,7 +803,9 @@ test('a forced sweep previews and spends only the ready sources', async () => {
       },
     ]);
 
-    const result = await executeSweep('NDestinationAddr1', { force: true });
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
+      force: true,
+    });
     assert.deepEqual(result.hashes, ['hashReady']);
     assert.equal(result.totalSent, 4_0000_0000 - 6_000);
     assert.equal(
@@ -794,7 +843,7 @@ test('executeSweep refuses to skip sources unless forced', async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     await assert.rejects(
-      () => executeSweep('NDestinationAddr1'),
+      () => executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai'),
       /not ready to sweep/,
     );
   } finally {
@@ -878,10 +927,10 @@ test('a sweep logs each leg it builds and broadcasts', async (t) => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     const lines = captureSweepLog(t);
-    await executeSweep('NDestinationAddr1');
+    await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
 
     const expected = [
-      /^\d{4}-\d\d-\d\dT[\d:.]+Z \[sweep\] start: destination=NDestinationAddr1 ready=1 blocked=0 force=false$/,
+      /^\d{4}-\d\d-\d\dT[\d:.]+Z \[sweep\] start: destination=NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai ready=1 blocked=0 force=false$/,
       /\[sweep\] src-log: nav=400000000 xnav=600000000$/,
       /\[sweep\] src-log NAV: 1 output\(s\) in 1 transaction batch\(es\)$/,
       /\[sweep\] src-log NAV: building transaction for 400000000$/,
@@ -938,7 +987,7 @@ test('a failed broadcast is logged with what already went out', async (t) => {
 
     const lines = captureSweepLog(t);
     await assert.rejects(
-      () => executeSweep('NDestinationAddr1'),
+      () => executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai'),
       /xNAV broadcast failed/,
     );
 
@@ -996,7 +1045,7 @@ test('a source whose wallet is still processing transactions is not ready', asyn
       /still processing transactions \(7 queued\)/,
     );
     await assert.rejects(
-      executeSweep('NDestinationAddr1'),
+      executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai'),
       /1 source\(s\) are not ready to sweep/,
     );
     assert.equal(state.wallet._lastSentTx, undefined);
@@ -1106,7 +1155,9 @@ async function untilLegStatus(status) {
 test('a broadcast caught by a dropped connection ends as outcome unknown', async (t) => {
   captureSweepLog(t);
   await withSweepSource('drop-send', { _sendResult: NEVER }, async (state) => {
-    const sweeping = executeSweep('NDestinationAddr1', { id: 'sweep-1' });
+    const sweeping = executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
+      id: 'sweep-1',
+    });
     await untilLegStatus('broadcasting');
     state.wallet.emit('disconnected');
 
@@ -1130,7 +1181,7 @@ test('a broadcast caught by a dropped connection ends as outcome unknown', async
 test('a build caught by a dropped connection broadcasts nothing', async (t) => {
   captureSweepLog(t);
   await withSweepSource('drop-build', { _txResult: NEVER }, async (state) => {
-    const sweeping = executeSweep('NDestinationAddr1');
+    const sweeping = executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
     await untilLegStatus('building');
     state.wallet.emit('disconnected');
 
@@ -1152,7 +1203,7 @@ test('a broadcast the server never answers times out as outcome unknown', async 
   captureSweepLog(t);
   await withSweepSource('silent-send', { _sendResult: NEVER }, async () => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
-    const sweeping = executeSweep('NDestinationAddr1');
+    const sweeping = executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
     await untilLegStatus('broadcasting');
 
     t.mock.timers.tick(SWEEP_BROADCAST_TIMEOUT_MS - 1);
@@ -1172,7 +1223,7 @@ test('a build that never finishes times out without broadcasting', async (t) => 
   captureSweepLog(t);
   await withSweepSource('silent-build', { _txResult: NEVER }, async (state) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
-    const sweeping = executeSweep('NDestinationAddr1');
+    const sweeping = executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
     await untilLegStatus('building');
 
     t.mock.timers.tick(SWEEP_BUILD_TIMEOUT_MS);
@@ -1191,12 +1242,17 @@ test('a build that never finishes times out without broadcasting', async (t) => 
 test('a second sweep is refused while one is running, and allowed after', async (t) => {
   captureSweepLog(t);
   await withSweepSource('lock', { _sendResult: NEVER }, async (state) => {
-    const first = executeSweep('NDestinationAddr1', { id: 'first' });
+    const first = executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
+      id: 'first',
+    });
     await untilLegStatus('broadcasting');
 
-    await assert.rejects(executeSweep('NDestinationAddr1', { id: 'second' }), {
-      code: 'SWEEP_IN_PROGRESS',
-    });
+    await assert.rejects(
+      executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', { id: 'second' }),
+      {
+        code: 'SWEEP_IN_PROGRESS',
+      },
+    );
     // The refused attempt must not replace the record of the running one.
     assert.equal(getSweepStatus().id, 'first');
     assert.equal(getSweepStatus().state, 'running');
@@ -1207,10 +1263,13 @@ test('a second sweep is refused while one is running, and allowed after', async 
     // The lock goes with the sweep, even one that failed. The source has
     // just lost its connection, so this attempt fails too, but no longer
     // as a second sweep.
-    await assert.rejects(executeSweep('NDestinationAddr1'), (error) => {
-      assert.notEqual(error.code, 'SWEEP_IN_PROGRESS');
-      return true;
-    });
+    await assert.rejects(
+      executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai'),
+      (error) => {
+        assert.notEqual(error.code, 'SWEEP_IN_PROGRESS');
+        return true;
+      },
+    );
   });
 });
 
@@ -1222,7 +1281,7 @@ test('a source with no connection is not reported as swept', async (t) => {
     state.connected = false;
 
     await assert.rejects(
-      executeSweep('NDestinationAddr1'),
+      executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai'),
       /was not broadcast: the wallet has no server connection/,
     );
     assert.equal(state.wallet._lastSentTx, undefined);
@@ -1236,7 +1295,7 @@ test('a broadcast answered with no transaction id is not a success', async (t) =
     { _sendResult: { hashes: [undefined], error: undefined } },
     async () => {
       await assert.rejects(
-        executeSweep('NDestinationAddr1'),
+        executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai'),
         /was not broadcast: the wallet lost its server connection/,
       );
       assert.equal(getSweepStatus().legs[0].status, 'failed');
@@ -1261,14 +1320,17 @@ test('a sweep that fails names the legs already broadcast', async (t) => {
       ],
     },
     async () => {
-      await assert.rejects(executeSweep('NDestinationAddr1'), (error) => {
-        assert.match(error.message, /xNAV broadcast failed/);
-        assert.match(
-          error.message,
-          /Already broadcast before this, and not undone:\n {2}NAV from src-partial: nav-hash$/,
-        );
-        return true;
-      });
+      await assert.rejects(
+        executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai'),
+        (error) => {
+          assert.match(error.message, /xNAV broadcast failed/);
+          assert.match(
+            error.message,
+            /Already broadcast before this, and not undone:\n {2}NAV from src-partial: nav-hash$/,
+          );
+          return true;
+        },
+      );
 
       const sweep = getSweepStatus();
       assert.deepEqual(
@@ -1286,12 +1348,14 @@ test('a sweep that fails names the legs already broadcast', async (t) => {
 test('a finished sweep is kept as the daemon status record', async (t) => {
   captureSweepLog(t);
   await withSweepSource('record', {}, async () => {
-    const result = await executeSweep('NDestinationAddr1', { id: 'done-1' });
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
+      id: 'done-1',
+    });
 
     const sweep = getSweepStatus();
     assert.equal(sweep.id, 'done-1');
     assert.equal(sweep.state, 'finished');
-    assert.equal(sweep.destination, 'NDestinationAddr1');
+    assert.equal(sweep.destination, 'NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
     assert.deepEqual(sweep.result, result);
     assert.deepEqual(sweep.result.hashes, ['abc123']);
     assert.equal(sweep.legs[0].status, 'broadcast');
@@ -1328,7 +1392,7 @@ test('a registered source with no open wallet blocks the sweep', async (t) => {
       },
     );
     await assert.rejects(
-      executeSweep('NDestinationAddr1', { registered }),
+      executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', { registered }),
       /2 source\(s\) are not ready to sweep/,
     );
     assert.equal(state.wallet._lastSentTx, undefined);
@@ -1346,7 +1410,7 @@ test('a registered source with no open wallet blocks the sweep', async (t) => {
         ['never-built', 'next'],
       ],
     );
-    const result = await executeSweep('NDestinationAddr1', {
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
       force: true,
       registered,
     });
@@ -1417,7 +1481,7 @@ test('a batch rejected over a spent output is rescanned and sent again', async (
 
   await withSweepSource('stale-output', opts, async (state) => {
     const rescans = [];
-    const result = await executeSweep('NDestinationAddr1', {
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
       rescan: async (sourceId) => {
         rescans.push(sourceId);
         // The scan finds the middle output gone, and the balance with it.
@@ -1455,7 +1519,7 @@ test('a sweep goes on rescanning for as long as outputs keep going stale', async
 
   await withSweepSource('stale-twice', opts, async (state) => {
     let rescans = 0;
-    const result = await executeSweep('NDestinationAddr1', {
+    const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
       rescan: async () => {
         rescans += 1;
         outputs.pop();
@@ -1482,7 +1546,7 @@ test('a rejected batch whose outputs are all still unspent fails the sweep', asy
   await withSweepSource('rejected-not-stale', opts, async (state) => {
     let rescans = 0;
     await assert.rejects(
-      executeSweep('NDestinationAddr1', {
+      executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
         rescan: async () => {
           rescans += 1;
           return true;
@@ -1501,7 +1565,9 @@ test('a rejected batch fails the sweep when the rescan does not finish', async (
 
   await withSweepSource('rescan-fails', opts, async () => {
     await assert.rejects(
-      executeSweep('NDestinationAddr1', { rescan: async () => false }),
+      executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
+        rescan: async () => false,
+      }),
       /bad-txns-inputs-spent[\s\S]*rescan to check for spent outputs did not finish/,
     );
   });
@@ -1530,7 +1596,7 @@ test('a sweep whose every batch keeps going stale gives up', async (t) => {
     async () => {
       let rescans = 0;
       await assert.rejects(
-        executeSweep('NDestinationAddr1', {
+        executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai', {
           rescan: async () => {
             rescans += 1;
             outputs.pop();
@@ -1568,7 +1634,7 @@ test('a NAV leg with more outputs than one batch goes out in several', async (t)
       ],
     },
     async (state) => {
-      const result = await executeSweep('NDestinationAddr1');
+      const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
 
       const calls = state.wallet._navCalls;
       assert.equal(calls.length, 3);
@@ -1628,7 +1694,7 @@ test('an xNAV leg is batched by outpoint and leaves dust behind', async (t) => {
       ],
     },
     async (state) => {
-      const result = await executeSweep('NDestinationAddr1');
+      const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
 
       const calls = state.wallet._xnavCalls;
       assert.equal(calls.length, 2);
@@ -1684,14 +1750,17 @@ test('a batch that fails stops the leg and names the batches before it', async (
       ],
     },
     async (state) => {
-      await assert.rejects(executeSweep('NDestinationAddr1'), (error) => {
-        assert.match(error.message, /NAV 2\/3 broadcast failed/);
-        assert.match(
-          error.message,
-          /not undone:\n {2}NAV 1\/3 from src-batch-fails: nav-1$/,
-        );
-        return true;
-      });
+      await assert.rejects(
+        executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai'),
+        (error) => {
+          assert.match(error.message, /NAV 2\/3 broadcast failed/);
+          assert.match(
+            error.message,
+            /not undone:\n {2}NAV 1\/3 from src-batch-fails: nav-1$/,
+          );
+          return true;
+        },
+      );
       // The third batch is never built.
       assert.equal(state.wallet._navCalls.length, 2);
     },
@@ -1712,7 +1781,7 @@ test('a balance the wallet cannot spend yet is reported, not dropped', async (t)
       _txResult: { tx: 'navhex', fee: NAV_TX_FEE },
     },
     async (state) => {
-      const result = await executeSweep('NDestinationAddr1');
+      const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
 
       assert.equal(state.wallet._lastTxArgs.amount, 5_0000_0000);
       assert.equal(result.totalSent, 5_0000_0000 - NAV_TX_FEE);
@@ -1746,7 +1815,7 @@ test('a source with nothing spendable broadcasts nothing and says so', async (t)
       _spendable: spendableOutputs({}),
     },
     async (state) => {
-      const result = await executeSweep('NDestinationAddr1');
+      const result = await executeSweep('NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai');
 
       assert.equal(state.wallet._navCalls.length, 0);
       assert.deepEqual(result.hashes, []);

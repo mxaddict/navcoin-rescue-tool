@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A sweep now only accepts a NavCoin mainnet address, NAV or xNAV, as its
+  destination. Anything ending in `.nav` used to be passed on as a DotNav
+  name, which navcoin-js resolves by asking the public electrum server the
+  wallet is connected to, and the address that server answered with was
+  never shown: a hostile server could have sent the coins to itself. A
+  name, a mistyped address or a testnet address is now refused by the
+  daemon before anything is built, and the CLI and GUI report it at the
+  preview. If you used a `.nav` name as the destination, enter the address
+  itself.
+
 ## [0.2.13] - 2026-11-15
 
 ### Fixed

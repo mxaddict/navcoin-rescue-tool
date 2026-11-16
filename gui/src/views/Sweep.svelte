@@ -57,7 +57,10 @@
     error = null;
     blockedMessage = null;
     try {
-      const res = await sweepPrepare({ force: forced });
+      const res = await sweepPrepare({
+        force: forced,
+        destination: destination.trim(),
+      });
       preview = res?.preview ?? null;
       force = forced;
       step = 'review';

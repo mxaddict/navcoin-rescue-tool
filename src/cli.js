@@ -568,7 +568,7 @@ async function handleSweep(argv) {
   let preview;
 
   try {
-    const response = await sweepPrepare(root, { force });
+    const response = await sweepPrepare(root, { force, destination });
     preview = response.preview;
   } catch (error) {
     if (isDaemonUnreachable(error)) {

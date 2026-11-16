@@ -74,10 +74,10 @@ export async function rescanDaemon() {
   return await daemonRequest('/rescan', { method: 'POST' });
 }
 
-export async function sweepPrepare({ force = false } = {}) {
+export async function sweepPrepare({ force = false, destination } = {}) {
   return await daemonRequest('/sweep/prepare', {
     method: 'POST',
-    body: JSON.stringify({ force }),
+    body: JSON.stringify({ force, destination }),
   });
 }
 

@@ -1,5 +1,6 @@
 // Sweeping every imported source to one destination: the preview, the
 // broadcast of each leg, and the daemon-log record of what went out.
+import { assertSweepDestination } from './destination.js';
 import {
   buildNavBatch,
   buildXnavBatch,
@@ -85,8 +86,18 @@ function partitionSweepSources(registered) {
  *
  * `registered` is every source in the registry, so that one whose wallet
  * is not open counts as not synced too.
+ *
+ * `destination` is checked when the caller has one to give, so that a
+ * client can refuse a bad one before the user confirms anything;
+ * `executeSweep` checks it whatever happened here.
  */
-export function prepareSweep({ force = false, registered = [] } = {}) {
+export function prepareSweep({
+  force = false,
+  registered = [],
+  destination,
+} = {}) {
+  if (destination !== undefined) assertSweepDestination(destination);
+
   const { ready, blocked } = partitionSweepSources(registered);
   const total = ready.length + blocked.length;
 
@@ -295,6 +306,10 @@ export async function executeSweep(
     error.code = 'SWEEP_IN_PROGRESS';
     throw error;
   }
+
+  // Before anything is looked at or logged as a sweep: what is not an
+  // address never reaches navcoin-js.
+  assertSweepDestination(destination);
 
   const { ready, blocked } = partitionSweepSources(registered);
 

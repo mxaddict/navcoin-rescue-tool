@@ -124,7 +124,11 @@ test('the sweep endpoints accept a force flag in the body', async () => {
 
 test('the CLI reads --force without eating the destination', async () => {
   await withDaemon('sweep-force-cli', async ({ base }) => {
-    const forced = await runCli(base, ['sweep', 'NDestAddr1', '--force']);
+    const forced = await runCli(base, [
+      'sweep',
+      'NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai',
+      '--force',
+    ]);
 
     assert.equal(forced.code, 1);
     assert.match(forced.stderr, /No imported sources/);
@@ -138,13 +142,26 @@ test('the CLI reads --force without eating the destination', async () => {
     // flag cannot fix — nor when the user already passed it.
     assert.doesNotMatch(forced.stderr, /--force\n/);
 
-    const unforced = await runCli(base, ['sweep', 'NDestAddr1']);
+    const unforced = await runCli(base, [
+      'sweep',
+      'NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai',
+    ]);
     assert.equal(unforced.code, 1);
     assert.doesNotMatch(
       unforced.stderr,
       /sweep anyway/i,
       'no sources at all is not something forcing gets past',
     );
+  });
+});
+
+test('the CLI refuses a destination that is not an address', async () => {
+  await withDaemon('sweep-force-cli-destination', async ({ base }) => {
+    const result = await runCli(base, ['sweep', 'alice.nav']);
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /must be a NavCoin mainnet address/);
+    assert.doesNotMatch(result.stderr, /No imported sources/);
   });
 });
 

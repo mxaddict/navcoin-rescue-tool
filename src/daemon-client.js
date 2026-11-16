@@ -121,11 +121,13 @@ export function rescanDaemon(root) {
   return daemonRequest('/rescan', { method: 'POST', root });
 }
 
-export function sweepPrepare(root, { force = false } = {}) {
+// `destination`, when the client already has it, lets the daemon refuse
+// one that is not an address before the user is asked to confirm anything.
+export function sweepPrepare(root, { force = false, destination } = {}) {
   return daemonRequest('/sweep/prepare', {
     method: 'POST',
     root,
-    body: { force },
+    body: { force, destination },
   });
 }
 

@@ -17,6 +17,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   daemon before anything is built, and the CLI and GUI report it at the
   preview. If you used a `.nav` name as the destination, enter the address
   itself.
+- The daemon's replies no longer carry the seed phrase or private keys.
+  `/status` and `/import` returned each source's whole registry record,
+  which includes what it was imported from, so the secret went to the GUI
+  on every status poll and to anything else that asked with the cookie.
+  Replies now leave it out; nothing but the wallet builder read it.
+- A request the daemon failed to handle is now answered with the error.
+  When `/status` could not read its files (a locked or damaged
+  `sources.json`), the request was left open with no reply, and the GUI's
+  status poll hung on it.
 
 ## [0.2.13] - 2026-11-15
 

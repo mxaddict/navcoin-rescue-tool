@@ -124,6 +124,13 @@ test('daemon import persists sources and rejects duplicates', async () => {
 
     const status = await getDaemonStatus(root);
     assert.equal(status.sourceCount, 3);
+
+    // The phrase is in the registry for the wallet worker and in no reply.
+    const stored = await readStatus(root);
+    assert.match(stored.sources.sources[0].normalizedDetails, /^abandon/);
+    for (const reply of [imported, status]) {
+      assert.doesNotMatch(JSON.stringify(reply), /abandon/);
+    }
     assert.deepEqual(
       status.sources.map((source) => source.id).sort(),
       imported.sources.map((source) => source.id).sort(),
@@ -323,6 +330,35 @@ test('daemon survives purge then re-import of same private key', async () => {
     const finalStatus = await getDaemonStatus(root);
     assert.equal(finalStatus.sourceCount, 1);
 
+    await stopDaemon(root);
+    await waitForExit(child);
+  } finally {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    await removeDaemonDataDir(root);
+  }
+});
+
+test('a status the daemon cannot read is answered with the error', async () => {
+  const root = await makeProjectTempDir('daemon-unreadable-status');
+  await bootstrapAppData(root);
+
+  const child = spawnDaemon({ root: root, stubPort });
+
+  try {
+    await waitForReady(child);
+    const cookie = await readAuthCookie(root);
+    assert.equal((await getDaemonStatus(root)).sourceCount, 0);
+
+    await fs.writeFile(path.join(root, 'sources.json'), '{ not json');
+    const response = await fetch(`${BASE_URL}/status`, {
+      headers: { Authorization: cookie },
+      signal: AbortSignal.timeout(10_000),
+    });
+    assert.equal(response.status, 500);
+    assert.match((await response.json()).error, /JSON/);
+
+    // And the daemon is still there to be stopped.
     await stopDaemon(root);
     await waitForExit(child);
   } finally {

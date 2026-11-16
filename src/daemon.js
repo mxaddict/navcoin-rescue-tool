@@ -22,6 +22,7 @@ import {
 import {
   importSources,
   markSourceFailed,
+  publicSource,
   removeSource,
   readSources,
   purgeAllSources,
@@ -185,7 +186,7 @@ async function main() {
     return shutdownPromise;
   }
 
-  const server = http.createServer(async (request, response) => {
+  const handleRequest = async (request, response) => {
     // Permissive CORS so the Tauri GUI webview (origin
     // http://localhost:1420 in dev, tauri://localhost in prod) can fetch
     // the daemon directly. Auth still gates every request — without the
@@ -231,7 +232,7 @@ async function main() {
       const sources = status.sources.sources.map((source) => {
         const live = getSourceState(source.id);
         return {
-          ...source,
+          ...publicSource(source),
           syncStatus: live?.syncStatus ?? source.syncStatus,
           syncPhase: live?.syncPhase ?? null,
           syncProgress: live?.syncProgress ?? 0,
@@ -331,7 +332,10 @@ async function main() {
           });
         }
 
-        sendJson(response, 200, { importId, sources });
+        sendJson(response, 200, {
+          importId,
+          sources: sources.map(publicSource),
+        });
       } catch (error) {
         console.log(`[daemon] import failed: ${error.message}`);
         // `code` lets a client recognise a checksum rejection it may offer
@@ -457,6 +461,23 @@ async function main() {
     }
 
     sendJson(response, 404, { error: 'Not found' });
+  };
+
+  // Whatever a route did not catch itself still gets a reply. Left to the
+  // process's unhandledRejection handler the request stayed open with no
+  // answer, and a client polling /status waited on it until it timed out.
+  const server = http.createServer((request, response) => {
+    handleRequest(request, response).catch((error) => {
+      console.log(
+        `[daemon] ${request.method} ${request.url} failed: ` +
+          `${error?.stack ?? error}`,
+      );
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      sendJson(response, 500, { error: error?.message ?? String(error) });
+    });
   });
 
   server.on('error', async (error) => {

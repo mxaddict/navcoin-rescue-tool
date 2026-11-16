@@ -550,21 +550,6 @@ reading, and no test was written or run for any of them.
   dropped, so the user sees "Sweep failed" after coins moved. A retry hits
   the same dust source every time. Balances just above the fee (a dust
   output) are suspected to fail the same way, not checked.
-- **Medium: a failed read in `GET /status` never gets a reply.** The
-  request handler passed to `http.createServer` is async and the `/status`
-  branch awaits `readStatus` with no try/catch (every other route has one).
-  Until the `unhandledRejection` handler in `daemon.js` (added for the
-  server-busy crash) this ended the daemon; now the rejection is logged and
-  the request is left open with no response. Not re-tested since.
-  `readJsonFileWithRetry` in `app-data.js` rethrows non-`SyntaxError`
-  errors (EPERM/EBUSY from antivirus on Windows, EMFILE) and a persistent
-  `SyntaxError`. The GUI polls `/status` throughout a sweep.
-- **Medium: `/status` and `/import` replies carry the phrase or WIF keys.**
-  Re-checked for `/status`. It spreads each record from `sources.json`
-  (`...source`), and `source-registry.js` stores `normalizedDetails` in that
-  record. Only `wallet-worker.js` reads the field, so the replies could drop
-  it. Today it reaches the webview on every poll and the Rust
-  `probe_daemon` buffer.
 - **Medium: the CLI takes secrets only as arguments.** `handleImport` /
   `parseOptions` in `cli.js`: `--phrase` and `--key` have no stdin or
   prompt fallback, so the secret lands in shell history and is readable in
@@ -592,10 +577,9 @@ reading, and no test was written or run for any of them.
   window was found; guarding on "every hash is a non-empty string" is
   cheap.
 - Test gaps on these paths: `test/sweep.test.js` mocks transaction creation
-  so it always succeeds. Nothing covers a balance below the fee, a later
-  source failing after an earlier broadcast (and what the caller learns),
-  `normalizedDetails` in replies, or `/status`
-  failing to read.
+  so it always succeeds. Nothing covers a balance below the fee
+  or a later source failing after an earlier broadcast (and what the caller
+  learns).
 - Not reviewed in this pass: `rescue-scan.js`, `electrum-connection.js`,
   `wallet-database.js`, `tx-cache.js`, derivation correctness in
   `mnemonic.js`, change-output handling for private-key sources (which use

@@ -44,6 +44,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ntr-daemon` and the GUI's daemon start now remove it from the unpacked
   folder themselves. The GUI binary still has to be allowed once, as
   macOS asks for any unsigned app.
+- A running sweep can no longer be cut off by another request. Stopping
+  the daemon, removing a source, purging and rescanning are refused until
+  the sweep ends, with a message saying so; before, each closed or emptied
+  the wallets under it and the sweep ended as "outcome unknown". This
+  includes the stop a newer version sends an older daemon when it starts:
+  it is refused too, and the newer version says why. A signal still stops
+  the daemon. A sweep is likewise refused for a source that is being
+  rescanned: for a moment such a source read as synced with a zero
+  balance, and a sweep then reported success having sent nothing for it.
 
 ## [0.2.13] - 2026-11-15
 

@@ -517,13 +517,6 @@ badly each can cost a user coins. No test was written for any of them yet.
 - **Low, from the reviewer, by reading:**
   - A second daemon that loses the port writes `status: 'error'` into the
     shared `daemon.json` while the first is running.
-  - `/daemon/stop`, `/purge` and `/remove` do not wait for a running
-    sweep, and both the GUI's `ensure_daemon` and
-    `stopDaemonFromOtherVersion` send a stop on a version mismatch. Closing
-    a wallet mid-broadcast now ends that leg as "outcome unknown" rather
-    than hanging. Refusing the three routes while `getSweepStatus()` is
-    running is a few lines; it was left out because a test needs a real
-    daemon holding a sweep open, which nothing in the suite sets up yet.
   - `stopDaemonFromOtherVersion` and the GUI's `wait_for_daemon_gone` take
     "port refused" for "gone", but `performShutdown` closes the listener
     before the wallets, so the replacement can start while the old process
@@ -561,16 +554,6 @@ reading, and no test was written or run for any of them.
   local user who binds the port while the daemon is down receives the
   cookie and every phrase imported. `handleStart` notices a foreign
   listener; `import` and `sweep` do not.
-- **Low: a rescan leaves the source `synced` for a moment.**
-  `runFreshRescan` zeroes the balance while `syncStatus` stays `synced`
-  until the first progress event, so a sweep in that window sends nothing
-  for the source and reports success. Nothing serialises two
-  `/sweep/confirm` calls, or a sweep against `/remove` or `/purge`, either.
-- **Low, suspected: a broadcast can count as sent without a hash.**
-  navcoin-js's `SendTransactionSingle` returns `undefined` when there is no
-  client, which `broadcastLeg` would count as a sent leg. No reachable
-  window was found; guarding on "every hash is a non-empty string" is
-  cheap.
 - Test gaps on these paths: `test/sweep.test.js` mocks transaction creation
   so it always succeeds. Nothing covers a balance below the fee
   or a later source failing after an earlier broadcast (and what the caller

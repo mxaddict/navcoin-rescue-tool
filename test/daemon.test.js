@@ -28,6 +28,9 @@ import {
   removeDaemonDataDir,
 } from './test-helpers.js';
 
+// A valid mainnet address nobody is asked to hold the key of.
+const SWEEP_DESTINATION = 'NQWfs2nFnQaV436jfVJWDqSxVkSHw3R8Ai';
+
 const TEST_PORT = 46199;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 
@@ -482,6 +485,41 @@ test('daemon rejects invalid imports without persisting broken state', async () 
   }
 });
 
+// Polls /status until the source is synced and shows the fixture's NAV
+// and xNAV, and returns that status. `daemonLog()` is the daemon's output
+// so far, for the message when it never gets there.
+async function waitForFundedSource(root, fixture, sourceId, daemonLog) {
+  const SYNC_TIMEOUT_MS = 90_000;
+  const POLL_INTERVAL_MS = 500;
+  const DAEMON_LOG_TAIL_LINES = 60;
+  const start = Date.now();
+  let status;
+
+  while (true) {
+    if (Date.now() - start > SYNC_TIMEOUT_MS) {
+      throw new Error(
+        `Wallet did not reach syncStatus='synced' with expected NAV+xNAV balance within ${SYNC_TIMEOUT_MS}ms. ` +
+          `Last status: ${JSON.stringify(
+            status?.sources?.find((source) => source.id === sourceId),
+          )}\nDaemon log, last lines:\n` +
+          daemonLog().split('\n').slice(-DAEMON_LOG_TAIL_LINES).join('\n'),
+      );
+    }
+
+    status = await getDaemonStatus(root);
+    const src = status.sources?.find((source) => source.id === sourceId);
+
+    if (
+      src?.syncStatus === 'synced' &&
+      src?.balance?.nav?.confirmed === fixture.expectedNavConfirmed &&
+      src?.balance?.xnav?.confirmed === fixture.expectedXNavConfirmed
+    )
+      return status;
+
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+}
+
 test(
   'daemon imports known mnemonic and discovers NAV+xNAV balance from stub',
   { timeout: 180_000 },
@@ -532,42 +570,12 @@ test(
       );
       assert.ok(fundedSource, 'navcoin-js-v1 is one of the derivations');
 
-      // Poll until syncStatus === 'synced' AND the expected balance is credited.
-      const SYNC_TIMEOUT_MS = 90_000;
-      const POLL_INTERVAL_MS = 500;
-      const DAEMON_LOG_TAIL_LINES = 60;
-      const expectedNav = fixture.expectedNavConfirmed;
-      const expectedXNav = fixture.expectedXNavConfirmed;
-      const start = Date.now();
-      let status;
-
-      while (true) {
-        if (Date.now() - start > SYNC_TIMEOUT_MS) {
-          throw new Error(
-            `Wallet did not reach syncStatus='synced' with expected NAV+xNAV balance within ${SYNC_TIMEOUT_MS}ms. ` +
-              `Last status: ${JSON.stringify(
-                status?.sources?.find(
-                  (source) => source.id === fundedSource.id,
-                ),
-              )}\nDaemon log, last lines:\n` +
-              daemonLog.split('\n').slice(-DAEMON_LOG_TAIL_LINES).join('\n'),
-          );
-        }
-
-        status = await getDaemonStatus(root);
-        const src = status.sources?.find(
-          (source) => source.id === fundedSource.id,
-        );
-
-        if (
-          src?.syncStatus === 'synced' &&
-          src?.balance?.nav?.confirmed === expectedNav &&
-          src?.balance?.xnav?.confirmed === expectedXNav
-        )
-          break;
-
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-      }
+      const status = await waitForFundedSource(
+        root,
+        fixture,
+        fundedSource.id,
+        () => daemonLog,
+      );
 
       const src = status.sources.find(
         (source) => source.id === fundedSource.id,
@@ -575,18 +583,8 @@ test(
       assert.equal(src.syncStatus, 'synced');
 
       // Assert the NAV confirmed balance matches fixture expectation.
-      assert.equal(
-        src.balance.nav.confirmed,
-        expectedNav,
-        `Expected nav.confirmed=${expectedNav} but got ${src.balance.nav.confirmed}`,
-      );
-
-      // Assert the xNAV confirmed balance matches fixture expectation.
-      assert.equal(
-        src.balance.xnav.confirmed,
-        expectedXNav,
-        `Expected xnav.confirmed=${expectedXNav} but got ${src.balance.xnav.confirmed}`,
-      );
+      assert.equal(src.balance.nav.confirmed, fixture.expectedNavConfirmed);
+      assert.equal(src.balance.xnav.confirmed, fixture.expectedXNavConfirmed);
 
       // At least one address should carry a non-zero balance.
       const fundedAddrs = src.addresses.filter((a) => a.balance > 0);
@@ -601,6 +599,111 @@ test(
       child.kill('SIGTERM');
       await waitForExit(child);
       await fixtureStub.close();
+      await removeDaemonDataDir(root);
+    }
+  },
+);
+
+// A real daemon holding a real sweep open: the stub never answers the
+// broadcast, so the sweep stays in its first leg until the test is done
+// with it.
+test(
+  'a running sweep is not cut off by stop, remove, purge or rescan',
+  { timeout: 240_000 },
+  async () => {
+    const fixture = JSON.parse(
+      await fs.readFile(
+        path.join(import.meta.dirname, 'fixtures', 'mainnet-fake.json'),
+        'utf8',
+      ),
+    );
+    const silentStub = await startStubElectrumServer(fixture, {
+      unanswered: ['blockchain.transaction.broadcast'],
+    });
+    const root = await makeProjectTempDir('daemon-sweep-held');
+    await bootstrapAppData(root);
+
+    const child = spawnDaemon({ root, stubPort: silentStub.port });
+    let daemonLog = '';
+    child.stderr.on('data', (chunk) => {
+      daemonLog += chunk.toString();
+    });
+    child.stdout.on('data', (chunk) => {
+      daemonLog += chunk.toString();
+    });
+
+    try {
+      await waitForReady(child);
+      const imported = await importDaemonSource(
+        {
+          type: 'mnemonic',
+          phrase:
+            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+        },
+        root,
+      );
+      const funded = imported.sources.find(
+        (source) => source.walletType === 'navcoin-js-v1',
+      );
+      await waitForFundedSource(root, fixture, funded.id, () => daemonLog);
+
+      const cookie = await readAuthCookie(root);
+      const post = (url, body) =>
+        fetch(`${BASE_URL}${url}`, {
+          method: 'POST',
+          headers: {
+            Authorization: cookie,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body ?? {}),
+        });
+
+      // The other derivations may still be scanning; they are set aside.
+      const sweep = post('/sweep/confirm', {
+        destination: SWEEP_DESTINATION,
+        confirmPhrase: 'SEND MY COINS',
+        force: true,
+        sweepId: 'held-sweep',
+      });
+      // Its reply only comes when the sweep ends, which is after this
+      // test has what it came for.
+      sweep.catch(() => {});
+
+      const deadline = Date.now() + 120_000;
+      while ((await getDaemonStatus(root)).sweep?.state !== 'running') {
+        assert.ok(
+          Date.now() < deadline,
+          `the sweep never started:\n${daemonLog.split('\n').slice(-40).join('\n')}`,
+        );
+        await new Promise((r) => setTimeout(r, 200));
+      }
+
+      for (const [url, body, status] of [
+        ['/daemon/stop', {}, 409],
+        ['/remove', { sourceId: funded.id }, 400],
+        ['/purge', {}, 400],
+        ['/rescan', {}, 400],
+      ]) {
+        const response = await post(url, body);
+        const reply = await response.json();
+        assert.equal(response.status, status, url);
+        assert.equal(reply.code, 'SWEEP_IN_PROGRESS', url);
+        assert.match(reply.error, /while a sweep is running/, url);
+      }
+
+      // Nothing was stopped, removed or rescanned from under it.
+      const after = await getDaemonStatus(root);
+      assert.equal(after.sweep.id, 'held-sweep');
+      assert.equal(after.sweep.state, 'running');
+      assert.equal(after.sourceCount, imported.sources.length);
+      const source = after.sources.find((entry) => entry.id === funded.id);
+      assert.equal(source.syncStatus, 'synced');
+      assert.equal(source.balance.nav.confirmed, fixture.expectedNavConfirmed);
+    } finally {
+      // A signal still stops a daemon that is sweeping.
+      child.kill('SIGTERM');
+      await waitForExit(child);
+      await silentStub.close();
       await removeDaemonDataDir(root);
     }
   },

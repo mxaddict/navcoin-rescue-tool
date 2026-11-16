@@ -477,8 +477,13 @@ async function handleStop() {
   try {
     await stopDaemon(getAppDataRoot());
     process.stdout.write(`Stopped ${CLI_NAME} daemon.\n`);
-  } catch {
-    process.stderr.write('No running daemon found.\n');
+  } catch (error) {
+    // A daemon that answered refused, as it does while a sweep runs.
+    process.stderr.write(
+      isDaemonUnreachable(error)
+        ? 'No running daemon found.\n'
+        : `${error.message}\n`,
+    );
     process.exitCode = 1;
   }
 }

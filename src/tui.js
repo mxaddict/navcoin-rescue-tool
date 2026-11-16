@@ -1074,7 +1074,13 @@ export async function launchTui() {
         try {
           await stopDaemon(root);
           log(C.teal('  Daemon stopped.'));
-        } catch {
+        } catch (error) {
+          // No `cause`: the daemon answered and refused, as it does while
+          // a sweep runs. Stay, so the sweep can be watched to its end.
+          if (!error.cause) {
+            log(C.pink(`  ${error.message}`));
+            break;
+          }
           log(C.pink('  Daemon not reachable — may already be stopped.'));
         }
         screen.destroy();

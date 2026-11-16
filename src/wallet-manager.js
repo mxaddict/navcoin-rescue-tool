@@ -268,6 +268,12 @@ export async function rescanSource(sourceId) {
 }
 
 async function runFreshRescan(state) {
+  // Before anything is wiped: a source emptied for a rescan must not read
+  // as synced, or a sweep in that moment finds nothing to send for it and
+  // reports success.
+  state.syncStatus = 'syncing';
+  state.syncProgress = 0;
+
   try {
     // Wipe UTXO/tx/scripthash state so the scan rebuilds from a clean
     // slate — addresses no longer in chain's listunspent set don't carry

@@ -84,7 +84,11 @@ test(
       // What a sweep runs when a batch is rejected: the source scanned
       // again from nothing, waited for, and synced on the same coins.
       const lookups = stub.requests('blockchain.scripthash.listunspent');
-      assert.equal(await rescanSource(source.id), true);
+      const rescanned = rescanSource(source.id);
+      // From the moment it is asked for, before its outputs are wiped: a
+      // sweep looking now must not take the source for synced and empty.
+      assert.equal(state.syncStatus, 'syncing');
+      assert.equal(await rescanned, true);
       assert.ok(stub.requests('blockchain.scripthash.listunspent') > lookups);
       assert.equal(state.syncStatus, 'synced');
       assert.equal(state.balance.nav.confirmed, fixture.expectedNavConfirmed);

@@ -198,6 +198,21 @@ const SWEEP_BATCH_REJECTED = 'SWEEP_BATCH_REJECTED';
 let sweepRecord = null;
 let sweepRunning = false;
 
+// Throws while a sweep is running, for whatever would pull a wallet out
+// from under it: stopping the daemon, removing or purging sources, a
+// rescan. `action` is what was asked for, as "stop the daemon". A sweep
+// cut off mid-broadcast ends as outcome unknown, with coins maybe sent.
+export function assertNoSweepRunning(action) {
+  if (!sweepRunning) return;
+  const error = new Error(
+    `Cannot ${action} while a sweep is running: it would be cut off with ` +
+      `transactions maybe sent. Wait for it to finish; its progress is in ` +
+      `the daemon status and the daemon log.`,
+  );
+  error.code = 'SWEEP_IN_PROGRESS';
+  throw error;
+}
+
 export function getSweepStatus() {
   return sweepRecord ? structuredClone(sweepRecord) : null;
 }

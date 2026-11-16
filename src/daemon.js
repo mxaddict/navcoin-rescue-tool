@@ -27,7 +27,12 @@ import {
   purgeAllSources,
 } from './source-registry.js';
 import { publicSource } from './source-secret.js';
-import { executeSweep, getSweepStatus, prepareSweep } from './sweep.js';
+import {
+  assertNoSweepRunning,
+  executeSweep,
+  getSweepStatus,
+  prepareSweep,
+} from './sweep.js';
 import {
   openSourceWallet,
   closeSourceWallet,
@@ -41,6 +46,15 @@ import {
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { 'Content-Type': 'application/json' });
   response.end(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+// An error as a reply. `code` lets a client tell the cases it handles
+// apart without matching on the message.
+function sendError(response, statusCode, error) {
+  sendJson(response, statusCode, {
+    error: error.message,
+    ...(error.code ? { code: error.code } : {}),
+  });
 }
 
 async function readJsonBody(request) {
@@ -352,6 +366,7 @@ async function main() {
     if (request.method === 'POST' && request.url === '/remove') {
       try {
         const body = await readJsonBody(request);
+        assertNoSweepRunning('remove a source');
         // A wallet still being built is written by its worker, and opened
         // by this process when the worker is done. Deleting it meanwhile
         // left a wallet open under an id no longer in the registry.
@@ -366,13 +381,14 @@ async function main() {
         resetNavcoinJs();
         sendJson(response, 200, result);
       } catch (error) {
-        sendJson(response, 400, { error: error.message });
+        sendError(response, 400, error);
       }
       return;
     }
 
     if (request.method === 'POST' && request.url === '/purge') {
       try {
+        assertNoSweepRunning('purge the sources');
         // As for /remove: every wallet being built is let finish first.
         await Promise.all(creatingWallets.values());
         await closeAllWallets();
@@ -384,17 +400,18 @@ async function main() {
           void performShutdown();
         });
       } catch (error) {
-        sendJson(response, 400, { error: error.message });
+        sendError(response, 400, error);
       }
       return;
     }
 
     if (request.method === 'POST' && request.url === '/rescan') {
       try {
+        assertNoSweepRunning('rescan');
         const result = await rescanAllSources();
         sendJson(response, 200, result);
       } catch (error) {
-        sendJson(response, 400, { error: error.message });
+        sendError(response, 400, error);
       }
       return;
     }
@@ -444,17 +461,22 @@ async function main() {
         });
         sendJson(response, 200, { result });
       } catch (error) {
-        // `code` tells a client a sweep already running, or one whose
+        // The code tells a client a sweep already running, or one whose
         // outcome is unknown, from an ordinary failure.
-        sendJson(response, 400, {
-          error: error.message,
-          ...(error.code ? { code: error.code } : {}),
-        });
+        sendError(response, 400, error);
       }
       return;
     }
 
     if (request.method === 'POST' && request.url === '/daemon/stop') {
+      // A request, so it can be refused. A signal still stops the daemon
+      // whatever it is doing.
+      try {
+        assertNoSweepRunning('stop the daemon');
+      } catch (error) {
+        sendError(response, 409, error);
+        return;
+      }
       sendJson(response, 200, { ok: true });
       void performShutdown();
       return;
